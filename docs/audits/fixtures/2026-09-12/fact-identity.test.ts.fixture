@@ -1,0 +1,100 @@
+// Architecture audit, 12 September 2026. Inert until copied into a disposable checkout.
+// Copy to src/main/arch/__tests__/audit-0912-fact-identity.test.ts and run:
+// npm test -- src/main/arch/__tests__/audit-0912-fact-identity.test.ts
+// At cb2353c2 and 7a2ca3ff: the steady-file control passes; both safety assertions fail.
+// Only fresh temporary repositories and a scratch architecture database are changed.
+import { afterEach, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ArchStore } from '../db';
+import type { ArchFactParser } from '../fact-parser';
+import { readArchTreeFacts } from '../tree-facts';
+import { SymbolExtractor } from '../../symbols/extract';
+import { grammarPath } from '../../symbols/paths';
+
+const require_ = createRequire(import.meta.url);
+const roots: string[] = [];
+const stores: ArchStore[] = [];
+const extractors: SymbolExtractor[] = [];
+afterEach(() => {
+  for (const extractor of extractors.splice(0)) extractor.dispose();
+  for (const store of stores.splice(0)) store.close();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+async function setup() {
+  const root = mkdtempSync(join(tmpdir(), 'tortie-audit-0912-facts-'));
+  roots.push(root);
+  const store = new ArchStore(join(root, 'arch.db'));
+  stores.push(store);
+  const extractor = await SymbolExtractor.create({
+    runtimeWasm: require_.resolve('web-tree-sitter/web-tree-sitter.wasm'), grammarPath
+  });
+  extractors.push(extractor);
+  const parser: ArchFactParser = {
+    batchSize: 4,
+    async run(files, ask) {
+      const out = [];
+      for (const file of files) {
+        const got = await extractor.extractFile(file.relPath, file.absPath, ask);
+        if (got !== null) out.push({ relPath: file.relPath, ...got });
+      }
+      return out;
+    }
+  };
+  const repo = (name: string, text: string) => {
+    const repoPath = join(root, name);
+    mkdirSync(join(repoPath, 'src/main'), { recursive: true });
+    writeFileSync(join(repoPath, 'src/main/sample.ts'), text);
+    return repoPath;
+  };
+  const scan = (repoPath: string, repoKey: string, reader = parser) => readArchTreeFacts({
+    repoPath, repoKey, store, parser: reader, trackedFiles: ['src/main/sample.ts'], wrapperPass: false
+  });
+  return { root, store, parser, repo, scan };
+}
+
+it('control: publishes the real steady-file call and reuses it without a parse', async () => {
+  const { store, repo, scan } = await setup();
+  const repoPath = repo('steady', "ipcMain.handle('audit:steady', f);\n");
+  await scan(repoPath, 'steady');
+  expect(store.facts('steady').filter((f) => f.category === 'surface').map((f) => f.subject)).toEqual(['IPC serves audit:steady']);
+  await scan(repoPath, 'steady', { batchSize: 4, run: async () => { throw new Error('unexpected parse'); } });
+  expect(store.factStamps('steady').get('src/main/sample.ts')?.truncated).toBe(false);
+  expect(store.facts('steady').filter((f) => f.category === 'surface').map((f) => f.subject)).toEqual(['IPC serves audit:steady']);
+});
+
+it('keeps the parser completeness flag when two repositories share a cached blob', async () => {
+  const { store, repo, scan } = await setup();
+  const text = "export const big = process.env.AUDIT_SWITCH;\n" + '// pad\n'.repeat(400_000);
+  await scan(repo('first', text), 'first');
+  const before = store.factStamps('first').get('src/main/sample.ts');
+  expect(before?.truncated).toBe(true);
+  await scan(repo('second', text), 'second');
+  const after = store.factStamps('second').get('src/main/sample.ts');
+  console.log(JSON.stringify({ case: 'cross-repository-cache', first: before, second: after,
+    firstCounts: store.factCounts('first'), secondCounts: store.factCounts('second') }));
+  expect(after?.truncated).toBe(true);
+});
+
+it('does not publish parser facts about temporary bytes under the restored blob identity', async () => {
+  const { store, repo, scan, parser } = await setup();
+  const original = "ipcMain.handle('audit:before', f);\n";
+  const temporary = "ipcMain.handle('audit:middle', f);\n";
+  const repoPath = repo('aba', original);
+  const path = join(repoPath, 'src/main/sample.ts');
+  const racing: ArchFactParser = { batchSize: 4, async run(files, ask) {
+    writeFileSync(path, temporary);
+    try { return await parser.run(files, ask); }
+    finally { writeFileSync(path, original); }
+  } };
+  await scan(repoPath, 'aba', racing);
+  const subjects = store.facts('aba').filter((f) => f.category === 'surface').map((f) => f.subject);
+  await scan(repoPath, 'aba');
+  const afterCleanScan = store.facts('aba').filter((f) => f.category === 'surface').map((f) => f.subject);
+  console.log(JSON.stringify({ case: 'worker-read-aba', disk: readFileSync(path, 'utf8'), subjects,
+    afterCleanScan,
+    stamp: store.factStamps('aba').get('src/main/sample.ts') }));
+  expect(subjects).not.toContain('IPC serves audit:middle');
+});
