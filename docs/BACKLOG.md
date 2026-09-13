@@ -27042,6 +27042,61 @@ comparisons stay out.
 
 ---
 
+## Phase 266 — opencode as a supported CLI (operator request, 2026-09-13)
+
+**Subject.** `feat(agents): opencode joins the registry`
+
+**First body line.** `Phase 266: opencode as a supported CLI`
+
+**Semver.** Minor. A new agent a person can launch, resume and restore.
+
+**Tier 3.** It can lose or misattribute a person's session (restore is durability-critical), it reads
+a store shape the registry has never read, and it holds — READ ONLY — a place a person's credential
+lives. Evidence is a real create/harvest/resume/read-back matrix over the live binary, a hostile arm
+(two panes in one cwd, a locked db, a db mid-write), and an attack on the SQLite reader's read-only
+guarantee.
+
+**Charter.** The operator's request of 2026-09-13 and [research 121](research/121-opencode-integration.md),
+which is the spec and was measured on his machine against the installed binary (1.18.30), a read-only
+copy of its session db and its source at `/Users/gdc/opencode`. He installed and authed opencode so
+the CLI could be driven.
+
+**The mechanism, from research 121.** A registry row in `src/main/agents/registry.ts`:
+`id: 'opencode'`, `binaries: ['opencode']`, `extraProbeDirs` reaching `~/.opencode/bin`, the install
+block `curl -fsSL https://opencode.ai/install | bash` (display and clipboard only,
+`canonicalIsPackageManager: false`), `versionProbe`, `launch: { argv: ['opencode'] }`, and a `resume`
+block that is `flag-uuid` with `template: ['--session', SESSION_ID_SLOT]` and a `cwd-newest` harvest
+— because opencode resumes by `-s/--session <id>` and `-c` but has NO pre-assign-id flag, so it is
+harvest, not arm-at-launch. `multilineKey` and `imageDrop` are measured hands-on (opencode is
+installed, so VERIFIED rather than docs-only), and `specstory: { provider: null }` / unsupported with
+a note naming specstory 2.8.0.
+
+**The architectural heart, and it is new.** Every agent the registry harvests writes per-session
+files; `storeDirs` and `src/main/manifest/harvest/` read files. opencode writes ROWS in
+`~/.local/share/opencode/opencode.db`. The phase adds a SQLite-backed store to the store abstraction
+— a `storeKind: 'sqlite'` discriminant or a `storeDb` field beside `storeDirs`, decided after
+reading the harvest layer in full — and a harvest reader that opens that db READ ONLY (immutable /
+`mode=ro`), takes no write lock, never touches the WAL, and returns the newest `session.id` whose
+`directory` column equals the pane's realpath'd cwd. The id encodes its own descending timestamp
+(`Identifier.timestamp`), so the reader can verify the row's age against the id — a stronger harvest
+than deepseek's opaque uuid, though still weak in the one way deepseek is: two panes in one cwd are
+not separable, so the claim stays takeable per `claim-strength.ts`.
+
+**The proof, run rather than read.** `conformance:resume` (and `:capture`) gains an opencode arm that
+creates a real session with the live binary, harvests the id from the db, resumes with
+`--session <id>`, and reads the ORIGINAL turn back on screen — measured, the Tier-3 bar. `gate:contract`
+regenerates the baseline for the new registry row. A hostile arm drives two panes in one directory, a
+locked db and a db mid-write; an attack proves the reader never takes a write lock and never mutates
+the store or its WAL. `conformance:agents` and `conformance:resume:capture` cover the argv and the
+capture-off claim.
+
+**What is NOT in this phase.** No specstory provider is written and capture stays OFF for opencode —
+that is specstory's product and the SpecStory boundary rule forbids finishing it off here. No opencode
+plugin, MCP server, ACP server or web/serve mode. No pre-assign-id flag invented from the source's
+internal `given` path; if opencode ships one as a CLI flag later, opencode becomes a Tier-1
+arm-at-launch agent in a follow-up. No model or provider driven on opencode's behalf. No token byte of
+`auth.json` read, logged or copied.
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
