@@ -927,6 +927,78 @@ const MIGRATIONS: readonly SqliteMigration[] = [
         DELETE FROM arch_decl;
       `);
     }
+  },
+  {
+    // PHASE 264. Completeness travels with the BYTES, not with the repository.
+    //
+    // `truncated` — whether the parse of a file's bytes was incomplete — was a
+    // fact about the bytes stored on `arch_fact_file`, whose primary key is
+    // `(repo_key, rel_path)`. It is exactly the error the `arch_fact_wrap`
+    // comment above forbids, inverted: a bytes-keyed fact living on a
+    // repository-keyed row. The facts themselves are keyed `(oid, rel_path)`
+    // and `hasFactsFor` answers off them ACROSS repositories, so a second
+    // repository holding the same bytes at the same path reused the facts but
+    // had no link of its own to carry `truncated` — the reuse arm in
+    // `tree-facts.ts` defaulted it to `false` and the file read as fully
+    // parsed when the parser had declined it. The result had not gained the
+    // missing call list; it had LOST the flag explaining why the list was
+    // missing. (Audit 0.103.0 R2.)
+    //
+    // The fix is a bytes-keyed completeness row in the shape of `arch_decl` and
+    // `arch_fact_wrapper`: `(oid, rel_path)` primary key, one integer flag. It
+    // is written for EVERY file that reaches `saveFacts`, including the file
+    // that parses completely and yields zero facts, so "these bytes were read,
+    // completely, and found nothing" becomes a recorded state distinct from
+    // "never read". `saveFacts` writes it in the same transaction as the facts,
+    // so there is no window in which facts exist with no completeness record.
+    //
+    // WHY THE LINKS ARE DROPPED, as 013 dropped them. A pre-014 link may carry
+    // a false `truncated: false` for bytes that were actually declined, and a
+    // pre-014 store has no `arch_fact_scan` row for any bytes at all. Rather
+    // than trust or backfill a flag we cannot recompute without re-reading the
+    // file, we drop the same five derived tables 013 drops so the first
+    // post-migration scan re-parses the tree and writes an `arch_fact_scan`
+    // row atomically beside every fact list. There is then never a state where
+    // facts exist with no completeness record, and the reader in `tree-facts.ts`
+    // treats a still-missing row conservatively (re-parse) rather than assuming
+    // complete. The re-parse is ≈1.25 ms/file, 013's own measured figure, and
+    // it is the price of a clean completeness record.
+    //
+    // FIVE TABLES DROPPED, EXACTLY 013'S SET AND FOR 013'S REASONS:
+    //   arch_fact         facts keyed on bytes; re-read writes them again
+    //   arch_fact_file    the links, or `hasFactsFor` re-links without parsing
+    //   arch_fact_wrap    derived from those rows under a wrapper map
+    //   arch_fact_wrapper wrapper declarations cached by oid
+    //   arch_decl         the Phase 259 half, written at the same call site
+    //
+    // NOTHING ELSE IS DELETED. Not `arch_repo`, not `arch_import`, not
+    // `arch_import_file`, not `arch_tree_file`, not `arch_camera`, not
+    // `arch_layout`, not `arch_verdict`, and NOT ONE SEMANTIC TABLE:
+    // `arch_claim`, `arch_claim_cite`, `arch_claim_rate`, `arch_journey` and
+    // `arch_semantic_run` hold a model's sentences that cost the operator
+    // tokens to make. No source file, no manifest and no path under
+    // `<userData>/gmux` is touched by this migration or by anything that reads
+    // it. `gate:cache-policy` holds that line.
+    //
+    // This migration is name-keyed and EXTENDS 013 rather than editing it:
+    // editing an applied migration is a silent no-op on every machine that has
+    // already run it, so 013 is never touched and 014 sits beside it.
+    name: '014-arch-fact-scan',
+    up: (db) => {
+      db.exec(`
+        DELETE FROM arch_fact;
+        DELETE FROM arch_fact_file;
+        DELETE FROM arch_fact_wrap;
+        DELETE FROM arch_fact_wrapper;
+        DELETE FROM arch_decl;
+        CREATE TABLE IF NOT EXISTS arch_fact_scan (
+          oid       TEXT    NOT NULL,
+          rel_path  TEXT    NOT NULL,
+          truncated INTEGER NOT NULL,
+          PRIMARY KEY (oid, rel_path)
+        );
+      `);
+    }
   }
 ];
 
@@ -1632,8 +1704,22 @@ export class ArchStore {
    * A link is proof of a read: a file with NO facts writes no `arch_fact` row,
    * so the question is asked of the links as well, or a fact-less file would
    * be parsed again on every stamp move.
+   *
+   * Phase 264 adds the `arch_fact_scan` row to the question. A complete-empty
+   * file (parsed, zero facts) writes no `arch_fact` row and its link is
+   * per-repository, so a SECOND repository holding the same bytes had nothing
+   * bytes-keyed to prove it was read and re-parsed it on every fresh open. The
+   * `arch_fact_scan` row is that bytes-keyed proof of a read, so it is asked
+   * first. After migration 014 the three checks never disagree; the scan check
+   * only ADDS the complete-empty case across repositories.
    */
   hasFactsFor(oid: string, relPath: string): boolean {
+    const scan = this.db
+      .prepare<[string, string], { one: number }>(
+        'SELECT 1 AS one FROM arch_fact_scan WHERE oid = ? AND rel_path = ? LIMIT 1'
+      )
+      .get(oid, relPath);
+    if (scan !== undefined) return true;
     const fact = this.db
       .prepare<[string, string], { one: number }>(
         'SELECT 1 AS one FROM arch_fact WHERE oid = ? AND rel_path = ? LIMIT 1'
@@ -1649,14 +1735,52 @@ export class ArchStore {
   }
 
   /**
-   * Replace the sorted fact list for (oid, relPath), in ONE transaction.
+   * The completeness of the parse recorded for these bytes at this path, or
+   * `undefined` when no completeness row exists for them (Phase 264).
+   *
+   * This is the bytes-keyed record `tree-facts.ts`'s reuse arm reads so a
+   * second repository recovers `truncated` by byte identity rather than
+   * defaulting it to `false`. `undefined` is the fourth, load-bearing answer:
+   * it means completeness is UNKNOWN for these bytes (a pre-014 store the
+   * migration did not backfill, or a producer that wrote facts without a scan
+   * row), and the caller must treat it conservatively — re-parse — never as
+   * complete.
+   */
+  factScan(oid: string, relPath: string): { truncated: boolean } | undefined {
+    const row = this.db
+      .prepare<[string, string], { truncated: number }>(
+        'SELECT truncated FROM arch_fact_scan WHERE oid = ? AND rel_path = ? LIMIT 1'
+      )
+      .get(oid, relPath);
+    return row === undefined ? undefined : { truncated: row.truncated === 1 };
+  }
+
+  /**
+   * Replace the sorted fact list for (oid, relPath), in ONE transaction, and
+   * record whether the parse that produced it was complete (Phase 264).
    *
    * A row whose category or kind is outside the closed sets, whose subject or
    * evidence is past its bound, or whose line is not 1 based, makes the WHOLE
    * call throw with the field named and writes nothing. That is the closed
    * set rule from `@shared/arch` made structural rather than documentary.
+   *
+   * `completeness.truncated` is a fact about the BYTES, so it is written to
+   * `arch_fact_scan`, keyed `(oid, rel_path)` exactly as the facts are, in the
+   * SAME transaction — a second repository holding the same bytes reads the
+   * same completeness by byte identity rather than reconstructing it from
+   * whichever repository asks next. The row is written even when `facts` is
+   * empty, so a file that parsed completely and found nothing is a recorded
+   * state ("read, complete, empty") distinct from "never read", which has no
+   * row. The two `tree-facts.ts` call sites always state completeness; the
+   * default of `{ truncated: false }` is only for a caller that does not read
+   * bytes and therefore cannot truncate.
    */
-  saveFacts(oid: string, relPath: string, facts: readonly ArchFactDraft[]): void {
+  saveFacts(
+    oid: string,
+    relPath: string,
+    facts: readonly ArchFactDraft[],
+    completeness: { truncated: boolean } = { truncated: false }
+  ): void {
     for (const fact of facts) {
       const why = refuseFact('arch_fact', fact);
       if (why !== null) throw new Error(`${relPath}: ${why}`);
@@ -1669,11 +1793,17 @@ export class ArchStore {
          (oid, rel_path, seq, category, kind, subject, line, rule, evidence)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    const scan = this.db.prepare<[string, string, number]>(
+      `INSERT INTO arch_fact_scan (oid, rel_path, truncated)
+       VALUES (?, ?, ?)
+       ON CONFLICT(oid, rel_path) DO UPDATE SET truncated = excluded.truncated`
+    );
     immediateTransaction(this.db, () => {
       drop.run(oid, relPath);
       facts.forEach((fact, seq) => {
         insert.run(oid, relPath, seq, fact.category, fact.kind, fact.subject, fact.line, fact.rule, fact.evidence);
       });
+      scan.run(oid, relPath, completeness.truncated ? 1 : 0);
     });
   }
 
@@ -1830,6 +1960,17 @@ export class ArchStore {
         `DELETE FROM arch_decl WHERE NOT EXISTS (
            SELECT 1 FROM arch_fact_file f
             WHERE f.oid = arch_decl.oid AND f.rel_path = arch_decl.rel_path)`
+      )
+      .run();
+    // Phase 264. The completeness row is keyed on bytes exactly as the facts
+    // are, so it is pruned by the same link. It outlives the last fact of a
+    // complete-empty file (which has none) precisely because a link still
+    // points at those bytes; when no repository links them any more it goes.
+    this.db
+      .prepare(
+        `DELETE FROM arch_fact_scan WHERE NOT EXISTS (
+           SELECT 1 FROM arch_fact_file f
+            WHERE f.oid = arch_fact_scan.oid AND f.rel_path = arch_fact_scan.rel_path)`
       )
       .run();
     return facts.changes + wrappers.changes;

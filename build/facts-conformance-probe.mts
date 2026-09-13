@@ -319,6 +319,10 @@ async function runRoot(rs: RootSpec): Promise<Answer> {
       answer['publish'] = await publishArm(loaded, rs.root, rs.name);
     }
 
+    if (arms.has('completeness')) {
+      answer['completeness'] = await completenessArm(loaded, rs.root, rs.name);
+    }
+
     if (arms.has('setting')) {
       const S = loaded.settings;
       const sanitizeArch = S['sanitizeArchSettings'] as (raw: unknown) => { wrapperPass: boolean };
@@ -710,8 +714,141 @@ async function publishArm(loaded: Loaded, root: string, name: string): Promise<A
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// PHASE 264. Completeness travels with the BYTES, not with the repository.
+// ---------------------------------------------------------------------------
+// The reuse arm reconstructed `truncated` from `carried`, this repository's own
+// previous link. A SECOND repository holding the same bytes had no `carried`,
+// so a declined parse read as fully complete (audit 0.103.0 R2). The fix records
+// completeness on a bytes-keyed `arch_fact_scan` row written inside `saveFacts`'s
+// own transaction, and the reuse arm reads it by identity; when no row exists
+// (unknown completeness) it RE-PARSES rather than assume complete.
+//
+// This arm drives that, WITHOUT a 2 MiB file — it seeds a repository's truncated
+// result directly through `saveFacts(..., { truncated: true })` (which is the
+// only place a real truncated result is ever recorded) and reads it back from a
+// second repository over the same bytes through the real `readArchTreeFacts`
+// reuse arm. Four observables, each the target of one ablation:
+//   reuseTruncated   the second repository recovered truncated:true by identity
+//   scanRowTruncated the bytes-keyed row itself reads truncated:1
+//   reopenTruncated  a third repository after a close + REOPEN still reads it
+//   unknownReparsed  a link-only (unknown-completeness) seed is RE-PARSED, so the
+//                    conservative arm asked the parser rather than assuming complete
+async function completenessArm(loaded: Loaded, root: string, name: string): Promise<Answer> {
+  const treeMod = await importFrom(root, 'main/arch/tree-facts.ts');
+  const readArchTreeFacts = treeMod['readArchTreeFacts'] as (input: Record<string, unknown>) => Promise<unknown>;
+  const ArchStore = loaded.db['ArchStore'] as new (path: string) => StoreLike;
+  const F = loaded.facts;
+  const dir = join(spec.scratch, `completeness-${name}`);
+  mkdirSync(dir, { recursive: true });
+  const dbPath = join(dir, 'arch.db');
+  const REL = 'src/main/sample.ts';
+  const REL2 = 'src/main/other.ts';
+  const out: Answer = {};
+  const repo = (key: string, relPath: string, text: string): string => {
+    const repoPath = join(dir, key);
+    mkdirSync(join(repoPath, 'src', 'main'), { recursive: true });
+    writeFileSync(join(repoPath, relPath), text);
+    return repoPath;
+  };
+  const truncatedOf = (store: StoreLike, repoKey: string, relPath: string): boolean | undefined =>
+    (store.factStamps(repoKey).get(relPath) as { truncated: boolean } | undefined)?.truncated;
+  const link = (relPath: string, oid: string, size: number) => ({
+    relPath,
+    oid,
+    mtimeMs: 1,
+    size,
+    lang: 'typescript',
+    vendored: null,
+    truncated: false,
+    wrapDigest: null
+  });
+
+  let store = new ArchStore(dbPath);
+  try {
+    // A repository recorded these bytes as truncated (the only real producer of
+    // a truncated result is a declined/ceiling parse reaching saveFacts).
+    const truncText = "ipcMain.handle('facts:trunc', f);\n";
+    const oidT = F.blobOid(Buffer.from(truncText, 'utf8'));
+    store.saveFacts(
+      oidT,
+      REL,
+      [
+        {
+          category: 'surface',
+          kind: 'ipc-channel',
+          subject: 'IPC serves facts:trunc',
+          line: 1,
+          rule: 'surface.ipc.electron',
+          evidence: truncText.trim()
+        }
+      ],
+      { truncated: true }
+    );
+    // A SECOND repository over the same bytes: the reuse arm must recover
+    // truncated:true by identity, with no link of its own.
+    const repoB = repo('B', REL, truncText);
+    await readArchTreeFacts({
+      repoPath: repoB,
+      repoKey: 'B',
+      store,
+      parser: seamOver(loaded).parser,
+      trackedFiles: [REL],
+      wrapperPass: false
+    });
+    out['reuseTruncated'] = truncatedOf(store, 'B', REL) ?? null;
+    out['scanRowTruncated'] = store.factScan(oidT, REL)?.truncated ?? null;
+
+    // Survives a close + reopen: a third repository still reads it off disk.
+    store.close();
+    store = new ArchStore(dbPath);
+    const repoC = repo('C', REL, truncText);
+    await readArchTreeFacts({
+      repoPath: repoC,
+      repoKey: 'C',
+      store,
+      parser: seamOver(loaded).parser,
+      trackedFiles: [REL],
+      wrapperPass: false
+    });
+    out['reopenTruncated'] = truncatedOf(store, 'C', REL) ?? null;
+
+    // Unknown completeness must RE-PARSE, never assume complete. A link-only
+    // seed makes hasFactsFor true with no bytes-keyed completeness row, so the
+    // reuse arm's conservative branch must fall through and ask the parser.
+    const unknownText = "ipcMain.handle('facts:unknown', f);\n";
+    const oidU = F.blobOid(Buffer.from(unknownText, 'utf8'));
+    store.linkFactFiles('seedU', [link(REL2, oidU, unknownText.length)]);
+    const repoD = repo('D', REL2, unknownText);
+    const seam = seamOver(loaded);
+    await readArchTreeFacts({
+      repoPath: repoD,
+      repoKey: 'D',
+      store,
+      parser: seam.parser,
+      trackedFiles: [REL2],
+      wrapperPass: false
+    });
+    out['unknownReparsed'] = seam.asks.withoutWrappers > 0;
+    out['unknownPublished'] = store
+      .facts('D')
+      .filter((f) => f.category === 'surface')
+      .map((f) => f.subject);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return out;
+}
+
 interface StoreLike {
-  saveFacts(oid: string, relPath: string, facts: readonly ArchFactDraft[]): void;
+  saveFacts(
+    oid: string,
+    relPath: string,
+    facts: readonly ArchFactDraft[],
+    completeness?: { truncated: boolean }
+  ): void;
+  factScan(oid: string, relPath: string): { truncated: boolean } | undefined;
   saveWrapperDecls(oid: string, relPath: string, decls: readonly unknown[]): void;
   wrapperDecls(files: readonly { oid: string; relPath: string }[]): Map<string, unknown[]>;
   linkFactFiles(repoKey: string, rows: readonly unknown[]): void;

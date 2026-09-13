@@ -183,10 +183,20 @@ it('arm 2: a store written before the migration loses only the rows that may be 
   });
   before.close();
 
-  // Make the file look like a store this build has never migrated.
+  // Make the file look like a store this build has never migrated: drop the
+  // markers for BOTH the identity migration (013) and the completeness
+  // migration (014), and drop the bytes-keyed `arch_fact_scan` table that
+  // Phase 264's `saveFacts` wrote a row into above — so on reopen 013 re-drops
+  // the five derived tables and 014 re-creates an EMPTY completeness table,
+  // exactly as a genuinely pre-migration store upgrades. Without dropping
+  // `arch_fact_scan` its stale row would prove a read the migration is meant to
+  // invalidate (014's own body only `CREATE ... IF NOT EXISTS`, it does not
+  // clear the table).
   const raw = new Database(dbPath);
   try {
     raw.prepare("DELETE FROM migrations WHERE name = '013-arch-fact-identity'").run();
+    raw.prepare("DELETE FROM migrations WHERE name LIKE '014-%'").run();
+    raw.exec('DROP TABLE IF EXISTS arch_fact_scan');
     expect(raw.prepare('SELECT COUNT(*) AS n FROM arch_fact').get()).toEqual({ n: 1 });
   } finally {
     raw.close();

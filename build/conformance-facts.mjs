@@ -618,6 +618,65 @@ const ABLATIONS = [
     red: 'rule F4',
     direction: (a) => a.publish !== undefined && a.publish.step3.wrapSubjects.includes('IPC serves facts:s3-injected')
   }
+,
+  // PHASE 264. Completeness travels with the BYTES. One ablation per clause the
+  // phase ships; the first two reconstruct the parent's exact defect.
+  {
+    // 264a: the reuse arm reads the bytes-keyed scan row for `truncated`. Put
+    // back the parent's `carried`-based line and a second repository, which has
+    // no `carried`, reads a declined parse as complete again.
+    name: 'rule 264a, the reuse arm reconstructs truncated from carried instead of the bytes-keyed scan row',
+    file: 'main/arch/tree-facts.ts',
+    from: '            link.truncated = scan.truncated;',
+    to: '            link.truncated = carried !== undefined && carried.oid === oid ? carried.truncated : false;',
+    arms: ['completeness'],
+    red: 'rule 264a',
+    direction: (a) => a.completeness !== undefined && a.completeness.reuseTruncated === false
+  },
+  {
+    // 264b: the completeness row is written inside saveFacts's transaction.
+    // Remove the write and no bytes-keyed row is ever recorded, so the reuse
+    // arm finds none and re-parses — a second repository over a small file reads
+    // it as complete, and nothing survives to be read back after a reopen.
+    name: 'rule 264b, saveFacts stops writing the completeness row in its transaction',
+    file: 'main/arch/db.ts',
+    from: '      scan.run(oid, relPath, completeness.truncated ? 1 : 0);\n',
+    to: '',
+    arms: ['completeness'],
+    red: 'rule 264b',
+    direction: (a) => a.completeness !== undefined && a.completeness.reopenTruncated !== true
+  },
+  {
+    // 264c: unknown completeness is re-parsed, never assumed complete. Default a
+    // missing scan row to a fabricated complete one and the conservative arm
+    // never fires: a link with no scan row is reused as complete without a parse.
+    name: 'rule 264c, an unknown completeness is defaulted to complete instead of being re-parsed',
+    file: 'main/arch/tree-facts.ts',
+    from: '          const scan = store.factScan(oid, file.relPath);',
+    to: '          const scan = store.factScan(oid, file.relPath) ?? { truncated: false };',
+    arms: ['completeness'],
+    red: 'rule 264c',
+    direction: (a) => a.completeness !== undefined && a.completeness.unknownReparsed === false
+  },
+  {
+    // 264d (migration): 014 invalidates the derived rows a pre-014 store may
+    // hold with a false completeness. Remove its DELETEs and the source scan
+    // catches it; the probe cannot reach a migration, so this is a sourceScan
+    // ablation the same shape as rule F2's worker-message clause.
+    name: "rule 264d, migration 014 stops invalidating a pre-014 store's derived rows",
+    file: 'main/arch/db.ts',
+    from:
+      '        DELETE FROM arch_fact;\n' +
+      '        DELETE FROM arch_fact_file;\n' +
+      '        DELETE FROM arch_fact_wrap;\n' +
+      '        DELETE FROM arch_fact_wrapper;\n' +
+      '        DELETE FROM arch_decl;\n' +
+      '        CREATE TABLE IF NOT EXISTS arch_fact_scan (',
+    to: '        CREATE TABLE IF NOT EXISTS arch_fact_scan (',
+    arms: [],
+    red: 'rule 264d',
+    sourceScan: (text) => migration014Problems(text)
+  }
 ];
 
 /**
@@ -1005,6 +1064,74 @@ function pinSetting(got, problems) {
   if (s.readerOn !== true || s.readerOff !== false) problems.push('rule 12: wrapperPassOn does not read the field');
 }
 
+/**
+ * PHASE 264. Completeness travels with the BYTES, not with the repository.
+ *
+ * The reuse arm reconstructed `truncated` from `carried` (this repository's own
+ * previous link), so a SECOND repository holding the same bytes at the same path
+ * read a declined parse as fully complete and lost the flag explaining the
+ * missing call list (audit 0.103.0 R2). Four clauses, each the target of one
+ * ablation below:
+ *   264a  the second repository recovers truncated:true by byte identity, and
+ *         the bytes-keyed `arch_fact_scan` row itself reads truncated:1
+ *   264b  the completeness row survives a close + REOPEN (it lives on disk, not
+ *         only in memory), so a third repository still recovers it
+ *   264c  UNKNOWN completeness (a link with no scan row) is RE-PARSED, never
+ *         assumed complete — the conservative arm asks the parser
+ */
+function pinCompleteness(got, problems) {
+  if (got.completeness === undefined) return;
+  const c = got.completeness;
+  if (c.reuseTruncated !== true) {
+    problems.push(
+      `rule 264a: a second repository read truncated=${JSON.stringify(c.reuseTruncated)} for bytes a first repository recorded truncated; completeness is a fact about the bytes and must travel with them, not with the repository`
+    );
+  }
+  if (c.scanRowTruncated !== true) {
+    problems.push(
+      `rule 264a: the bytes-keyed arch_fact_scan row read truncated=${JSON.stringify(c.scanRowTruncated)}; a truncated parse must record truncated:1 on the (oid, rel_path) row`
+    );
+  }
+  if (c.reopenTruncated !== true) {
+    problems.push(
+      `rule 264b: after a close and reopen a third repository read truncated=${JSON.stringify(c.reopenTruncated)}; the completeness row must be persisted, not held only in memory`
+    );
+  }
+  if (c.unknownReparsed !== true) {
+    problems.push(
+      `rule 264c: a link with no completeness row (unknown completeness) was NOT re-parsed (parser asked=${JSON.stringify(c.unknownReparsed)}); an unknown outcome must be re-parsed, never assumed complete`
+    );
+  }
+}
+
+/**
+ * PHASE 264. Migration `014-arch-fact-scan` must INVALIDATE the derived rows a
+ * pre-014 store may have written with a false completeness — it drops the same
+ * five derived tables `013` drops, so the first post-migration scan re-parses
+ * and writes an honest `arch_fact_scan` row rather than trusting a stale link's
+ * `truncated:0`. The probe cannot reach a migration, so this reads the source:
+ * [] when the five DELETEs are present in 014's body, a problem for each that is
+ * missing. Over the shipping tree it must be [], and the ablation that removes
+ * them must make it non-empty.
+ */
+export function migration014Problems(text) {
+  const src = stripComments(text);
+  const at = src.indexOf("name: '014-arch-fact-scan'");
+  if (at === -1) return ["migration '014-arch-fact-scan' is not in the MIGRATIONS array"];
+  // Only 014 follows it in the file, so the tail is 014's body alone.
+  const body = src.slice(at);
+  const out = [];
+  for (const table of ['arch_fact', 'arch_fact_file', 'arch_fact_wrap', 'arch_fact_wrapper', 'arch_decl']) {
+    if (!new RegExp(`DELETE\\s+FROM\\s+${table}\\s*;`).test(body)) {
+      out.push(`014 does not DELETE FROM ${table}, so a pre-014 store's false completeness on that table is not invalidated`);
+    }
+  }
+  if (!/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+arch_fact_scan\b/.test(body)) {
+    out.push('014 does not create the arch_fact_scan table');
+  }
+  return out;
+}
+
 function pin(got) {
   const problems = [];
   if (got === undefined || got.error !== undefined) return [`the probe answered ${got === undefined ? 'nothing' : got.error}`];
@@ -1016,6 +1143,7 @@ function pin(got) {
   pinStore(got, problems);
   pinSetting(got, problems);
   pinPublish(got, problems);
+  pinCompleteness(got, problems);
   return problems;
 }
 
@@ -1128,7 +1256,7 @@ try {
   }
 
   // The probe over the shipping tree and every ablated copy, ONE process.
-  const roots = [{ name: 'shipping', root: join(repoRoot, 'src'), arms: ['fixtures', 'recall', 'symbols', 'identity', 'limits', 'store', 'setting', 'publish'] }];
+  const roots = [{ name: 'shipping', root: join(repoRoot, 'src'), arms: ['fixtures', 'recall', 'symbols', 'identity', 'limits', 'store', 'setting', 'publish', 'completeness'] }];
   for (const [i, edit] of ABLATIONS.entries()) {
     roots.push({ name: `ablation-${i}`, root: ablatedCopy(join(scratch, `ablation-${i}`), edit), arms: edit.arms });
   }
@@ -1167,6 +1295,10 @@ try {
     const pub = shipping.publish;
     say(`${TAG} rule F3: the worker window published ${pub.workerWindow.first.length} fact(s) and left the file ${pub.workerWindow.linked ? 'LINKED' : 'unlinked'}; the reader window published ${pub.readerWindow.first.length} and left it ${pub.readerWindow.linked ? 'LINKED' : 'unlinked'}; the control published ${pub.control.first.length} and was reused with ${pub.control.reparsed} parse(s)`);
     say(`${TAG} rule F4: step 1 cached ${pub.wrapperRace.decls.length} declaration(s) of the racing bytes (the control cached ${pub.wrapperControl.decls.length}); step 3 read [${pub.step3.wrapSubjects.join(' | ')}]`);
+    const comp = shipping.completeness;
+    say(
+      `${TAG} rule 264: a second repository reuses truncated=${JSON.stringify(comp.reuseTruncated)} (scan row ${JSON.stringify(comp.scanRowTruncated)}), survives a reopen as ${JSON.stringify(comp.reopenTruncated)}, and an unknown completeness is re-parsed=${JSON.stringify(comp.unknownReparsed)} publishing [${(comp.unknownPublished ?? []).join(' | ')}]`
+    );
   }
 
   // Rule 4 and every other ablation: the copy must run, and the named pin must go red.
@@ -1220,6 +1352,14 @@ try {
   const workerSource = readFileSync(join(repoRoot, 'src', 'main', 'symbols', 'worker.ts'), 'utf8');
   for (const p of workerOidProblems(workerSource)) fail(`rule F2: src/main/symbols/worker.ts ${p}`);
   say(`${TAG} rule F2: IndexedFile declares oid required and the answering message carries it`);
+
+  // Rule 264d, the migration half, over the shipping db.ts. The probe cannot
+  // reach a migration, so completeness invalidation is proved by source: 014
+  // drops the same five derived tables 013 does, so a pre-014 store's false
+  // completeness cannot survive the upgrade.
+  const dbSourceForMigration = readFileSync(join(repoRoot, 'src', 'main', 'arch', 'db.ts'), 'utf8');
+  for (const p of migration014Problems(dbSourceForMigration)) fail(`rule 264d: src/main/arch/db.ts ${p}`);
+  say(`${TAG} rule 264d: migration 014-arch-fact-scan invalidates the five derived tables and creates arch_fact_scan`);
 
   // Rule 10, the SQL scan.
   const dbSource = readFileSync(join(repoRoot, 'src', 'main', 'arch', 'db.ts'), 'utf8');

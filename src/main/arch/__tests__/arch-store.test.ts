@@ -256,11 +256,22 @@ describe('the arch store', () => {
     expect(store.hasFactsFor(OID_A, 'test/ipc.test.ts')).toBe(false);
   });
 
-  it('a link is proof of a read, so a file with no facts is not parsed again on every stamp move', () => {
+  it('a complete-empty save is proof of a read by bytes, and a bare link is proof of a read too', () => {
+    // Phase 264: `saveFacts` records a bytes-keyed `arch_fact_scan` row even
+    // when the fact list is empty, so a file parsed completely that yields no
+    // fact is a RECORDED read ("complete-empty") the moment it is saved — its
+    // completeness is `{ truncated: false }` and `hasFactsFor` is true off the
+    // bytes-keyed row with no link of its own, which is the second-repository
+    // case the audit R2 defect lost.
     store.saveFacts(OID_B, 'src/empty.ts', []);
-    expect(store.hasFactsFor(OID_B, 'src/empty.ts')).toBe(false);
-    store.linkFactFiles(KEY, [link('src/empty.ts', OID_B)]);
     expect(store.hasFactsFor(OID_B, 'src/empty.ts')).toBe(true);
+    expect(store.factScan(OID_B, 'src/empty.ts')).toEqual({ truncated: false });
+    // And a bare LINK over other bytes with no fact and no scan row is still
+    // proof of a read on its own, which is what stops a fact-less file being
+    // parsed again on every stamp move.
+    expect(store.hasFactsFor(OID_A, 'src/other-empty.ts')).toBe(false);
+    store.linkFactFiles(KEY, [link('src/other-empty.ts', OID_A)]);
+    expect(store.hasFactsFor(OID_A, 'src/other-empty.ts')).toBe(true);
   });
 
   it('REFUSES a whole save when one row is outside the closed sets, naming the field, and writes nothing', () => {

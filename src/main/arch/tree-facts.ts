@@ -48,12 +48,15 @@
  *
  * Stated limits, so a later round reads them here rather than finding them:
  * a link written without a parse, being a stamp move over unchanged bytes or
- * the pass turned off, carries the vendor reason and the truncation flag the
- * store's own stamp of that path already held, and reads `truncated` false
- * only when the bytes changed under a path this repository never linked,
- * which is then parsed anyway; a file the worker refuses (over its 2 MiB cap) keeps its
- * line and path facts and is linked `truncated`, because its call list is the
- * thing that is missing; and a file over this module's own 4 MB read cap is
+ * the pass turned off, carries the vendor reason from the store's own stamp of
+ * that path; its truncation flag, since Phase 264, comes from the bytes-keyed
+ * `arch_fact_scan` row rather than from this repository's own previous link, so
+ * a SECOND repository holding the same bytes reads the SAME completeness by
+ * byte identity instead of defaulting it false — the audit R2 defect. When no
+ * such row exists the completeness is unknown and the file is re-parsed rather
+ * than assumed complete. A file the worker refuses (over its 2 MiB cap) keeps
+ * its line and path facts and is linked `truncated`, because its call list is
+ * the thing that is missing; and a file over this module's own 4 MB read cap is
  * linked under a streamed hash of its bytes with no rule read at all. And
  * the key carries NO rule table version: a fact is a function of (bytes,
  * path) under the table as it stands, so the first commit that changes a
@@ -411,18 +414,63 @@ export async function readArchTreeFacts(input: ArchTreeFactsInput): Promise<Arch
         };
         if (store.hasFactsFor(oid, file.relPath)) {
           // The same bytes at the same path: the facts are already there.
-          // The wrapper digest and the truncation flag are carried from this
-          // repository's own last link of these bytes, and the pass below
-          // decides whether the digest still holds.
-          factsReused += 1;
-          link.wrapDigest = input.wrapperPass ? (carried?.wrapDigest ?? null) : null;
-          link.truncated = carried !== undefined && carried.oid === oid ? carried.truncated : false;
-          links.set(file.relPath, link);
-          return;
+          //
+          // PHASE 264. Completeness is a fact about the BYTES, so `truncated`
+          // is read from the bytes-keyed `arch_fact_scan` row, NOT
+          // reconstructed from `carried` (this repository's own previous link).
+          // `carried` is undefined in any SECOND repository holding these bytes,
+          // and the old `carried !== undefined && carried.oid === oid ?
+          // carried.truncated : false` collapsed `truncated` to false there —
+          // reading a declined file as fully parsed and losing the flag that
+          // explained the missing call list (audit 0.103.0 R2). The scan row is
+          // keyed (oid, relPath) exactly as the facts are, so a second
+          // repository recovers `truncated: true` by byte identity with no link
+          // of its own.
+          const scan = store.factScan(oid, file.relPath);
+          if (scan !== undefined) {
+            factsReused += 1;
+            // `wrapDigest` STAYS carried-from-the-link, and null is the CORRECT
+            // conservative answer — it is NOT moved to a bytes-keyed row, and
+            // that is a ruling, not an oversight. Two reasons:
+            //  1. A `+wrap` fact is not a fact about THIS file's own bytes: it
+            //     exists because ANOTHER file declares a wrapper, so it is keyed
+            //     on this file under a DIGEST of the closed wrapper map and
+            //     legitimately DIFFERS between repositories holding different
+            //     other files (the `arch_fact_wrap` comment in db.ts states
+            //     this). A bytes-keyed row would be as wrong for it as a
+            //     repo-keyed row was for `truncated`.
+            //  2. `wrapDigest` is a cache KEY; `truncated` is a RESULT. null
+            //     means "no wrapper map is known for these bytes here", which
+            //     the wrapper pass's step 1 answers by RE-PARSING the file for
+            //     its wrapper arm — a missing key forces recomputation, failing
+            //     SAFE. `truncated: false` claimed "the parse was complete", so
+            //     a missing result defaulting to false failed UNSAFE. That
+            //     asymmetry is the finding, stated rather than silently equalised.
+            link.wrapDigest = input.wrapperPass ? (carried?.wrapDigest ?? null) : null;
+            link.truncated = scan.truncated;
+            links.set(file.relPath, link);
+            return;
+          }
+          // `hasFactsFor` is true but no bytes-keyed completeness row exists for
+          // these bytes: completeness is UNKNOWN (a pre-014 store the migration
+          // did not reach, or a producer that wrote facts without a scan row).
+          // Never assume complete — fall through and RE-PARSE the file, which
+          // writes an `arch_fact_scan` row atomically beside its facts. This is
+          // the audit's "retain an incomplete outcome or reparse". A
+          // known-truncated file has a row (truncated:1) and is reused above,
+          // so this conservative arm fires only on genuinely unknown
+          // completeness and cannot spin a warm-scan retry loop.
         }
         if (grammar === null) {
           const text = isManifestPath(file.relPath) ? buf.toString('utf8') : null;
-          store.saveFacts(oid, file.relPath, readFacts({ relPath: file.relPath, lang: null, text, calls: [] }));
+          // A manifest or grammar-null file is READ whole, not parsed by a
+          // worker, so its parse is always complete: truncated false (Phase 264).
+          store.saveFacts(
+            oid,
+            file.relPath,
+            readFacts({ relPath: file.relPath, lang: null, text, calls: [] }),
+            { truncated: false }
+          );
           factsRead += 1;
           links.set(file.relPath, link);
           return;
@@ -499,7 +547,18 @@ export async function readArchTreeFacts(input: ArchTreeFactsInput): Promise<Arch
       // publication requires all three reads to have seen the same object.
       if (blobOid(buf) !== q.oid) continue;
       const text = buf.toString('utf8');
-      store.saveFacts(q.oid, q.relPath, readFacts({ relPath: q.relPath, lang: q.grammar, text, calls }));
+      // PHASE 264. Completeness is recorded atomically with the facts, from the
+      // value computed at the line above off the worker's own answer, on the
+      // path that has already passed both 263 oid guards. A worker that
+      // declined the file (over its 2 MiB cap) or hit its call ceiling makes
+      // this `truncated: true`, and that flag now travels with the bytes for
+      // every other repository holding them.
+      store.saveFacts(
+        q.oid,
+        q.relPath,
+        readFacts({ relPath: q.relPath, lang: q.grammar, text, calls }),
+        { truncated: q.link.truncated }
+      );
       factsRead += 1;
       // PHASE 259, the declaration half. The symbols arrive on the SAME worker
       // message the calls do and were thrown away after their kind counts were
