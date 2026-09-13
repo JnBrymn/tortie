@@ -869,6 +869,64 @@ const MIGRATIONS: readonly SqliteMigration[] = [
         );
       `);
     }
+  },
+  {
+    // PHASE 263. A fact row written before this commit may describe bytes
+    // OTHER than the ones it is keyed on.
+    //
+    // The pass read each path three times — once for the oid the row is keyed
+    // on, once inside the worker for the calls and the symbols, once again for
+    // the text the rules are read over — and only the outer two were ever
+    // compared, because the parser's result carried no identity at all. A
+    // change followed by a REVERT around the worker's read left those two
+    // agreeing while the worker had parsed something else, and the middle
+    // bytes' evidence was stored under the outer bytes' name. Nothing repaired
+    // it afterwards: `hasFactsFor` answers off (oid, rel_path) alone, so the
+    // next clean scan reused the row without a parse, in this repository and
+    // in every other one holding the same bytes at the same path.
+    //
+    // So the rows are dropped whole rather than aged, the same shape as 002,
+    // 007, 008 and 011: the fact base is DERIVED, the next check re-parses the
+    // tree and writes it again at about 1.25 ms per file, and nothing a person
+    // wrote lives in any of these tables.
+    //
+    // THE LINKS GO WITH THE FACTS, which is 011's own lesson written down
+    // again. `hasFactsFor` answers true off a LINK alone, so a migration that
+    // dropped the facts and kept the links would re-link every file without
+    // parsing one and leave the fact base empty until somebody edited a file.
+    //
+    // Five tables, and each is here for its own reason:
+    //   arch_fact         the mislabelled rows themselves
+    //   arch_fact_file    the links, or nothing is ever re-parsed
+    //   arch_fact_wrap    derived from those rows under a wrapper map
+    //   arch_fact_wrapper wrapper declarations cached by oid, and step 1 of the
+    //                     wrapper pass saved them with no identity check at all
+    //   arch_decl         the Phase 259 half, written at the same call site off
+    //                     the same worker message as the calls
+    // The last two were NOT dropped by 011 and must be dropped now.
+    //
+    // NOTHING ELSE IS DELETED. Not `arch_repo`, not `arch_import`, not
+    // `arch_import_file`, not `arch_tree_file`, not `arch_camera`, not
+    // `arch_layout`, not `arch_verdict`, and NOT ONE SEMANTIC TABLE: `arch_claim`,
+    // `arch_claim_cite`, `arch_claim_rate`, `arch_journey` and
+    // `arch_semantic_run` hold a model's sentences that cost the operator
+    // tokens to make, and their own drift refresh already handles a moved oid.
+    // No source file, no manifest and no path under `<userData>/gmux` is
+    // touched by this or by anything that reads it.
+    //
+    // Phase 264 adds `014-…` beside this one and never edits it: a migration is
+    // name-keyed, so editing an applied one is a silent no-op on every machine
+    // that has already run it.
+    name: '013-arch-fact-identity',
+    up: (db) => {
+      db.exec(`
+        DELETE FROM arch_fact;
+        DELETE FROM arch_fact_file;
+        DELETE FROM arch_fact_wrap;
+        DELETE FROM arch_fact_wrapper;
+        DELETE FROM arch_decl;
+      `);
+    }
   }
 ];
 

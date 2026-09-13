@@ -66,6 +66,19 @@ export interface IndexedFile {
   relPath: string;
   mtimeMs: number;
   size: number;
+  /**
+   * The identity of the bytes this worker actually parsed (Phase 263), being
+   * their git blob name. The fact pass refuses to store a row whose identity
+   * is not the one it is publishing under, so a file rewritten and reverted
+   * around the pass's own reads is left unlinked for the next run instead of
+   * being described by the wrong bytes.
+   *
+   * REQUIRED, and that is the point: an optional field lets a future producer
+   * omit it in silence, and a publisher that refuses what it cannot identify
+   * would then unlink every file with nobody noticing. 40 characters per file
+   * is the whole cost, and identity is not one of the asks.
+   */
+  oid: string;
   symbols: ExtractedSymbol[];
   /** Present only when the request asked for imports (Phase 63). */
   imports?: ExtractedImport[];
@@ -127,6 +140,7 @@ async function run(port_: NonNullable<typeof parentPort>): Promise<void> {
             relPath: file.relPath,
             mtimeMs: got.mtimeMs,
             size: got.size,
+            oid: got.oid,
             symbols: got.symbols,
             ...(raw.imports === true ? { imports: got.imports } : {}),
             ...(raw.calls === true ? { calls: got.calls, callsTruncated: got.callsTruncated } : {}),

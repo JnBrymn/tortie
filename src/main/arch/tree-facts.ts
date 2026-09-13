@@ -60,6 +60,25 @@
  * rule leaves every cached row stale until that file's bytes change, and
  * that commit ships a migration that empties `arch_fact` (or a table digest
  * on the link) in the same change. Phase 258 is the first that may edit a rule.
+ *
+ * And since Phase 263 the extractor NAMES the bytes it parsed, so publication
+ * requires two comparisons rather than one: the identity the worker read and
+ * the identity of this module's own second read must BOTH equal the identity
+ * the row is keyed on. The path is read three times and only the outer two
+ * were compared before, which a change followed by a revert around the
+ * worker's read walked straight through — the middle bytes' calls were stored
+ * under the outer bytes' name and every later clean scan REUSED that row
+ * rather than repairing it, here and in any other repository holding the same
+ * bytes. The rule holds for every row one worker message carries, being the
+ * calls, the Phase 259 declarations and the wrapper declarations cached by
+ * oid, and in the wrapper pass's step 1 and step 3 as well as here. A
+ * disagreement is not an error: the file is left UNLINKED for the next run,
+ * which is step 4's own behaviour. The cost is that a file rewritten on every
+ * scan is re-read on every scan and never linked, and it converges the moment
+ * the file stops moving; freshness is still (mtime, size), so a rewrite that
+ * preserves both is still not noticed at all, and what is guaranteed is only
+ * that no scan which DOES read a file stores a fact under bytes it never
+ * parsed.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -435,6 +454,26 @@ export async function readArchTreeFacts(input: ArchTreeFactsInput): Promise<Arch
     const answered = await askParser(parser, batch, input.wrapperPass);
     for (const q of batch) {
       const file = answered.get(q.relPath);
+      // PHASE 263, the first of the two identity comparisons. The path is read
+      // THREE times around this loop: once above for the oid this row is keyed
+      // on, once by the WORKER for the calls and the symbols, and once below
+      // for the text the rules are read over. Only the first and the third
+      // were ever compared, so a change followed by a REVERT around the
+      // worker's read left those two agreeing while the worker had parsed
+      // something else, and the middle bytes' evidence was stored under the
+      // outer bytes' name. A later clean scan did not repair it either, since
+      // `hasFactsFor` answers off (oid, relPath) alone and reuses the row
+      // without a parse, in this repository AND in any other holding the same
+      // bytes. So the answer now names the bytes it read, and this comparison
+      // closes the worker's window while the one at the third read below
+      // closes the reader's; neither covers the other. A file whose answer
+      // names other bytes is rejected WHOLE, being no facts, no declarations,
+      // no wrapper declarations and no wrapper work, and is left out of
+      // `answeredFiles` so its link is deleted and the next run reads it. That
+      // is the wrapper pass's own step 4 behaviour rather than a new refusal.
+      // An answer that is MISSING is not a disagreement: it is the worker's
+      // own cap or a dead batch, and it keeps the truncated link it always had.
+      if (file !== undefined && file.oid !== q.oid) continue;
       const calls = file?.calls ?? [];
       // A file the worker did not answer (over its own cap, or half written)
       // keeps its line and path facts; what is missing is the call list.
@@ -452,6 +491,12 @@ export async function readArchTreeFacts(input: ArchTreeFactsInput): Promise<Arch
       // race:before` cited at a line holding `race:after`. So the second read
       // must hash to the oid the first one did, or the file is left unlinked
       // for the next run, which is the wrapper pass's own guard at step 4.
+      // This is the THIRD read of the path and it compares the FIRST read's
+      // identity against this one's, which is the window the `text` below is
+      // taken from. The Phase 263 check above compares the first read's
+      // identity against the WORKER's, which is the window the `calls` and the
+      // symbols are taken from. Both are needed and neither is redundant:
+      // publication requires all three reads to have seen the same object.
       if (blobOid(buf) !== q.oid) continue;
       const text = buf.toString('utf8');
       store.saveFacts(q.oid, q.relPath, readFacts({ relPath: q.relPath, lang: q.grammar, text, calls }));
@@ -658,6 +703,15 @@ async function wrapperPass(p: WrapperPassInput): Promise<string> {
     const answered = await askParser(parser, batch, true);
     for (const h of batch) {
       const file = answered.get(h.relPath);
+      // PHASE 263, and this step had no identity check of ANY kind: step 4's
+      // read below is downstream of it and never protected the declarations
+      // written here, which are cached by oid and shared by it. An answer that
+      // names other bytes saves nothing, does no wrapper work and DELETES the
+      // link, so the next run reads the file again.
+      if (file !== undefined && file.oid !== h.oid) {
+        links.delete(h.relPath);
+        continue;
+      }
       const own = file?.wrappers ?? [];
       store.saveWrapperDecls(h.oid, h.relPath, own);
       const link = linkFor(h);
@@ -681,6 +735,14 @@ async function wrapperPass(p: WrapperPassInput): Promise<string> {
     const answered = await askParser(parser, batch, false);
     for (const h of batch) {
       const file = answered.get(h.relPath);
+      // PHASE 263. These re-asked calls are read over step 4's own bytes, so
+      // the same revert window sits between this answer and that read: an
+      // answer naming other bytes contributes no wrapper work and the file is
+      // unlinked for the next run. Step 4's guard below stays where it is.
+      if (file !== undefined && file.oid !== h.oid) {
+        links.delete(h.relPath);
+        continue;
+      }
       const link = linkFor(h);
       link.truncated = file === undefined || file.callsTruncated === true;
       links.set(h.relPath, link);

@@ -25,12 +25,19 @@
  *   limits    rule 15: the call ceiling, the manifest cap, the subject cut
  *   store     rules 10 and 16: a scratch ArchStore driven end to end
  *   setting   rule 12: the sanitizer and the seal
+ *   publish   rules F3 and F4 (Phase 263): the fact pass's two publication
+ *             windows, driven one at a time over a scratch repository and a
+ *             scratch arch.db, so that ablating either guard alone goes red
+ *
+ * PHASE 263 also extends the `identity` arm with rules F1 and F2: the second
+ * spelling of the blob name in `main/symbols/oid.ts` agrees with the fact
+ * domain's own, and `extractFile` answers the identity of the bytes it parsed.
  *
  * Usage: tsx build/facts-conformance-probe.mts '<json>' where the json is
  * { "roots": [{ "name", "root", "arms": [...] }], "checkout": "<abs>", "scratch": "<abs>" }
  */
 
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
@@ -84,6 +91,17 @@ interface Loaded {
       wrappers: never[];
       callsTruncated: boolean;
     }>;
+    /**
+     * PHASE 263. The whole answer, including `oid`, the identity of the bytes
+     * THIS parse read. Rules F2, F3 and F4 are about that field, so the arms
+     * below reach the same door the shared worker pool reaches rather than
+     * `extractAll`, which never touches a file.
+     */
+    extractFile(
+      rel: string,
+      abs: string,
+      ask?: { calls?: boolean; wrappers?: boolean }
+    ): Promise<({ oid: string; mtimeMs: number; size: number; calls: DriverCall[]; callsTruncated: boolean } & Record<string, unknown>) | null>;
     dispose(): void;
   };
   db: Record<string, unknown>;
@@ -236,12 +254,32 @@ async function runRoot(rs: RootSpec): Promise<Answer> {
       const srcRead = F.readFacts({ relPath: 'src/x.ts', lang: 'typescript', text, calls: read.calls });
       const testRead = F.readFacts({ relPath: 'test/x.test.ts', lang: 'typescript', text, calls: read.calls });
       const planted = Buffer.from('app.get("/facts", h);\n', 'utf8');
+      // PHASE 263, rules F1 and F2. The extractor lives behind a directory
+      // wall that forbids it importing the fact domain's `blobOid`, so it
+      // carries a second spelling. That duplication is what makes the
+      // publication guard a comparison between two independent readers rather
+      // than a function agreeing with itself — and it is only worth anything
+      // while the two answer the same. F1 asks the ROOT'S OWN second spelling
+      // for the same constant rule 9 pins for the first. F2 asks `extractFile`
+      // over a real file whether the identity it answers is the identity of
+      // the bytes it read.
+      const oidMod = await importFrom(rs.root, 'main/symbols/oid.ts');
+      const symbolBlobOid = oidMod['symbolBlobOid'] as (buf: Buffer) => string;
+      const parseDir = join(spec.scratch, `parse-${rs.name}`);
+      mkdirSync(parseDir, { recursive: true });
+      const parseAbs = join(parseDir, 'facts.ts');
+      writeFileSync(parseAbs, planted);
+      const parsed = await loaded.extractor.extractFile('src/facts.ts', parseAbs, { calls: true });
       answer['identity'] = {
         reversedSame: JSON.stringify(a) === JSON.stringify(b),
         facts: a.length,
         src: srcRead.map((f) => `${f.rule} ${f.subject}`),
         test: testRead.map((f) => `${f.rule} ${f.subject}`),
-        oid: F.blobOid(planted)
+        oid: F.blobOid(planted),
+        symbolOid: symbolBlobOid(planted),
+        parsedOid: parsed === null ? null : parsed.oid,
+        parsedTruth: F.blobOid(planted),
+        parsedCalls: parsed === null ? -1 : parsed.calls.length
       };
     }
 
@@ -275,6 +313,10 @@ async function runRoot(rs: RootSpec): Promise<Answer> {
 
     if (arms.has('store')) {
       answer['store'] = await storeArm(loaded, rs.name);
+    }
+
+    if (arms.has('publish')) {
+      answer['publish'] = await publishArm(loaded, rs.root, rs.name);
     }
 
     if (arms.has('setting')) {
@@ -413,6 +455,254 @@ async function storeArm(loaded: Loaded, name: string): Promise<Answer> {
       wrapVia: wrapAfterReplace.every((f) => f.viaWrapper),
       counts: store.factCounts('w')
     };
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return out;
+}
+
+
+// ---------------------------------------------------------------------------
+// PHASE 263, rules F3 and F4. The publication windows.
+// ---------------------------------------------------------------------------
+// The path under a fact pass is read THREE times: once by the pass for the oid
+// the row is keyed on, once by the PARSER for the calls and the symbols, and
+// once again by the pass for the text the rules are read over. Only the outer
+// two were ever compared, so a change followed by a REVERT around the parser's
+// read left them agreeing while the parser had seen something else.
+//
+// There are therefore TWO windows and two guards, and this arm drives them one
+// at a time so that ablating either alone goes red. That is the whole point of
+// driving both: a single scenario would let one guard cover for the other and
+// the gate would call a redundant pair proved.
+//
+//   worker window  the racing seam rewrites the file BEFORE it parses and puts
+//                  it back before it answers. The pass's own two reads agree;
+//                  only the answer's identity disagrees.
+//   reader window  the seam parses the real bytes and rewrites the file AFTER
+//                  it answers. The answer's identity agrees; only the pass's
+//                  third read disagrees.
+//
+// Each carries a control, because a refusal with no control might be refusing
+// everything. F4 is the same question in the wrapper pass, whose step 1 caches
+// declarations BY OID and so shares a wrong one with every other repository.
+// ---------------------------------------------------------------------------
+
+/**
+ * A seam over one extractor, the shape `sharedFactParser()` gives the pass.
+ *
+ * `asks` counts what the pass actually ASKED FOR, split by whether it wanted
+ * wrappers, because every refusal below has to be proved to have refused
+ * something: a scenario where the pass never reached the parser at all would
+ * read exactly like a guard working, and the pins assert the counts.
+ */
+function seamOver(loaded: Loaded, around?: (phase: 'before' | 'after', wrappers: boolean) => void) {
+  const asks = { withWrappers: 0, withoutWrappers: 0 };
+  const parser = {
+    batchSize: 4,
+    async run(
+      files: readonly { relPath: string; absPath: string }[],
+      ask: { calls: true; wrappers: boolean }
+    ): Promise<unknown[]> {
+      if (ask.wrappers) asks.withWrappers += 1;
+      else asks.withoutWrappers += 1;
+      around?.('before', ask.wrappers);
+      const out: unknown[] = [];
+      try {
+        for (const file of files) {
+          const got = await loaded.extractor.extractFile(file.relPath, file.absPath, ask);
+          if (got !== null) out.push({ relPath: file.relPath, ...got });
+        }
+      } finally {
+        around?.('after', ask.wrappers);
+      }
+      return out;
+    }
+  };
+  return { parser, asks };
+}
+
+async function publishArm(loaded: Loaded, root: string, name: string): Promise<Answer> {
+  const treeMod = await importFrom(root, 'main/arch/tree-facts.ts');
+  const readArchTreeFacts = treeMod['readArchTreeFacts'] as (input: Record<string, unknown>) => Promise<unknown>;
+  const ArchStore = loaded.db['ArchStore'] as new (path: string) => StoreLike;
+  const F = loaded.facts;
+  const dir = join(spec.scratch, `publish-${name}`);
+  mkdirSync(dir, { recursive: true });
+  const store = new ArchStore(join(dir, 'arch.db'));
+  const REL = 'src/main/sample.ts';
+  const out: Answer = {};
+  try {
+    const repo = (key: string, text: string): string => {
+      const repoPath = join(dir, key);
+      mkdirSync(join(repoPath, 'src', 'main'), { recursive: true });
+      writeFileSync(join(repoPath, REL), text);
+      return repoPath;
+    };
+    const scan = (repoPath: string, repoKey: string, parser: unknown, wrapperPass: boolean) =>
+      readArchTreeFacts({ repoPath, repoKey, store, parser, trackedFiles: [REL], wrapperPass });
+    const surfaces = (repoKey: string): string[] =>
+      store.facts(repoKey).filter((f) => f.category === 'surface').map((f) => f.subject);
+    const wrapSubjects = (repoKey: string): string[] =>
+      store.facts(repoKey).filter((f) => f.viaWrapper).map((f) => f.subject);
+    const linked = (repoKey: string): boolean => store.factStamps(repoKey).has(REL);
+    const stampDigest = (repoKey: string): string | null => {
+      const stamp = store.factStamps(repoKey).get(REL) as { wrapDigest?: string | null } | undefined;
+      return stamp?.wrapDigest ?? null;
+    };
+
+    // Each scenario gets its OWN bytes. `hasFactsFor` answers off (oid,
+    // relPath) alone, so two scenarios sharing one store, one path and one
+    // text would let the second be answered from the first's row without ever
+    // reaching the parser — which is the very sharing F3 exists to protect,
+    // and which would make the second scenario prove nothing.
+
+    // The worker window: rewritten BEFORE the parse and put back before the
+    // answer, so the pass's own two reads agree and only the answer disagrees.
+    {
+      const before = "ipcMain.handle('facts:w-before', f);\n";
+      const middle = "ipcMain.handle('facts:w-middle', f);\n";
+      const repoPath = repo('worker-window', before);
+      const abs = join(repoPath, REL);
+      const racing = seamOver(loaded, (phase) => {
+        writeFileSync(abs, phase === 'before' ? middle : before);
+      });
+      await scan(repoPath, 'worker-window', racing.parser, false);
+      const first = surfaces('worker-window');
+      const stillLinked = linked('worker-window');
+      const clean = seamOver(loaded);
+      await scan(repoPath, 'worker-window', clean.parser, false);
+      out['workerWindow'] = {
+        first,
+        linked: stillLinked,
+        afterClean: surfaces('worker-window'),
+        asked: racing.asks.withWrappers + racing.asks.withoutWrappers,
+        reparsed: clean.asks.withWrappers + clean.asks.withoutWrappers
+      };
+    }
+
+    // The reader window: parsed over the real bytes, rewritten AFTER the
+    // answer, so only the pass's third read disagrees.
+    {
+      const before = "ipcMain.handle('facts:r-before', f);\n";
+      const middle = "ipcMain.handle('facts:r-middle', f);\n";
+      const repoPath = repo('reader-window', before);
+      const abs = join(repoPath, REL);
+      const racing = seamOver(loaded, (phase) => {
+        if (phase === 'after') writeFileSync(abs, middle);
+      });
+      await scan(repoPath, 'reader-window', racing.parser, false);
+      const first = surfaces('reader-window');
+      const stillLinked = linked('reader-window');
+      writeFileSync(abs, before);
+      const clean = seamOver(loaded);
+      await scan(repoPath, 'reader-window', clean.parser, false);
+      out['readerWindow'] = {
+        first,
+        linked: stillLinked,
+        afterClean: surfaces('reader-window'),
+        asked: racing.asks.withWrappers + racing.asks.withoutWrappers,
+        reparsed: clean.asks.withWrappers + clean.asks.withoutWrappers
+      };
+    }
+
+    // The control beside them: a steady file publishes and is then reused
+    // without a parse at all, which is what proves neither guard refuses
+    // everything.
+    {
+      const steady = "ipcMain.handle('facts:steady', f);\n";
+      const repoPath = repo('steady', steady);
+      const honest = seamOver(loaded);
+      await scan(repoPath, 'steady', honest.parser, false);
+      const first = surfaces('steady');
+      const again = seamOver(loaded);
+      await scan(repoPath, 'steady', again.parser, false);
+      out['control'] = {
+        first,
+        linked: linked('steady'),
+        asked: honest.asks.withWrappers + honest.asks.withoutWrappers,
+        reparsed: again.asks.withWrappers + again.asks.withoutWrappers,
+        second: surfaces('steady')
+      };
+    }
+
+    // F4, the wrapper pass's STEP 1. Its declarations are cached BY OID and it
+    // had no identity check of any kind, so a racing answer there is shared
+    // with every repository holding the same bytes. The first scan runs with
+    // the pass OFF so the link carries no digest, which is what puts the file
+    // in step 1's `unread` list on the second.
+    {
+      const base = "ipcMain.handle('facts:wrapbase', f);\n";
+      const racingText = "export function serve(name, f) { ipcMain.handle(name, f); }\nserve('facts:w1-injected', g);\n";
+      const repoPath = repo('wrap-race', base);
+      const abs = join(repoPath, REL);
+      await scan(repoPath, 'wrap-race', seamOver(loaded).parser, false);
+      const racing = seamOver(loaded, (phase) => {
+        writeFileSync(abs, phase === 'before' ? racingText : base);
+      });
+      await scan(repoPath, 'wrap-race', racing.parser, true);
+      const oid = F.blobOid(Buffer.from(base, 'utf8'));
+      const decls = store.wrapperDecls([{ oid, relPath: REL }]).get(REL) ?? [];
+      out['wrapperRace'] = {
+        decls: (decls as { name: string }[]).map((d) => d.name),
+        digest: stampDigest('wrap-race'),
+        subjects: surfaces('wrap-race'),
+        wrapSubjects: wrapSubjects('wrap-race'),
+        asked: racing.asks.withWrappers
+      };
+    }
+    {
+      const steady = "export function serve(name, f) { ipcMain.handle(name, f); }\nserve('facts:w1-wrapped', g);\n";
+      const repoPath = repo('wrap-steady', steady);
+      await scan(repoPath, 'wrap-steady', seamOver(loaded).parser, false);
+      const honest = seamOver(loaded);
+      await scan(repoPath, 'wrap-steady', honest.parser, true);
+      const oid = F.blobOid(Buffer.from(steady, 'utf8'));
+      const decls = store.wrapperDecls([{ oid, relPath: REL }]).get(REL) ?? [];
+      out['wrapperControl'] = {
+        decls: (decls as { name: string }[]).map((d) => d.name),
+        digest: stampDigest('wrap-steady'),
+        wrapSubjects: wrapSubjects('wrap-steady'),
+        asked: honest.asks.withWrappers
+      };
+    }
+
+    // F4's second half: the wrapper pass's STEP 3, which re-asks a file whose
+    // cached wrapper-only facts were computed under a map that has moved. Its
+    // answer is read over step 4's own bytes, so it has a window of its own.
+    {
+      const xBefore = "export function serve(name, f) { ipcMain.handle(name, f); }\nserve('facts:s3-x', g);\n";
+      const xRacing = "export function serve(name, f) { ipcMain.handle(name, f); }\nserve('facts:s3-injected', g);\n";
+      const yBefore = "ipcMain.handle('facts:s3-y', f);\n";
+      const yAfter = "export function relay(name, f) { ipcMain.handle(name, f); }\nrelay('facts:s3-y2', g);\n";
+      const repoPath = join(dir, 'step3');
+      mkdirSync(join(repoPath, 'src', 'main'), { recursive: true });
+      const xAbs = join(repoPath, 'src/main/x.ts');
+      const yAbs = join(repoPath, 'src/main/y.ts');
+      writeFileSync(xAbs, xBefore);
+      writeFileSync(yAbs, yBefore);
+      const tracked = ['src/main/x.ts', 'src/main/y.ts'];
+      const pass = (parser: unknown) =>
+        readArchTreeFacts({ repoPath, repoKey: 'step3', store, parser, trackedFiles: tracked, wrapperPass: true });
+      await pass(seamOver(loaded).parser);
+      // Y gains a declaration of its own, so the closed map's digest moves and
+      // X — untouched, reused, and holding wrapper-only facts computed under
+      // the old map — is what step 3 re-asks.
+      writeFileSync(yAbs, yAfter);
+      // Step 3 is the one ask that wants NO wrappers; the base pass and step 1
+      // both ask with them on, which is how the seam tells them apart.
+      const racing = seamOver(loaded, (phase, wrappers) => {
+        if (wrappers) return;
+        writeFileSync(xAbs, phase === 'before' ? xRacing : xBefore);
+      });
+      await pass(racing.parser);
+      out['step3'] = {
+        wrapSubjects: wrapSubjects('step3'),
+        surfaces: surfaces('step3'),
+        asked: racing.asks.withoutWrappers
+      };
+    }
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

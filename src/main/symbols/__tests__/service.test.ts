@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SymbolPersistence } from '../persist';
 import { SymbolService } from '../service';
 import type { SymbolPool } from '../pool';
+import { symbolBlobOid } from '../oid';
 import type { IndexedFile } from '../worker';
 
 let root = '';
@@ -46,12 +47,14 @@ function fakePool(): SymbolPool {
   return {
     async run(files: { relPath: string; absPath: string }[]) {
       parsed.push(files.map((f) => f.relPath));
-      const { statSync } = await import('node:fs');
+      const { readFileSync, statSync } = await import('node:fs');
       const out: IndexedFile[] = [];
       for (const file of files) {
         let st;
+        let buf;
         try {
           st = statSync(file.absPath);
+          buf = readFileSync(file.absPath);
         } catch {
           continue;
         }
@@ -59,6 +62,10 @@ function fakePool(): SymbolPool {
           relPath: file.relPath,
           mtimeMs: st.mtimeMs,
           size: st.size,
+          // Phase 263: the real digest of the bytes this fake "parsed", not a
+          // placeholder — the fake reads the file anyway, and an invented
+          // identity would make the fixture disagree with every real reader.
+          oid: symbolBlobOid(buf),
           symbols: [
             {
               name: symbolNameFor(file.relPath),

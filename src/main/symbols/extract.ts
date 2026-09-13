@@ -27,6 +27,7 @@ import type { GrammarId } from './languages';
 import { BINARY_SNIFF_BYTES, grammarFor, MAX_INDEXED_FILE_BYTES } from './languages';
 import { describeCall, MAX_CALLS_PER_FILE, unquoteLiteral } from './calls';
 import type { CallForm, ExtractedCall } from './calls';
+import { symbolBlobOid } from './oid';
 import { readWrapperDecls } from './wrappers';
 import type { ExtractedWrapper } from './wrappers';
 import {
@@ -257,12 +258,21 @@ export class SymbolExtractor {
   /**
    * Read + extract one file. Returns null when the file cannot contribute —
    * unreadable, binary-ish, or over MAX_INDEXED_FILE_BYTES.
+   *
+   * `oid` is the identity of THE BYTES THIS PARSE READ (Phase 263), being the
+   * git blob name of the very buffer handed to `extractAll` below. The fact
+   * pass compares it against the identity it is about to publish the row
+   * under, and refuses the file whole when they differ: a change followed by a
+   * revert between the pass's own two reads used to leave those two agreeing
+   * while this parse had seen something else entirely. Every refusal above
+   * stays a `null` rather than an answer with an empty digest, because a file
+   * that contributes nothing names nothing.
    */
   async extractFile(
     relPath: string,
     absPath: string,
     ask: ExtractAsk = {}
-  ): Promise<(Extracted & { mtimeMs: number; size: number }) | null> {
+  ): Promise<(Extracted & { mtimeMs: number; size: number; oid: string }) | null> {
     if (grammarFor(relPath) === null) return null;
     let buf: Buffer;
     let mtimeMs: number;
@@ -283,7 +293,7 @@ export class SymbolExtractor {
     const probe = buf.subarray(0, BINARY_SNIFF_BYTES);
     if (probe.includes(0)) return null;
     const found = await this.extractAll(relPath, buf.toString('utf8'), ask);
-    return { ...found, mtimeMs, size };
+    return { ...found, mtimeMs, size, oid: symbolBlobOid(buf) };
   }
 
   /** Free every loaded grammar. Called when a worker is about to exit. */

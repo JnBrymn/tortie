@@ -44,6 +44,10 @@ function inProcessParser(asks: { files: string[]; wrappers: boolean }[] = []): A
           relPath: file.relPath,
           mtimeMs: got.mtimeMs,
           size: got.size,
+          // The identity of the bytes THIS parse read (Phase 263). The seam is
+          // the worker's message, so the stand-in carries what the worker now
+          // carries, or the publisher would refuse every file here.
+          oid: got.oid,
           symbols: got.symbols,
           calls: got.calls,
           callsTruncated: got.callsTruncated,

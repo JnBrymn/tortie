@@ -88,6 +88,31 @@
  * 15. Limits: the call ceiling, the manifest cap, the subject cut.
  * 16. The store round trip over a scratch ArchStore.
  * 17. Registration: package.json, verification-checks, the teardown floor.
+ *
+ * PHASE 263 ADDED FOUR RULES AND SEVEN ABLATIONS, because the pass's
+ * PUBLICATION was driven by no arm at all and its guards were ablatable with
+ * this gate green. A path under the fact pass is read three times — once for
+ * the oid the row is keyed on, once by the parser for the calls and the
+ * symbols, once again for the text the rules are read over — and only the
+ * outer two were compared, so a change followed by a REVERT around the
+ * parser's read left them agreeing while the parser had seen something else.
+ * The extractor now names the bytes it parsed and the pass requires that name.
+ *
+ * F1. The two spellings of the blob name agree. `main/symbols/oid.ts` is a
+ *     SECOND spelling of `main/arch/facts/oid.ts` because the directory wall
+ *     forbids the import, and the duplication is what makes the guard a
+ *     comparison between two independent readers rather than a function
+ *     agreeing with itself. Both must answer PINNED_OID.
+ * F2. A parse names its bytes, and the message carries it: `extractFile`
+ *     answers the blob name of the buffer it handed the grammars, and
+ *     `IndexedFile` declares `oid` REQUIRED and the worker's push sets it.
+ * F3. Publication requires the parse identity AND the reader's. The two
+ *     windows are driven one at a time over a scratch repository and a scratch
+ *     arch.db, each with a control, so ablating either guard alone goes red
+ *     and neither can cover for the other.
+ * F4. The same in the wrapper pass, whose step 1 caches declarations BY OID
+ *     and had no identity check of any kind, and whose step 3 re-asks a file
+ *     read over step 4's own bytes.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -513,6 +538,86 @@ const ABLATIONS = [
     arms: ['fixtures'],
     red: 'rule 1'
   }
+,
+  // PHASE 263. One per clause the phase ships. The two that matter most are
+  // the LAST FOUR: ablating the base guard alone reddens only the worker
+  // window and ablating the third read alone reddens only the reader window,
+  // which is the proof that the two comparisons are not redundant.
+  {
+    name: 'rule F1, the second spelling of the blob name disagrees with the first',
+    file: 'main/symbols/oid.ts',
+    from: "h.update(`blob ${buf.length}\\0`);",
+    to: "h.update(`blob ${buf.length + 1}\\0`);",
+    arms: ['identity'],
+    red: 'rule F1'
+  },
+  {
+    name: 'rule F2, extractFile names bytes it did not parse',
+    file: 'main/symbols/extract.ts',
+    from: 'return { ...found, mtimeMs, size, oid: symbolBlobOid(buf) };',
+    to: 'return { ...found, mtimeMs, size, oid: symbolBlobOid(Buffer.alloc(0)) };',
+    arms: ['identity'],
+    red: 'rule F2'
+  },
+  {
+    name: 'rule F2, the worker message drops the parse identity',
+    file: 'main/symbols/worker.ts',
+    from: '            oid: got.oid,\n',
+    to: '',
+    arms: [],
+    red: 'rule F2',
+    sourceScan: (text) => workerOidProblems(text)
+  },
+  {
+    name: 'rule F3, the base pass stops comparing the ANSWER to the identity it publishes under',
+    file: 'main/arch/tree-facts.ts',
+    from: '      if (file !== undefined && file.oid !== q.oid) continue;\n',
+    to: '',
+    arms: ['publish'],
+    red: 'rule F3',
+    // The non-redundancy half: this guard closes the WORKER's window and only
+    // that one, so ablating it publishes the temporary bytes' own channel and
+    // leaves the reader window still refusing.
+    direction: (a) =>
+      a.publish !== undefined &&
+      a.publish.workerWindow.first.includes('IPC serves facts:w-middle') &&
+      a.publish.readerWindow.first.length === 0
+  },
+  {
+    name: 'rule F3, the base pass stops comparing its THIRD read to the identity it publishes under',
+    file: 'main/arch/tree-facts.ts',
+    from: '      if (blobOid(buf) !== q.oid) continue;\n',
+    to: '',
+    arms: ['publish'],
+    red: 'rule F3',
+    // The other half, and its damage has a different SHAPE, which is why the
+    // pin asks whether anything at all was published rather than what. The
+    // subject comes from the parser's call list and the line and evidence come
+    // from the third read, so this window publishes the RIGHT channel cited at
+    // a line holding other bytes — the Phase 257 fix round read exactly that.
+    direction: (a) =>
+      a.publish !== undefined &&
+      a.publish.readerWindow.first.length > 0 &&
+      a.publish.workerWindow.first.length === 0
+  },
+  {
+    name: 'rule F4, the wrapper pass step 1 caches a declaration it did not read',
+    file: 'main/arch/tree-facts.ts',
+    from: '      if (file !== undefined && file.oid !== h.oid) {\n        links.delete(h.relPath);\n        continue;\n      }\n      const own = file?.wrappers ?? [];',
+    to: '      const own = file?.wrappers ?? [];',
+    arms: ['publish'],
+    red: 'rule F4',
+    direction: (a) => a.publish !== undefined && a.publish.wrapperRace.decls.includes('serve')
+  },
+  {
+    name: 'rule F4, the wrapper pass step 3 re-asks and keeps an answer about other bytes',
+    file: 'main/arch/tree-facts.ts',
+    from: '      if (file !== undefined && file.oid !== h.oid) {\n        links.delete(h.relPath);\n        continue;\n      }\n      const link = linkFor(h);\n      link.truncated = file === undefined || file.callsTruncated === true;\n      links.set(h.relPath, link);\n      wrapWork.push({\n',
+    to: '      const link = linkFor(h);\n      link.truncated = file === undefined || file.callsTruncated === true;\n      links.set(h.relPath, link);\n      wrapWork.push({\n',
+    arms: ['publish'],
+    red: 'rule F4',
+    direction: (a) => a.publish !== undefined && a.publish.step3.wrapSubjects.includes('IPC serves facts:s3-injected')
+  }
 ];
 
 /**
@@ -775,6 +880,83 @@ function pinIdentity(got, problems) {
     problems.push(`rule 9: src and test/x.test.ts differ by [${srcOnly.join(' | ')}], and the pinned difference is the two gate.refusal rows and the timer`);
   }
   if (i.oid !== PINNED_OID) problems.push(`rule 9: blobOid reads ${i.oid} and git hash-object printed ${PINNED_OID}`);
+  // PHASE 263. F1: the extractor's own spelling of the same name, which the
+  // directory wall forces to be a separate function, must answer the same
+  // constant. Two readers that disagree make the publication guard meaningless
+  // in one direction and unusable in the other.
+  if (i.symbolOid !== PINNED_OID) {
+    problems.push(`rule F1: symbols/oid.ts reads ${i.symbolOid} for the bytes arch/facts/oid.ts reads ${PINNED_OID}; the two spellings are compared against each other at every publication`);
+  }
+  // F2: and a parse names the bytes it read, over a real file.
+  if (i.parsedOid === null) problems.push('rule F2: extractFile answered null for a file holding one call');
+  else if (i.parsedOid !== i.parsedTruth) {
+    problems.push(`rule F2: extractFile answers oid ${i.parsedOid} for bytes whose blob name is ${i.parsedTruth}`);
+  }
+  if (i.parsedCalls !== 1) problems.push(`rule F2: extractFile read ${i.parsedCalls} call(s) from the one-call file, so the arm is not driving a real parse`);
+}
+
+/**
+ * PHASE 263, rules F3 and F4: the two publication windows, each driven alone
+ * and each with a control.
+ *
+ * Every refusal here is paired with the ask count that proves it refused
+ * SOMETHING. A scenario the pass never took to the parser reads exactly like a
+ * guard working, and a gate that cannot tell those apart is the gate this
+ * phase was written because of.
+ */
+function pinPublish(got, problems) {
+  if (got.publish === undefined) return;
+  const p = got.publish;
+  const window = (label, w, middle, before) => {
+    if (w.asked !== 1) problems.push(`rule F3: the ${label} window asked the parser ${w.asked} time(s), so its refusal refused nothing`);
+    if (w.first.includes(middle)) problems.push(`rule F3: the ${label} window published ${middle}, which no read of the bytes it is keyed on ever saw`);
+    if (w.first.length !== 0) problems.push(`rule F3: the ${label} window published [${w.first.join(' | ')}] and a rejected file publishes nothing`);
+    if (w.linked !== false) problems.push(`rule F3: the ${label} window left the file LINKED, so the next run would not read it`);
+    if (w.reparsed !== 1) problems.push(`rule F3: the ${label} window's next run parsed ${w.reparsed} time(s) and a rejected file must be read again`);
+    if (JSON.stringify(w.afterClean) !== JSON.stringify([before])) {
+      problems.push(`rule F3: the ${label} window's next run read [${w.afterClean.join(' | ')}] and the file holds ${before}`);
+    }
+  };
+  window('worker', p.workerWindow, 'IPC serves facts:w-middle', 'IPC serves facts:w-before');
+  window('reader', p.readerWindow, 'IPC serves facts:r-middle', 'IPC serves facts:r-before');
+  const c = p.control;
+  if (JSON.stringify(c.first) !== JSON.stringify(['IPC serves facts:steady'])) problems.push(`rule F3: the control published [${c.first.join(' | ')}]`);
+  if (c.linked !== true) problems.push('rule F3: the control was left unlinked, so the guards are refusing a steady file');
+  if (c.asked !== 1 || c.reparsed !== 0) problems.push(`rule F3: the control parsed ${c.asked} then ${c.reparsed} time(s); the same bytes at the same path are answered without a parse`);
+  if (JSON.stringify(c.second) !== JSON.stringify(['IPC serves facts:steady'])) problems.push(`rule F3: the control's reuse read [${c.second.join(' | ')}]`);
+  const w1 = p.wrapperRace;
+  if (w1.asked !== 1) problems.push(`rule F4: the wrapper pass's step 1 asked ${w1.asked} time(s), so its refusal refused nothing`);
+  if (w1.decls.length !== 0) problems.push(`rule F4: step 1 cached [${w1.decls.join(', ')}] under an identity whose bytes declare nothing, and those rows are keyed by OID and read by every repository`);
+  if (w1.digest !== null) problems.push(`rule F4: step 1 stamped the link with ${String(w1.digest).slice(0, 12)}…, so the next run would not read the file again`);
+  if (w1.wrapSubjects.includes('IPC serves facts:w1-injected')) problems.push('rule F4: step 1 published a wrapper-only fact of the temporary bytes');
+  const wc = p.wrapperControl;
+  if (JSON.stringify(wc.decls) !== JSON.stringify(['serve'])) problems.push(`rule F4: the wrapper control cached [${wc.decls.join(', ')}] and the file declares serve`);
+  if (wc.digest === null) problems.push('rule F4: the wrapper control was left unstamped, so step 1 is refusing a steady file');
+  if (JSON.stringify(wc.wrapSubjects) !== JSON.stringify(['IPC serves facts:w1-wrapped'])) {
+    problems.push(`rule F4: the wrapper control read [${wc.wrapSubjects.join(' | ')}] through its own declaration`);
+  }
+  const s3 = p.step3;
+  if (s3.asked !== 1) problems.push(`rule F4: step 3 asked ${s3.asked} time(s), so its refusal refused nothing`);
+  if (s3.wrapSubjects.includes('IPC serves facts:s3-injected')) problems.push('rule F4: step 3 kept an answer about bytes step 4 never read');
+  if (!s3.wrapSubjects.includes('IPC serves facts:s3-y2')) problems.push(`rule F4: step 3's control lost the moved file's own wrapper fact: [${s3.wrapSubjects.join(' | ')}]`);
+}
+
+/**
+ * PHASE 263, the scan half of rule F2. The worker message is the seam between
+ * the reader and the publisher, and no probe arm crosses a real thread: the
+ * unit suite's `p263-worker-message.test.ts` does that. What this asks of the
+ * source is the shape that cannot be omitted by accident — REQUIRED, not
+ * optional, and set on the push unconditionally. An optional field lets a
+ * future producer drop it in silence and a publisher that refuses what it
+ * cannot identify would then unlink every file with nobody noticing.
+ */
+export function workerOidProblems(text) {
+  const src = stripComments(text);
+  const out = [];
+  if (/\boid\?\s*:/.test(src)) out.push('IndexedFile declares oid OPTIONAL, and an omitted identity unlinks every file in silence');
+  else if (!/\boid\s*:\s*string\s*;/.test(src)) out.push('IndexedFile declares no required `oid: string`');
+  if (!/\boid\s*:\s*got\.oid\b/.test(src)) out.push('the answering message does not carry `oid: got.oid`');
+  return out;
 }
 
 function pinLimits(got, problems) {
@@ -833,6 +1015,7 @@ function pin(got) {
   pinLimits(got, problems);
   pinStore(got, problems);
   pinSetting(got, problems);
+  pinPublish(got, problems);
   return problems;
 }
 
@@ -945,7 +1128,7 @@ try {
   }
 
   // The probe over the shipping tree and every ablated copy, ONE process.
-  const roots = [{ name: 'shipping', root: join(repoRoot, 'src'), arms: ['fixtures', 'recall', 'symbols', 'identity', 'limits', 'store', 'setting'] }];
+  const roots = [{ name: 'shipping', root: join(repoRoot, 'src'), arms: ['fixtures', 'recall', 'symbols', 'identity', 'limits', 'store', 'setting', 'publish'] }];
   for (const [i, edit] of ABLATIONS.entries()) {
     roots.push({ name: `ablation-${i}`, root: ablatedCopy(join(scratch, `ablation-${i}`), edit), arms: edit.arms });
   }
@@ -980,6 +1163,10 @@ try {
     say(`${TAG} rule 12: absent ${shipping.setting.absent}, "yes" ${shipping.setting.yes}, true ${shipping.setting.trueCase}, seal unmoved ${shipping.setting.sealSame}`);
     say(`${TAG} rule 15: ${shipping.limits.calls} calls with callsTruncated ${shipping.limits.callsTruncated}; a 2 MiB manifest yields ${shipping.limits.bigManifestFacts}; a 305 character subject is cut to ${shipping.limits.longSubject}`);
     say(`${TAG} rule 16: prune ${shipping.store.roundTrip.prunedFirst} then ${shipping.store.roundTrip.prunedSecond}, wrap facts replaced to ${shipping.store.roundTrip.wrapCount}`);
+    say(`${TAG} rule F1: symbols/oid.ts and arch/facts/oid.ts both read ${shipping.identity.symbolOid}; rule F2: extractFile named the bytes it parsed over ${shipping.identity.parsedCalls} call`);
+    const pub = shipping.publish;
+    say(`${TAG} rule F3: the worker window published ${pub.workerWindow.first.length} fact(s) and left the file ${pub.workerWindow.linked ? 'LINKED' : 'unlinked'}; the reader window published ${pub.readerWindow.first.length} and left it ${pub.readerWindow.linked ? 'LINKED' : 'unlinked'}; the control published ${pub.control.first.length} and was reused with ${pub.control.reparsed} parse(s)`);
+    say(`${TAG} rule F4: step 1 cached ${pub.wrapperRace.decls.length} declaration(s) of the racing bytes (the control cached ${pub.wrapperControl.decls.length}); step 3 read [${pub.step3.wrapSubjects.join(' | ')}]`);
   }
 
   // Rule 4 and every other ablation: the copy must run, and the named pin must go red.
@@ -988,6 +1175,11 @@ try {
     let red;
     if (edit.red === 'rule 8') {
       red = purityProblems(readFileSync(join(scratch, `ablation-${i}`, edit.file), 'utf8')).map((p) => `rule 8: oid.ts ${p}`);
+    } else if (edit.sourceScan !== undefined) {
+      // A clause the probe cannot reach, because no arm crosses a real worker
+      // thread. The scan that reads it over the shipping tree reads it over
+      // the ablated copy too, which is what keeps it ablatable at all.
+      red = edit.sourceScan(readFileSync(join(scratch, `ablation-${i}`, edit.file), 'utf8')).map((p) => `${edit.red}: ${p}`);
     } else {
       if (answer === undefined || answer.error !== undefined) {
         fail(`with ${edit.name} ablated, the copy did not run: ${(answer?.error ?? 'no answer').slice(0, 300)}`);
@@ -995,7 +1187,8 @@ try {
       }
       red = pin(answer).filter((p) => p.startsWith(edit.red));
       if (edit.direction !== undefined && !edit.direction(answer)) {
-        fail(`with ${edit.name} ablated, ${edit.red} did not move in the measured direction (${JSON.stringify(answer.recall ?? answer.fixtures?.['ts-electron']?.wrapFacts).slice(0, 200)})`);
+        const shown = answer.recall ?? answer.publish ?? answer.fixtures?.['ts-electron']?.wrapFacts;
+        fail(`with ${edit.name} ablated, ${edit.red} did not move in the measured direction (${String(JSON.stringify(shown)).slice(0, 400)})`);
       }
     }
     if (red.length === 0) {
@@ -1022,6 +1215,11 @@ try {
     fail(`rule 8: ARCH_ARGV_WORDS reads ${JSON.stringify(words)} and the twelve pinned words are ${JSON.stringify(PINNED_WORDS)}; the fact base needs no word of its own`);
   }
   say(`${TAG} rule 8: ${scanDir(factsDir).length} files under src/main/arch/facts/ are pure, tree-facts.ts names no process, ARCH_ARGV_WORDS is the twelve`);
+
+  // Rule F2, the scan half, over the shipping worker message.
+  const workerSource = readFileSync(join(repoRoot, 'src', 'main', 'symbols', 'worker.ts'), 'utf8');
+  for (const p of workerOidProblems(workerSource)) fail(`rule F2: src/main/symbols/worker.ts ${p}`);
+  say(`${TAG} rule F2: IndexedFile declares oid required and the answering message carries it`);
 
   // Rule 10, the SQL scan.
   const dbSource = readFileSync(join(repoRoot, 'src', 'main', 'arch', 'db.ts'), 'utf8');
