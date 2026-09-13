@@ -53,6 +53,22 @@
  *     proved on the fixtures below, because a scan that cannot fail is not a
  *     scan that passed.
  *
+ *  6. THE RUNTIME RANGE IS ONE RANGE, SAID IN THREE FILES (Phase 262). The
+ *     TypeScript checks run on whatever `node` npm found first on PATH, and
+ *     below a measured floor tsx installs an async ESM hook and a separate CJS
+ *     path instead of one synchronous `module.registerHooks()` loader, so
+ *     `import` and `require` reach two instances of every module and two
+ *     copies of every module-level Map. A check then passes or fails for the
+ *     wrong reason. This clause asserts, statically: that
+ *     build/verification-checks.mjs still exports `SUPPORTED_NODE`,
+ *     `nodeIsSupported` and `assertSupportedRuntime`; that
+ *     build/ts-runner.mjs still calls the preflight INSIDE `tsxCli()`, which
+ *     is the one place every TypeScript check resolves its runner; that
+ *     package.json's `engines.node` names the same floors as the table; and
+ *     that `.nvmrc` holds one bare version the table admits, because every CI
+ *     lane reads that file through .github/actions/setup. Its three readers
+ *     are proved on fixtures, for the same reason rules 4 and 5 prove theirs.
+ *
  * Run it with `npm run gate:checks`. It also runs inside `npm run build`, so
  * nothing that builds can skip it.
  */
@@ -61,6 +77,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHECKS, CHECK_TYPES } from './verification-checks.mjs';
+// The namespace too, so clause 6 can say which export is missing rather
+// than dying on a named import before it prints anything.
+import * as verificationChecks from './verification-checks.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const failures = [];
@@ -224,14 +243,16 @@ for (const name of buildScripts) {
  * Measured on 2026-09-09 with the sixteen misplaced imports moved, at 42, and
  * raised to 43 when this phase was rebased onto Phase 242.2, whose
  * `build/probe-p242-2-image.mjs` is the forty third caller, and to 44 by
- * Phase 247, whose `build/conformance-pathdoors.mjs` is the forty fourth. The
- * floor is
+ * Phase 247, whose `build/conformance-pathdoors.mjs` is the forty fourth. It
+ * was read at 47 when Phase 262 arrived — three callers had come in without
+ * the floor following them — and was raised to 48 there, whose
+ * `build/conformance-runtime.mjs` is the forty eighth. The floor is
  * raised in the commit that brings a caller in for the same reason
  * `HELPER_USER_FLOOR` is: adding one can never turn this rule red, so a floor
  * left behind is a floor that would let the new probe be deleted again in
  * silence.
  */
-const RUNNER_CALLER_FLOOR = 44;
+const RUNNER_CALLER_FLOOR = 48;
 if (runnerCallers < RUNNER_CALLER_FLOOR) {
   fail(
     `${String(runnerCallers)} script(s) under build/ call tsxCli() against a ` +
@@ -387,6 +408,202 @@ for (const path of filesUnder(srcDir)) {
 }
 
 // ---------------------------------------------------------------------------
+// 6. One runtime range, said once, and the preflight that refuses below it
+// ---------------------------------------------------------------------------
+
+const runtimeExports = {
+  SUPPORTED_NODE: 'object',
+  nodeIsSupported: 'function',
+  assertSupportedRuntime: 'function'
+};
+let runtimeTableReadable = true;
+for (const [name, kind] of Object.entries(runtimeExports)) {
+  if (typeof verificationChecks[name] === kind) continue;
+  runtimeTableReadable = false;
+  fail(
+    `build/verification-checks.mjs does not export ${name}. The runtime the ` +
+      `checks may run on is declared there and nowhere else, and ` +
+      `build/ts-runner.mjs refuses through it.`
+  );
+}
+
+// 6a. The preflight is called where every TypeScript check passes through.
+// `tsxCli()` is the one place a check resolves its runner, so the question is
+// asked of that function's body and not of the file: a call anywhere else in
+// build/ts-runner.mjs would not be reached by the 40-odd probes that import it.
+const RUNNER_PATH = join(buildDir, 'ts-runner.mjs');
+const PREFLIGHT_CALL = 'assertSupportedRuntime(';
+
+/** The body of `function <name>(...)` in `text`, brace matched, or null. */
+function functionBody(text, name) {
+  const code = codeOnly(text);
+  const at = code.indexOf(`function ${name}(`);
+  if (at < 0) return null;
+  const open = code.indexOf('{', at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    if (code[i] === '{') depth += 1;
+    else if (code[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return code.slice(open, i + 1);
+    }
+  }
+  return null;
+}
+
+const runnerText = readFileSync(RUNNER_PATH, 'utf8');
+const tsxCliBody = functionBody(runnerText, 'tsxCli');
+if (tsxCliBody === null) {
+  fail(
+    'build/ts-runner.mjs no longer declares tsxCli(), so this gate cannot ' +
+      'see whether the runtime preflight is still reached.'
+  );
+} else if (!tsxCliBody.includes(PREFLIGHT_CALL)) {
+  fail(
+    `build/ts-runner.mjs does not call assertSupportedRuntime() inside ` +
+      `tsxCli(). Without it a TypeScript check runs on a Node where the ` +
+      `runner loads two copies of every module: a registration made through ` +
+      `one is invisible to the other, so the check passes or fails for the ` +
+      `wrong reason, and it does so after the probe has already spent its ` +
+      `minutes.`
+  );
+}
+
+// The body reader, proved on three texts, so a reader that stopped finding
+// anything is never mistaken for a preflight that is still there.
+const BODY_FIXTURES = [
+  { why: 'the shipping shape', text: 'export function tsxCli() {\n  assertSupportedRuntime();\n}\n', want: true },
+  { why: 'the call moved out of the function', text: 'assertSupportedRuntime();\nexport function tsxCli() {\n  return 1;\n}\n', want: false },
+  { why: 'the call left only in prose', text: '// assertSupportedRuntime() used to be here\nexport function tsxCli() {\n  return 1;\n}\n', want: false }
+];
+for (const one of BODY_FIXTURES) {
+  const body = functionBody(one.text, 'tsxCli');
+  const found = body !== null && body.includes(PREFLIGHT_CALL);
+  if (found === one.want) continue;
+  fail(
+    `clause 6's body reader got "${one.why}" wrong. It answered ` +
+      `${String(found)}.`
+  );
+}
+
+// 6b. package.json's engines.node says the same thing as the table.
+// npm's language and the table are two spellings of one range, and the point
+// of this clause is that neither can move without the other.
+
+/** The comparator floors of a `^a.b.c || ... || >=x.y.z` string, or null. */
+function enginesFloors(spec) {
+  const parts = String(spec)
+    .split('||')
+    .map((one) => one.trim())
+    .filter((one) => one !== '');
+  if (parts.length === 0) return null;
+  const floors = [];
+  for (let i = 0; i < parts.length; i += 1) {
+    const match = /^(\^|>=)(\d+)\.(\d+)\.(\d+)$/.exec(parts[i]);
+    if (match === null) return null;
+    // Only the last line is open ended; a caret line is closed at its major.
+    if ((match[1] === '>=') !== (i === parts.length - 1)) return null;
+    floors.push([Number(match[2]), Number(match[3]), Number(match[4])]);
+  }
+  return floors;
+}
+
+const declaredRange = pkg.engines?.node;
+if (typeof declaredRange !== 'string' || declaredRange.trim() === '') {
+  fail(
+    'package.json declares no engines.node. The runtime range is declared ' +
+      'there and in build/verification-checks.mjs, and this gate is what ' +
+      'keeps the two the same range.'
+  );
+} else if (runtimeTableReadable) {
+  const floors = enginesFloors(declaredRange);
+  if (floors === null) {
+    fail(
+      `package.json's engines.node reads "${declaredRange}", which this ` +
+        `gate's matcher cannot read. It understands ` +
+        `"^a.b.c || ... || >=x.y.z" only, with exactly one open ended line ` +
+        `last. Widen the matcher deliberately rather than leaving the ` +
+        `agreement unchecked.`
+    );
+  } else if (
+    JSON.stringify(floors) !== JSON.stringify(verificationChecks.SUPPORTED_NODE)
+  ) {
+    fail(
+      `package.json's engines.node reads "${declaredRange}", and ` +
+        `build/verification-checks.mjs's SUPPORTED_NODE reads ` +
+        `${JSON.stringify(verificationChecks.SUPPORTED_NODE)}. They are one ` +
+        `range in two languages and they disagree. The table is tsx's own ` +
+        `and is the measurement; change engines to match it, or re-measure ` +
+        `with npm run conformance:runtime.`
+    );
+  }
+}
+
+// The matcher, proved on four strings, two of which must be refused.
+const RANGE_FIXTURES = [
+  { why: 'the shipping string', text: '^22.22.3 || ^24.11.1 || ^25.1.0 || >=26.0.0', want: '[[22,22,3],[24,11,1],[25,1,0],[26,0,0]]' },
+  { why: 'a single open ended line', text: '>=22.0.0', want: '[[22,0,0]]' },
+  { why: 'an open ended line that is not last', text: '>=22.0.0 || ^24.11.1', want: null },
+  { why: 'a range npm allows and this matcher must refuse rather than pass', text: '>=22.22.3 <23', want: null }
+];
+for (const one of RANGE_FIXTURES) {
+  const got = enginesFloors(one.text);
+  const seen = got === null ? null : JSON.stringify(got);
+  if (seen === one.want) continue;
+  fail(
+    `clause 6's engines matcher got "${one.why}" wrong. It answered ` +
+      `${String(seen)}.`
+  );
+}
+
+// 6c. .nvmrc names a version inside the range.
+// This is the clause that binds the three files: every CI lane reaches
+// actions/setup-node through .github/actions/setup, which reads this file, so
+// a version outside the range would send every lane to a runtime the checks
+// refuse — and it would do it silently, because nothing else compares them.
+let nvmrcVersion = null;
+try {
+  const raw = readFileSync(join(repoRoot, '.nvmrc'), 'utf8');
+  const lines = raw.split('\n');
+  const body = lines.filter((line) => line.trim() !== '');
+  if (body.length !== 1) {
+    fail(
+      `.nvmrc holds ${String(body.length)} non-empty lines. It holds exactly ` +
+        `one, the bare version, because it has no comment syntax every ` +
+        `consumer honours.`
+    );
+  } else {
+    nvmrcVersion = body[0].trim();
+    if (nvmrcVersion !== body[0]) {
+      fail(`.nvmrc's line is "${body[0]}"; it carries surrounding whitespace.`);
+    }
+    if (/^v/.test(nvmrcVersion)) {
+      fail(
+        `.nvmrc reads "${nvmrcVersion}". Write the bare version with no v ` +
+          `prefix; a prefix is a routine cause of a silent CI fallback to the ` +
+          `runner image's own Node.`
+      );
+    }
+  }
+} catch {
+  fail(
+    '.nvmrc is missing. It names the one version this repository develops ' +
+      'against, every CI lane reads it through .github/actions/setup, and ' +
+      'without it the lanes run on whatever Node the runner image ships.'
+  );
+}
+if (nvmrcVersion !== null && runtimeTableReadable) {
+  if (!verificationChecks.nodeIsSupported(nvmrcVersion)) {
+    fail(
+      `.nvmrc names ${nvmrcVersion}, which is outside ` +
+        `${verificationChecks.supportedNodeRange()}. Every CI lane reads that ` +
+        `file, so every lane would run on a Node the TypeScript checks refuse.`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 
@@ -408,6 +625,13 @@ process.stdout.write(
     `with 4 of 4 reader fixtures behaving, and ${testFilesScanned} test ` +
     `files reach no home past HOME (${HOME_FIXTURES.length} scanner fixtures, ` +
     `${HOME_FIXTURES.filter((f) => f.caught).length} of which must be caught).\n`
+);
+process.stdout.write(
+  `  the runtime range is one range: engines.node "${String(declaredRange)}", ` +
+    `SUPPORTED_NODE ${JSON.stringify(verificationChecks.SUPPORTED_NODE)} and ` +
+    `.nvmrc ${String(nvmrcVersion)}, with tsxCli() calling the preflight ` +
+    `(${String(BODY_FIXTURES.length)} body fixtures and ` +
+    `${String(RANGE_FIXTURES.length)} range fixtures behaving).\n`
 );
 for (const type of [...CHECK_TYPES, 'aggregate']) {
   const n = counts.get(type) ?? 0;

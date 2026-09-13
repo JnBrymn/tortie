@@ -7,6 +7,9 @@
   "main": "./out/main/index.js",
   "author": "Ita Vero, LLC",
   "license": "Apache-2.0",
+  "engines": {
+    "node": "^22.22.3 || ^24.11.1 || ^25.1.0 || >=26.0.0"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build && node build/assert-bundle-refusals.mjs && node build/assert-preview-containment.mjs && node build/assert-probe-containment.mjs && node build/assert-css-order.mjs && node build/assert-electron-teardown.mjs && node build/assert-background-teardown.mjs && node build/assert-known-hosts-scoped.mjs && node build/assert-tab-floor.mjs && node build/assert-menu-glyphs.mjs && node build/assert-menu-accelerators.mjs && node build/assert-hermetic-checks.mjs && node build/contract-inventory.mjs --check",
@@ -161,6 +164,7 @@
     "smoke:remote": "npm run build && node build/harness-socket.mjs --fresh gmux-p70-remote 'export GMUX_CONFIG_ROOT=\"${GMUX_CONFIG_ROOT:-$GMUX_HARNESS_DIR}\"; node build/with-scratch-machine.mjs -- GMUX_SMOKE=remote-sessions electron . --user-data-dir=$GMUX_CONFIG_ROOT/profile -ApplePersistenceIgnoreState YES'",
     "smoke:execplane": "npm run build && node build/harness-socket.mjs --fresh gmux-p69-exec 'GMUX_CONFIG_ROOT=\"${GMUX_CONFIG_ROOT:-$GMUX_HARNESS_DIR}\" GMUX_SMOKE=exec-plane electron . --user-data-dir=\"${GMUX_CONFIG_ROOT:-$GMUX_HARNESS_DIR}/profile\" -ApplePersistenceIgnoreState YES'",
     "goldens:machines": "node build/capture-machine-goldens.mjs",
+    "conformance:runtime": "node build/conformance-runtime.mjs",
     "conformance:agents": "node build/conformance-agents.mjs",
     "conformance:machines": "node build/conformance-machines.mjs",
     "conformance:remoteclose": "vitest run src/main/machines/__tests__/remote-close.test.ts",

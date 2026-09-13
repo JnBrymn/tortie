@@ -69,6 +69,10 @@ jobs:
             echo "::error::missing required secrets:$missing"
             exit 1
           fi
+      # The composite sets up Node before any step that runs it. The version
+      # check below shells out to node, so it must not run on whatever the
+      # runner image happens to ship.
+      - uses: ./.github/actions/setup
       - name: The tag and package.json must agree on the version
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
@@ -77,7 +81,6 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
             exit 1
           fi
-      - uses: ./.github/actions/setup
       - name: Cache the electron-builder toolsets (dmg-builder, 96 MB)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

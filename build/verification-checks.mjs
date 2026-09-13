@@ -36,7 +36,134 @@
  *
  * `aggregate` is not a sixth type. It marks a script that only runs other
  * classified checks, and its members are named so the gate can follow them.
+ *
+ * ## The runtime the checks are allowed to run on (Phase 262)
+ *
+ * Every check in the table below runs on whatever `node` npm found first on
+ * PATH, and below a measured floor the TypeScript ones load two copies of
+ * every module. `SUPPORTED_NODE` and `assertSupportedRuntime()` below are the
+ * refusal that stops them.
+ *
+ * The split is NOT Node's own behaviour. It is tsx 4.23.12's feature gate:
+ * `node_modules/tsx/dist/register-C4vWVmug.mjs` installs ONE synchronous
+ * `module.registerHooks()` loader, serving the import path and the require
+ * path from a single instance, only when `module.registerHooks` exists and
+ * tsx's own `moduleRegisterHooks` table admits the running version. When it
+ * does not, tsx falls back to the async `module.register()` ESM hook plus a
+ * separate CJS path, which is two loaders, two module instances and two
+ * copies of every module-level Map. A registration made through one is then
+ * invisible to the other and a check can pass for the wrong reason.
+ *
+ * `SUPPORTED_NODE` IS TSX'S OWN TABLE, copied from
+ * `node_modules/tsx/dist/node-features-JeyyvQz6.mjs`, and `nodeIsSupported()`
+ * is tsx's own predicate re-derived: each row is matched on its major, and the
+ * LAST row is the catch-all every higher major falls through to. On 2026-09-13
+ * the prediction was checked against the registry fixture
+ * `build/p262-registry-loader.mts` on five real runtimes and agreed 5 of 5:
+ * 20.18.3 and 22.14.0 split the registry, 22.23.1, 24.20.0 and 26.8.2 did not.
+ *
+ * A TSX UPGRADE CAN MOVE THIS TABLE, AND THIS FILE MUST BE RE-MEASURED WHEN
+ * TSX MOVES. `npm run conformance:runtime` is the measurement: it runs the
+ * fixture under every Node it finds on the machine and asserts the prediction
+ * matches each one's outcome. `npm run gate:checks` clause 6 is what keeps
+ * this table, `package.json`'s `engines.node` and `.nvmrc` saying one thing.
  */
+
+import { readFileSync } from 'node:fs';
+
+/**
+ * The per-line floors, as a table rather than a semver string, because this
+ * file may not gain a dependency and a string would need a parser. It is
+ * tsx's own `moduleRegisterHooks` table; see the header. `package.json`'s
+ * `engines.node` says the same thing in npm's language, and `gate:checks`
+ * clause 6 compares the two so neither can drift.
+ */
+export const SUPPORTED_NODE = [
+  [22, 22, 3],
+  [24, 11, 1],
+  [25, 1, 0],
+  [26, 0, 0]
+];
+
+/** `[major, minor, patch]`, or null when the string is not a version. */
+function parseVersion(version) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version).trim());
+  if (match === null) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Is `parts` at or above `floor`? */
+function atLeast(parts, floor) {
+  for (let i = 0; i < 3; i += 1) {
+    if (parts[i] !== floor[i]) return parts[i] > floor[i];
+  }
+  return true;
+}
+
+/**
+ * Can this Node run the TypeScript checks without splitting every module in
+ * two? tsx's own predicate: the first row whose major matches decides, and the
+ * last row is the catch-all every higher major falls through to, so 23.x and
+ * 25.0.x are refused while 27 and above are admitted.
+ */
+export function nodeIsSupported(version = process.versions.node) {
+  const parts = parseVersion(version);
+  if (parts === null) return false;
+  for (let i = 0; i < SUPPORTED_NODE.length; i += 1) {
+    const floor = SUPPORTED_NODE[i];
+    if (i === SUPPORTED_NODE.length - 1 || parts[0] === floor[0]) {
+      return atLeast(parts, floor);
+    }
+  }
+  return false;
+}
+
+/** The table written in npm's language, e.g. `^22.22.3 || ... || >=26.0.0`. */
+export function supportedNodeRange() {
+  return SUPPORTED_NODE.map((floor, i) => {
+    const prefix = i === SUPPORTED_NODE.length - 1 ? '>=' : '^';
+    return `${prefix}${floor[0]}.${floor[1]}.${floor[2]}`;
+  }).join(' || ');
+}
+
+/** The version `.nvmrc` names, or null when it cannot be read. */
+function nvmrcVersion() {
+  try {
+    const text = readFileSync(new URL('../.nvmrc', import.meta.url), 'utf8');
+    const first = text.trim();
+    return first === '' ? null : first;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refuse, before an expensive probe starts, when the runtime npm actually
+ * invoked cannot run the TypeScript checks. `build/ts-runner.mjs` calls this
+ * as the first statement of its `tsxCli` function, which is the one place every
+ * TypeScript check resolves its runner, so one call reaches all of them.
+ *
+ * The sentence names the version found, the range, and the files that decide
+ * it. It never prints a path under the person's home and never prints
+ * `process.env`.
+ */
+export function assertSupportedRuntime(version = process.versions.node) {
+  if (nodeIsSupported(version)) return;
+  const pinned = nvmrcVersion();
+  const lines = [
+    `Node ${version} cannot run Tortie's TypeScript checks.`,
+    `They need ${supportedNodeRange()}.`,
+    'Below those lines the TypeScript runner loads two copies of every ' +
+      'module, so a registration made through one is invisible to the other ' +
+      'and a check can pass for the wrong reason.',
+    pinned === null
+      ? '.nvmrc names the version this repository is verified on.'
+      : `.nvmrc names ${pinned}, the version this repository is verified on.`,
+    "The range is declared in package.json's engines field and in " +
+      'build/verification-checks.mjs.'
+  ];
+  throw new Error(lines.join(' '));
+}
 
 export const CHECK_TYPES = [
   'pure contract or state test',
@@ -118,6 +245,15 @@ export const CHECKS = [
 
   // Static conformance gates. Every one runs from node and the lockfile
   // install alone, through the pinned tsx runner in build/ts-runner.mjs.
+  //
+  // Phase 262. The runtime that runner is allowed to run on:
+  // build/conformance-runtime.mjs runs the committed registry regression
+  // build/p262-registry-loader.mts under the pinned tsx on every Node it
+  // finds already installed on the machine, and asserts SUPPORTED_NODE above
+  // predicts each one's outcome. It installs nothing, launches no Electron,
+  // starts no tmux server and opens no ssh; a Node line this machine does not
+  // have is reported and skipped rather than failed.
+  pure('conformance:runtime'),
   pure('conformance:agents'),
   // Phase 242.2. It stays `pure`: condition 88g runs the shipping image-put
   // text under /bin/sh, synchronously, over a scratch directory it removes in

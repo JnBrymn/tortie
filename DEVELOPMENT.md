@@ -28,9 +28,15 @@ Architecture authority: [`docs/audits/2026-08-20-electron-typescript-architectur
 
 ## Dev quickstart
 
-Requirements: macOS (arm64), Node 22+, Xcode Command Line Tools (for native
-module builds and for compiling the bundled tmux), `pkg-config`, and `git` on
-PATH.
+Requirements: macOS (arm64), Node 22.22.3+ (or 24.11.1+, 25.1.0+, 26+ —
+`.nvmrc` names 22.23.1, the version the checks are verified on), Xcode
+Command Line Tools (for native module builds and for compiling the bundled
+tmux), `pkg-config`, and `git` on PATH.
+
+Outside that range the TypeScript checks load two copies of every module, so
+a registration made through one is invisible to the other and a check can
+pass for the wrong reason. They refuse instead, with a sentence naming the
+Node they found and the range they need.
 
 A system `tmux` (3.6 or newer, `brew install tmux`) is needed to run
 `npm run dev` and the harnesses, because a development build resolves tmux from
