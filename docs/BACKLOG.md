@@ -27097,6 +27097,50 @@ internal `given` path; if opencode ships one as a CLI flag later, opencode becom
 arm-at-launch agent in a follow-up. No model or provider driven on opencode's behalf. No token byte of
 `auth.json` read, logged or copied.
 
+## Phase 268 — auto save, through the guarded door (issue 24, JnBrymn, 2026-09-14)
+
+**Subject.** `feat(editor): save on a delay, when you ask for it`
+
+**First body line.** `Phase 268: auto save, through the guarded door`
+
+**Semver.** Minor. A new, default-off editor behaviour.
+
+**Tier 3.** It writes a person's files ON A TIMER, on a machine where agents write the same files
+concurrently, and the failure it risks is the one that already cost 173 bytes of somebody's
+paragraph (issue 16, research 100 §1). Evidence is a real app run with a real concurrent writer,
+plus `conformance:save` green with an ablation proving the gate still catches an unguarded
+auto-write.
+
+**Charter.** [Issue 24](https://github.com/gregce/tortie/issues/24) and
+[research 122](research/122-issue-24-auto-save.md), which is the spec and was read from VS Code's
+own source at the operator's checkout (`/Users/gdc/vscode`, `770a9bced0e`) at his instruction to
+"check what vscode does".
+
+**The mechanism, from research 122.** A setting in VS Code's own vocabulary — `off` (THE DEFAULT),
+`afterDelay`, `onFocusChange`, and a delay defaulting to 1000 ms — with the toggle at File > Auto
+Save (`src/main/menu.ts:637`; CLAUDE.md requires the native menus to move in the same commit) and the
+fuller choice in Settings beside the other editor preferences. **Auto save takes `fs:writeGuarded`,
+the same door ⌘S takes** (`src/renderer/editor/tab-io.ts`, `save-write.ts`) — no new write path and
+no unguarded fallback. On a guarded refusal the tab STAYS DIRTY, auto save STOPS for that tab, and
+the sentence from `save-sentences.ts` is shown ONCE rather than once per tick; only an explicit ⌘S,
+with its existing never-default re-checked Overwrite, moves forward. That is VS Code's own rule at
+`textFileEditorModel.ts:751-753` ("do not save unless save reason is explicit"), and Tortie's
+`savedContents` digest plays the part VS Code's etag plays. The skip list is VS Code's
+`editorAutoSave.ts:151` ("no auto save for non-dirty, readonly or untitled editors") plus Tortie's
+own: never a file outside every open project root, because `save` deliberately keeps the unguarded
+`fs:writeFile` there (`tab-io.ts:37`).
+
+**The proof, run rather than read.** One app run: a file open and dirty in Tortie, an agent-style
+write landing on disk underneath it, and auto save proving it refused, stopped for that tab, and said
+so ONCE. Plus `conformance:save` green, with an ablation that routes auto save through the unguarded
+door and shows the gate goes RED. Phase 260's per-project tab rules, the redline and the rewind
+journal all key off saved state, so the run drives them rather than reasoning about them.
+
+**What is NOT in this phase.** No `files.saveConflictResolution` equivalent and no unguarded
+auto-write anywhere — that is the escape hatch issue 16 is about. No auto save for out-of-project
+files. No format-on-save or fix-on-save. No per-language override. No change to ⌘S, its Overwrite, or
+any refusal sentence. No hot-exit / unsaved-state-across-restart, which Tortie does not have.
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
