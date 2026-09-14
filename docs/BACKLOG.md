@@ -27141,6 +27141,79 @@ auto-write anywhere — that is the escape hatch issue 16 is about. No auto save
 files. No format-on-save or fix-on-save. No per-language override. No change to ⌘S, its Overwrite, or
 any refusal sentence. No hot-exit / unsaved-state-across-restart, which Tortie does not have.
 
+## Phase 269 — the shell variables an agent needs, where you already set how it launches (issue 20, JnBrymn, 2026-09-14)
+
+**Subject.** 
+
+**First body line.** 
+
+**Semver.** Minor. A new per-agent control; nothing changes for anyone who does not use it.
+
+**Tier 3.** It decides which of a person's shell variables — API keys among them — are handed to a
+spawned process, and the values are resolved from a login shell at every launch. Two independent
+methods, one an attack: a live run proving a named variable reaches the pane and appears in NO
+manifest row, NO tmux server environment and NO log; and an attack on the SEAL, proving a
+passthrough name written straight into  (as any agent on the machine could) is
+refused on read.
+
+**Charter.** [Issue 20](https://github.com/gregce/tortie/issues/20) and
+[research 123](research/123-issue-20-session-environment.md), which measured the whole chain. Phase
+33 and [research 41](research/41-pi-env-providers.md) built the mechanism; this phase is only about
+reaching it.
+
+**What research 123 found, and it is our defect not his.** His title is false in the good direction:
+a pane's parent is the private tmux server and the server's parent is launchd, with Tortie nowhere in
+the ancestry, so the independence he asked for already exists. The real fault is that **Phase 33
+shipped  and no compiled agent row sets it, so it is inert on every machine in
+the world** —  is a type declaration with nothing behind it. The 
+notice that would have explained his failure is guarded on a row already naming a variable, and
+ returns  when there is no , deliberately, so a person with no
+config file is shown nothing at all. He got pi's own model error and silence from us.
+
+**The mechanism, and it is mostly assembly.** The names move OUT of  — that file is the
+user's and  says Tortie never writes it, which stays true — and into
+Tortie's own settings beside the launch flags they are a sibling of. 
+already draws "one group card per launchable agent, detected agents first" with a confirm-once modal,
+so this is one more control in a card that already exists rather than a new surface; that is also why
+it does not clutter the fourteen agents nobody will use it for. Underneath, nothing is rebuilt:
+ () resolves the values per launch and per restore,
+ () is still the one merge rule with the GMUX stamps
+last, and the manifest keeps names only.  remains the power-user route and keeps working.
+
+**THE SEAL IS NOT OPTIONAL.** 's header records why the danger presets are
+sealed by main on write and checked on read: *"A value that turns a safeguard off cannot arrive from
+an edit to settings.json, which any agent running on the machine could make."* A passthrough name is
+exactly that class — an agent that could append a name to another agent's list could read a key it
+was never given. The names are sealed the same way (, "The danger seal")
+and a name that arrives unsealed is refused, not honoured.
+
+**The delight, which is the point of the phase.** The empty state is one quiet line, not a lecture:
+this agent gets  and , name anything else it needs. Adding a name OFFERS the names the
+person's own login shell exports so they pick rather than type and hunt docs — **names only, never a
+value, never a length**. The confirm-once modal names the variable in the shape it already uses for a
+preset. And the failure he actually hit becomes loud: a named variable that is unset at launch
+surfaces the existing  notice naming it, so silence is no longer a possible outcome.
+
+**The proof, run rather than read.** One app run: name a test variable for an agent, launch, and read
+it INSIDE the pane; then read , the manifest row and the logs
+and find it in none of them. Rotate the value in the scratch shell profile, start a second session,
+and read the NEW value without restarting Tortie or the server — which is the thing he was trying to
+achieve by restarting. The attack: write a passthrough name directly into  and prove
+the read refuses it.  gains the seal and the hash assertions;
+ stays green.
+
+**What is NOT in this phase.** No change to the process model, and no session spawned outside the
+tmux server — the independence already exists and the server's lifetime is the durability design. No
+injection into the tmux server environment, ever (research 41's refusal: keys readable by every pane
+and every same-user process, and an agent that edits  changing every session's credentials
+with no confirm). No login-shell wrapping of agent launches. **No variable passed through by
+default, for any agent** — naming one stays a decision a person confirms. Tortie still never writes
+. PR #21 is not merged; its  change never reaches pi at all (
+is called only on the shell branch, ), it measured 68 ms to 1714 ms
+on the harness shells and turned four tests red including a restored session coming back on a
+different command. The one line of it worth having — expanding  inside PATH ENTRIES rather than
+only the binary path — is a separate small entry, not this one.
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
