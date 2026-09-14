@@ -78,6 +78,14 @@ export interface TreeRenameResult {
   opsCreated: number;
   /** The refusal under the create editor, or null when the name is fine. */
   nameError: TreeNameError | null;
+  /**
+   * ISSUE 22 / PHASE 267. True while a create has a placeholder row open in the
+   * model. Model-driven (rises when the placeholder is added, falls when it is
+   * settled or removed), so FileTree can hide the empty-folder hint under the
+   * row rather than letting the hint cover it. It is NOT `rootEmpty`, which is
+   * fed-based and stays true through a create.
+   */
+  createPending: boolean;
 }
 
 export function useTreeRename({
@@ -191,6 +199,11 @@ export function useTreeRename({
   const nameErrorShownRef = useRef(false);
   nameErrorShownRef.current = nameError !== null;
 
+  // ISSUE 22 / PHASE 267. The empty-folder hint in FileTree hides the moment a
+  // create places its placeholder row, driven off the model rather than the
+  // fed listing (see TreeRenameResult.createPending).
+  const [createPending, setCreatePending] = useState(false);
+
   /** The verdict on the pending create's current text, or null when idle. */
   const pendingVerdict = useCallback((): EntryNameVerdict | null => {
     const pendingPath = opsRef.current?.pendingPath() ?? null;
@@ -259,7 +272,14 @@ export function useTreeRename({
   // Hide (or re-place) the reason when the editor closes or the rows move —
   // every one of those emits on the model.
   useEffect(() => {
+    // ISSUE 22 / PHASE 267. Read the pending placeholder once on subscribe so a
+    // create already in flight when this effect re-runs is reflected, then keep
+    // it in step on every model emit — the placeholder is added on create and
+    // removed on Esc / empty commit / a real create, so the flag rises and
+    // falls with the row, no polling.
+    setCreatePending(opsRef.current?.pendingPath() != null);
     const unsubscribe = model.subscribe(() => {
+      setCreatePending(opsRef.current?.pendingPath() != null);
       queueMicrotask(() => {
         if (nameErrorShownRef.current) refreshNameError();
       });
@@ -285,5 +305,5 @@ export function useTreeRename({
     };
   }, [nameErrorShown, treeShadow, refreshNameError]);
 
-  return { opsCreated, nameError };
+  return { opsCreated, nameError, createPending };
 }

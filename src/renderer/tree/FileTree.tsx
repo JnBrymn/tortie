@@ -216,7 +216,7 @@ export function FileTree({
     sanctionUntilRef
   } = bridge;
 
-  const { opsCreated, nameError } = useTreeRename({
+  const { opsCreated, nameError, createPending } = useTreeRename({
     rootPath,
     remote,
     remoteWriteRoot,
@@ -666,13 +666,28 @@ export function FileTree({
   const emptyLine =
     remote === null ? 'This folder is empty.' : remoteEmptyLine(remote.label);
 
+  /**
+   * ISSUE 22 / PHASE 267. The tree — and thus the inline-rename adapter the
+   * one create flow needs — is mounted even at zero rows, so a New File create
+   * can place its placeholder row and the user can type a name. The empty line
+   * is a sibling HINT of the mounted tree rather than a replacement for it, and
+   * it shows only when the folder is genuinely empty, no filter is open, and no
+   * create is pending. `createPending` (a model-driven flag from useTreeRename)
+   * hides the hint the instant a placeholder row appears, so it never covers
+   * the row; Esc restores it. `rootEmpty` alone cannot do this — it is derived
+   * from the fed listing and stays true through a create (the placeholder is a
+   * model-only row).
+   */
+  const emptyHint = rootEmpty && !search.isOpen && !createPending;
+
   return (
     <div
       className={
         'files-tree' +
         (rootArmed ? ' root-drop' : '') +
         (importWholeBox && importHover?.refused !== true ? ' import-drop' : '') +
-        (importHover?.refused === true ? ' import-refused' : '')
+        (importHover?.refused === true ? ' import-refused' : '') +
+        (emptyHint ? ' is-empty' : '')
       }
       ref={hostRef}
       onDragStart={onDragStart}
@@ -681,19 +696,18 @@ export function FileTree({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
     >
-      {rootEmpty && !search.isOpen ? (
-        <div className="section-stub">{emptyLine}</div>
-      ) : (
-        <PierreTree
-          model={model}
-          style={hostStyle}
-          onClick={onClick}
-          onDoubleClick={onDoubleClick}
-          onKeyDown={onKeyDown}
-          onContextMenu={onContextMenu}
-          aria-label="Project files"
-        />
-      )}
+      <PierreTree
+        model={model}
+        style={hostStyle}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        onKeyDown={onKeyDown}
+        onContextMenu={onContextMenu}
+        aria-label="Project files"
+      />
+      {emptyHint ? (
+        <div className="files-tree-empty">{emptyLine}</div>
+      ) : null}
       {importBox !== null ? (
         <div
           className="files-import-target"

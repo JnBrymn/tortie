@@ -220,6 +220,88 @@ describe('the editor opens empty, and nothing exists yet', () => {
   });
 });
 
+describe('issue 22: New File at an EMPTY project root', () => {
+  // The bug: in a completely empty project the create button did nothing and
+  // toasted "Could not start a new item here." The tree (and its inline-rename
+  // adapter) was UNMOUNTED at zero rows, so renameView() was null. These pin
+  // the create-at-empty-root contract the render fix restores: with the adapter
+  // present a create at '' reaches the inline editor; with it absent it refuses.
+  it('adapter present, empty root: reaches the inline editor, no toast', () => {
+    const rig = makeRig();
+    // Empty root: no siblings, so the seed is the bare unique name at ''.
+    rig.ops.newEntry('', 'file');
+    expect(rig.rows.has('untitled')).toBe(true); // placeholder row placed
+    expect(rig.view.path).toBe('untitled'); // startRenaming reached the editor
+    expect(rig.view.value).toBe(''); // opened empty, ready to type
+    expect(rig.ops.pendingPath()).toBe('untitled');
+    expect(h.toast).not.toHaveBeenCalled();
+    expect(createCalls()).toBe(0);
+  });
+
+  it('pending is set BEFORE the model emits, so the createPending guard is reactive', () => {
+    // The empty-folder hint hides off `createPending`, which use-tree-rename
+    // recomputes from ops.pendingPath() inside a model.subscribe callback —
+    // and the only emits during a create are the ones model.add and
+    // startRenaming fire. If `pending` were assigned AFTER those calls, both
+    // emits would read pendingPath() === null, createPending would never rise,
+    // and the hint would cover the placeholder row (issue 22 / Phase 267,
+    // the verifier's Finding 1). Pin that pendingPath() is already the
+    // placeholder DURING both mutations.
+    const view = makeView();
+    const rows = new Set<string>();
+    let ops: TreeOps | null = null;
+    const seenDuringAdd: (string | null)[] = [];
+    const seenDuringStart: (string | null)[] = [];
+    const model = {
+      add: (path: string) => {
+        rows.add(path);
+        seenDuringAdd.push(ops?.pendingPath() ?? null);
+      },
+      remove: (path: string) => {
+        rows.delete(path);
+      },
+      getItem: (path: string) => (rows.has(path) ? ({} as never) : null),
+      startRenaming: (path: string) => {
+        view.path = path;
+        view.value = path.split('/').pop() ?? '';
+        seenDuringStart.push(ops?.pendingPath() ?? null);
+        return true;
+      },
+      batch: vi.fn(),
+      resetPaths: vi.fn(),
+      focusPath: vi.fn(),
+      getSelectedPaths: () => [] as string[]
+    };
+    const ctx: TreeOpsContext = {
+      rootPath: '/repo',
+      model: model as unknown as TreeOpsContext['model'],
+      readFed: () => new Set<string>(),
+      writeFed: () => {},
+      hold: () => () => {},
+      renameView: () => view,
+      selectOnly: vi.fn()
+    };
+    ops = createTreeOps(ctx);
+    ops.newEntry('', 'file');
+    expect(seenDuringAdd).toEqual(['untitled']);
+    expect(seenDuringStart).toEqual(['untitled']);
+  });
+
+  it('adapter absent (the bug shape): toasts and never opens the editor', () => {
+    const rig = makeRig();
+    rig.viewMissing.value = true; // renameView() === null, as when unmounted
+    rig.ops.newEntry('', 'file');
+    expect(rig.view.path).toBeNull(); // startRenaming never reached
+    expect(rig.rows.size).toBe(0);
+    expect(rig.ops.pendingPath()).toBeNull();
+    expect(h.toast).toHaveBeenCalledWith(
+      'error',
+      'Could not start a new item here.'
+    );
+    expect(createCalls()).toBe(0);
+  });
+});
+
 describe('every no-create exit really creates nothing', () => {
   it('Escape: the library removed the row; settle frees the gesture', () => {
     const rig = makeRig();

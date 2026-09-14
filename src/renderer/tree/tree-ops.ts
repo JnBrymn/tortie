@@ -1021,9 +1021,17 @@ export function createTreeOps(ctx: TreeOpsContext): TreeOps {
       // the row while its name is being typed; the hold below is the other.
       pendingRelease?.();
       pendingRelease = ctx.hold([placeholder]);
+      // ISSUE 22 / PHASE 267. `pending` is set BEFORE the model mutations, so
+      // the emits `add` and `startRenaming` fire are read by use-tree-rename's
+      // `model.subscribe` with `pendingPath()` already pointing at the
+      // placeholder — that is what makes `createPending` rise and the
+      // empty-folder hint step aside for the row rather than covering it.
+      // Every failure path below clears it again before it returns.
+      pending = { placeholder, kind };
       try {
         ctx.model.add(placeholder);
       } catch {
+        pending = null;
         pendingRelease();
         pendingRelease = null;
         app().toast('error', 'Could not start a new item here.');
@@ -1035,9 +1043,9 @@ export function createTreeOps(ctx: TreeOpsContext): TreeOps {
         // needs a path that collides with nothing); the user never sees it
         // as text.
         view.setValue('');
-        pending = { placeholder, kind };
         return;
       }
+      pending = null;
       ctx.model.remove(placeholder, { recursive: kind === 'dir' });
       pendingRelease();
       pendingRelease = null;

@@ -12,6 +12,7 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 ### Fixed
 
+- Creating a file or folder in a brand-new empty project now works from the New File and New Folder buttons. It used to do nothing and show an error until the folder already had a file in it.
 - Splitting and closing terminals over a long session no longer leaves memory behind. Each pane's scheduled redraw and its cursor blink now stop the moment the pane goes away, so the app stays as light after a day of rearranging panes as it was at launch.
 
 ## 0.104.0 (2026-09-12)

@@ -71,6 +71,30 @@
   min-height: 0;
 }
 
+/* THE EMPTY-FOLDER HINT (issue 22 / Phase 267). The tree (and thus the inline
+   rename adapter the create flow needs) is mounted even at zero rows; this
+   line is a SIBLING of it, not a replacement, so a New File create can place
+   its placeholder row in the mounted tree and the hint steps aside for it
+   (FileTree gates both this line and .is-empty on rootEmpty && !search.isOpen
+   && !createPending). The line sits just under the always-present filter
+   field, where the first row would be. pointer-events: none so the empty
+   space below stays the root drop target. */
+.files-tree.is-empty > file-tree-container {
+  /* Shrink to the filter field + zero rows so the hint follows it, rather than
+     being pushed to the bottom by the flex-fill container. .is-empty is dropped
+     the instant a placeholder row appears or the folder gains a row, so the
+     container returns to flex: 1. */
+  flex: 0 0 auto;
+}
+
+.files-tree-empty {
+  padding: var(--space-3) var(--space-2) var(--space-5);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
 /* ROOT DROP TARGET (Phase 12.9 item 3). Pierre only offers the project root
    through a top-level FILE row; the empty space below the rows is where
    anyone actually aims, so the whole viewport takes the accent ring the row
