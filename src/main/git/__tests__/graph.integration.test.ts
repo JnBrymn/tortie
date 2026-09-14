@@ -20,7 +20,14 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+
+// Every test here drives REAL git (init, clone, commit) on a temporary
+// repository, so its cost is the machine's, not the code's. Vitest's 5 s
+// default is tight enough that a loaded CI runner trips it — the release
+// lane failed a signed build on exactly that. The work is unchanged; only
+// the patience is.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 import { GitService } from '../service';
 import { git, isolateGitConfig, makeRepo as makeHarnessRepo } from './harness';
 

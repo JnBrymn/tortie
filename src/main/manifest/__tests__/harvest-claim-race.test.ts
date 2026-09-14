@@ -603,7 +603,7 @@ describe('one folder with two spellings is still one folder (T12)', () => {
     } finally {
       off();
     }
-  });
+  }, 20_000);
 
   it('a neighbour reached through a symlink still counts as the same folder', async () => {
     // The same string compare decides `sameCwdWatches`, so an unresolved

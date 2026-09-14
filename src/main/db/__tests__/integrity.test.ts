@@ -501,12 +501,16 @@ describe('openGmuxDatabase, with the gate in front of it', () => {
   it('costs a fraction of a millisecond on a healthy manifest-sized file', () => {
     // Research 34 §3.2 measured 0.0412 ms for `integrity_check` on the real 40
     // session manifest. This asserts the order of magnitude rather than the
-    // number, because a shared machine's timings are not repeatable.
+    // number, because a shared machine's timings are not repeatable. The
+    // ceiling is 200 ms rather than 20: the real cost is 0.0412 ms and the
+    // pathological one this guards against is 873 ms on a 60 MB index, so
+    // 200 still catches a real regression by a wide margin while a loaded
+    // runner's scheduling spike no longer fails a signed release build.
     const path = build('timed.db', 40);
     const started = process.hrtime.bigint();
     for (let i = 0; i < 20; i++) checkDatabaseIntegrity(path);
     const each = Number(process.hrtime.bigint() - started) / 1e6 / 20;
-    expect(each).toBeLessThan(20);
+    expect(each).toBeLessThan(200);
     expect(statSync(path).size).toBeGreaterThan(0);
   });
 });
