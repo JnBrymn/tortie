@@ -4,7 +4,9 @@ Each commit appears once under Added, Changed or Fixed. Every bullet stays on on
 
 The operator set the style on 2026-08-23 by rewriting every entry, and it binds every entry after. An item is one or two sentences. It says what a person can now do or what no longer goes wrong, in plain words, and then stops. A limit that a person will hit goes in the same item in one clause, e.g. "Saves have no undo", and a limit nobody will hit stays in the commit body. No measured numbers unless the number is the point. No build story, no file names, no gate names. The lead paragraph says what the release is about in two or three sentences and lists nothing.
 
-## Unreleased
+## 0.105.0 (2026-09-14)
+
+This release adds opencode as a supported agent, sitting alongside the others in the new-session picker with launch, resume and restore. It also fixes two things that could bite over a long session: creating the very first file or folder in a brand-new empty project now works from the buttons, and splitting and closing terminals no longer leaves memory behind.
 
 ### Added
 
