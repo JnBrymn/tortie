@@ -57,6 +57,7 @@ import githubcopilotSvg from '../assets/agents/githubcopilot.svg?raw';
 import grokSvg from '../assets/agents/grok.svg?raw';
 import museSvg from '../assets/agents/muse.svg?raw';
 import ompSvg from '../assets/agents/omp.svg?raw';
+import opencodeSvg from '../assets/agents/opencode.svg?raw';
 import piSvg from '../assets/agents/pi.svg?raw';
 import qwenSvg from '../assets/agents/qwen.svg?raw';
 
@@ -80,6 +81,7 @@ const LOGOS: Record<string, string> = {
   grok: grokSvg,
   muse: museSvg,
   omp: ompSvg,
+  opencode: opencodeSvg,
   pi: piSvg,
   qwen: qwenSvg
 };
