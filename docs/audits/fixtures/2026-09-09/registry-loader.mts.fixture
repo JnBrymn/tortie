@@ -1,0 +1,33 @@
+// Copy to build/audit-0909-registry.mts in an isolated checkout.
+// Run with the pinned tsx CLI and --tsconfig tsconfig.node.json.
+// Starts no connection or child. Registers only an in-memory fixture.
+import { createRequire } from 'node:module';
+import { remoteContextFor } from '../src/main/machines/control-plane';
+import {
+  machineContext,
+  registerRemoteMachineContext,
+  setMachineRemotePath
+} from '../src/main/machines/context';
+
+const id = 'audit-registry-only';
+registerRemoteMachineContext({
+  kind: 'remote', machineId: id, sshBin: '/usr/bin/ssh', host: '127.0.0.1',
+  user: null, port: null, remoteTmuxPath: '/not-executed',
+  socket: 'audit-not-opened', controlPath: '/not-opened',
+  hostKeys: { tortie: '/not-read', user: '/not-read' }
+});
+setMachineRemotePath(id, '/not-executed');
+const require = createRequire(import.meta.url);
+const cjsContext = require('../src/main/machines/context');
+const read = (fn: () => string): string | { error: string } => {
+  try { return fn(); } catch (error) { return { error: String(error) }; }
+};
+const plane = read(() => remoteContextFor(id).machineId);
+console.log(JSON.stringify({
+  node: process.version, execPath: process.execPath,
+  direct: read(() => machineContext(id).machineId), plane,
+  commonJs: read(() => cjsContext.machineContext(id).machineId),
+  sameRegistrationFunction: registerRemoteMachineContext === cjsContext.registerRemoteMachineContext,
+  resolvedCommonJs: require.resolve('../src/main/machines/context')
+}, null, 2));
+if (plane !== id) process.exitCode = 1;

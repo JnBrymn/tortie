@@ -1,0 +1,71 @@
+// Copy to build/audit-0909-redline.mts in an isolated checkout.
+// Independent property checks, not a UI or timing benchmark. No filesystem writes.
+import assert from 'node:assert/strict';
+import { composeRedlineDocument } from '../src/renderer/editor/redline-document';
+import { changesOf, mix, resolvePress } from '../src/renderer/editor/rewind';
+
+let seed = 0x09092026;
+function random(n: number): number {
+  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  return seed % n;
+}
+const lines = [
+  'The quick brown fox jumps over the lazy dog.',
+  'A second paragraph carries the earlier meaning.',
+  'Repeated repeated repeated words remain words.',
+  'A person accepts a change and keeps working.',
+  '日本語の文章と English words.',
+  'Emoji 👩‍💻 and combining marks e\u0301 stay intact.',
+  '# A heading', '- a list item', '', '  '
+];
+let documents = 0;
+let slides = 0;
+let subsetChecks = 0;
+let identityChecks = 0;
+for (let i = 0; i < 2000; i += 1) {
+  const newline = i % 3 === 0 ? '\r\n' : '\n';
+  let oldText: string;
+  let newText: string;
+  if (i % 2 === 0) {
+    const paragraph = `The quick brown fox jumps over the lazy dog with parcel ${i}.`;
+    const gap = newline + newline;
+    oldText = `# Start${gap}${paragraph}${gap}End.${newline}`;
+    newText = `# Start${gap}An entirely unrelated introduction appears here.${gap}${paragraph.replace('brown', 'red')}${gap}End.${newline}`;
+  } else {
+    const original = Array.from({ length: 2 + random(14) }, () => lines[random(lines.length)]!);
+    const changed = [...original];
+    for (let j = 0; j < 1 + i % 5; j += 1) {
+      const at = random(changed.length + 1);
+      changed.splice(at, random(2), lines[random(lines.length)]!);
+    }
+    oldText = original.join(newline) + (i % 7 === 0 ? '' : newline);
+    newText = changed.join(newline) + (i % 11 === 0 ? '' : newline);
+  }
+  const doc = composeRedlineDocument(oldText, newText);
+  slides += doc.slid;
+  assert.equal(doc.runs.filter(r => r.kind !== 'ins').map(r => r.text).join(''), oldText, `old ${i}`);
+  assert.equal(doc.runs.filter(r => r.kind !== 'del').map(r => r.text).join(''), newText, `new ${i}`);
+  const changes = changesOf(doc.runs);
+  assert.equal(mix(doc.runs, changes, new Set()), oldText);
+  assert.equal(mix(doc.runs, changes, new Set(changes.map((_, index) => index))), newText);
+  changes.forEach((change, index) => {
+    assert.equal(oldText.slice(change.off, change.off + change.del.length), change.del);
+    assert.deepEqual(resolvePress(changes, change), { kind: 'one', index });
+    identityChecks += 1;
+  });
+  for (let sample = 0; sample < 8; sample += 1) {
+    const take = new Set(changes.flatMap((_, index) => random(2) === 0 ? [index] : []));
+    // Independent oracle: splice baseline offsets backwards, without reading run ownership.
+    let expected = oldText;
+    for (let index = changes.length - 1; index >= 0; index -= 1) {
+      if (!take.has(index)) continue;
+      const c = changes[index]!;
+      expected = expected.slice(0, c.off) + c.ins + expected.slice(c.off + c.del.length);
+    }
+    assert.equal(mix(doc.runs, changes, take), expected, `subset ${i}/${sample}`);
+    subsetChecks += 1;
+  }
+  documents += 1;
+}
+assert.ok(slides >= 500, 'The corpus must exercise the new slide, not just unchanged paths.');
+console.log(JSON.stringify({ documents, slides, subsetChecks, identityChecks, seed: '0x09092026' }));
