@@ -27,3 +27,18 @@ export {
   type BaselineStore,
   type BaselineStoreDeps
 } from './store';
+// PHASE 265: the domain's shutdown owner. `capabilities.ts` closes admission
+// before the first await of the quit and awaits the bounded join after the
+// credentials join and above the watcher drain.
+export {
+  admitBaselineStore,
+  baselineWorkCount,
+  baselinesAreOpen,
+  beginBaselineShutdown,
+  joinBaselineShutdown,
+  resetBaselineLifecycle,
+  trackBaselineWork,
+  BASELINE_CLOSING_REASON,
+  BASELINE_SHUTDOWN_JOIN_MS,
+  type BaselineShutdownReport
+} from './shutdown';

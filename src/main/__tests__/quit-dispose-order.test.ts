@@ -172,4 +172,53 @@ describe('disposeMainCapabilities (the quit-time teardown)', () => {
         'workerGuard.cancel();'
     );
   });
+
+  // -------------------------------------------------------------------------
+  // Phase 265. The baseline domain's shutdown owner, and its POSITION, which is
+  // the whole of what it promises. `beginBaselineShutdown()` is worth nothing
+  // unless it is synchronous and first: an await in front of it is a window in
+  // which a `baselines:store` can still be admitted. And the join is where it
+  // is because a baseline write is filesystem work on the same four-thread uv
+  // pool as the watcher drain, so it must settle ABOVE the drain, with the core
+  // shutdown and the remote joins between it and the drain.
+  // -------------------------------------------------------------------------
+
+  it('closes baseline admission first, before anything is awaited', () => {
+    const bare = code(body);
+    const begin = bare.indexOf('beginBaselineShutdown()');
+    const firstAwait = bare.indexOf('await ');
+    expect(begin).toBeGreaterThan(-1);
+    expect(firstAwait).toBeGreaterThan(-1);
+    expect(begin).toBeLessThan(firstAwait);
+  });
+
+  it('awaits the baseline join after the credentials join and before the core is shut down', () => {
+    const bare = code(body);
+    const credJoin = bare.indexOf('await joinCredentialShutdown()');
+    const baselineJoin = bare.indexOf('await joinBaselineShutdown()');
+    const core = bare.indexOf('shutdownGmuxCore()');
+    expect(credJoin).toBeGreaterThan(-1);
+    expect(baselineJoin).toBeGreaterThan(-1);
+    expect(core).toBeGreaterThan(-1);
+    // After the credentials join, and before the core shutdown.
+    expect(credJoin).toBeLessThan(baselineJoin);
+    expect(baselineJoin).toBeLessThan(core);
+  });
+
+  it('joins the baseline write far above the watcher drain', () => {
+    const bare = code(body);
+    const baselineJoin = bare.indexOf('await joinBaselineShutdown()');
+    const drain = bare.indexOf('drainWatcherCloses(');
+    expect(baselineJoin).toBeGreaterThan(-1);
+    expect(drain).toBeGreaterThan(-1);
+    expect(baselineJoin).toBeLessThan(drain);
+  });
+
+  it('never fires the baseline join with void, and takes the named default bound', () => {
+    // A `void` would put the write back where the parent left it: owned by
+    // nothing. Empty parens means the bound is the module's named default
+    // constant (BASELINE_SHUTDOWN_JOIN_MS) rather than an inline magic number.
+    expect(body).not.toContain('void joinBaselineShutdown()');
+    expect(flat(body)).toContain('const baselines = await joinBaselineShutdown();');
+  });
 });

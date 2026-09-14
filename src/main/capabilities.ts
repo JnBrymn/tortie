@@ -46,6 +46,8 @@ import { loginProviderForAgent } from '@shared/logins';
 import { foldChosenNow, foldSuspension } from './sessions/fold-wiring';
 import { installLaunchContextResolver } from './context/launch-resolver';
 import {
+  beginBaselineShutdown,
+  joinBaselineShutdown,
   registerBaselinesIpc,
   startBaselineStorePruning
 } from './baselines';
@@ -433,6 +435,11 @@ export async function disposeMainCapabilities(): Promise<MainDisposeOutcome> {
   // `security` child all begin nothing, which is what makes the join below a
   // bounded thing rather than a race against work still being admitted.
   beginCredentialShutdown();
+  // PHASE 265. Close the baseline domain's admission on the same synchronous
+  // line, before any await, so a `baselines:store` arriving after quit begins
+  // is refused rather than begun. The bounded join is awaited below, after the
+  // credentials join. It cannot throw and calling it twice is calling it once.
+  beginBaselineShutdown();
   // PHASE 211. Stop the credential watcher first: it holds fs.watch handles and
   // a slow interval, and both must be released whatever the rest of teardown
   // does. It is synchronous and cannot throw.
@@ -463,6 +470,27 @@ export async function disposeMainCapabilities(): Promise<MainDisposeOutcome> {
         children: credentials.children,
         joined: credentials.joined,
         waitedMs: credentials.waitedMs
+      }
+    );
+  }
+  // PHASE 265. Join the baseline write already in flight, bounded. It is HERE,
+  // after the credentials join and before `shutdownGmuxCore()` below, and so
+  // far ABOVE the watcher drain (with the core shutdown and the remote joins
+  // between it and the drain): a baseline write is filesystem work on the same
+  // four-thread uv pool as the drain, so it must settle before the drain rather
+  // than race it. What is lost if it does not settle inside the bound is the
+  // NARROWING and nothing on disk. A quit with nothing in flight walks an empty
+  // set and resolves in this same tick, so the ordinary quit pays nothing. The
+  // one sentence it logs carries counts and a boolean only, never a path.
+  const baselines = await joinBaselineShutdown();
+  if (baselines.tracked > 0) {
+    getLog('quit').info(
+      `settled baseline work: ${baselines.tracked} write(s), ` +
+        `${baselines.joined ? 'joined' : 'NOT joined'} after ${baselines.waitedMs} ms`,
+      {
+        tracked: baselines.tracked,
+        joined: baselines.joined,
+        waitedMs: baselines.waitedMs
       }
     );
   }

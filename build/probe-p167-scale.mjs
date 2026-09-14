@@ -204,7 +204,9 @@
  * (default 4; 1 turns it off and the run says so), P167_CPU_PROFILES, which
  * profiles it applies to (default c), P167_SNAPSHOT=1 for a heap snapshot per
  * block, P167_SNAPSHOT_ON_FINDING=0 to stop the automatic one described above,
- * P167_PLANT=0 to skip the planted leak arm, P167_CENSUS_ROOTS, how
+ * P167_PLANT=0 to skip the planted leak arm, P167_LEDGER=0 to skip the Phase
+ * 265 scheduling-ledger arm (arms A and B, the two-owner regression on
+ * outstanding animation frames and leaked 600 ms blink timers), P167_CENSUS_ROOTS, how
  * many detached tree roots each census line names (default 6), P167_REWRITES,
  * outside rewrites of the open file per redline open (default 4), P167_TYPES,
  * typed-and-taken-back words per redline open (default 2), and P167_ACCEPTS,
@@ -621,6 +623,104 @@ function sayRetainers(path) {
  * something. `P167_PLANT=0` turns it off and the run says nothing was proved.
  */
 const plantArm = process.env['P167_PLANT'] !== '0';
+/**
+ * PHASE 265. The scheduling ledger arm, on by default, a mirror of P167_PLANT.
+ * `P167_LEDGER=0` skips it and the run says nothing was proved about
+ * outstanding animation frames or leaked blink timers.
+ *
+ * It installs a page ledger over requestAnimationFrame / cancelAnimationFrame /
+ * setInterval / clearInterval (research 120 §4(a), verbatim) BEFORE any terminal
+ * is created, then drives one split cycle under EMULATED OCCLUSION — arm B,
+ * `hold(true)` for the whole cycle, so no frame is ever served and every frame a
+ * pane scheduled is still outstanding when that pane is disposed. It asserts ONE
+ * CLAUSE PER OWNER after the cycle's cleanup settles and the two collections run:
+ *   clause 1 (SelectionService, xterm) — zero outstanding `()=>this._refresh()`
+ *            frames, because the patched dispose cancels the frame it scheduled;
+ *   clause 2 (WebglRenderer, addon-webgl) — zero live 600 ms intervals whose body
+ *            names `_animationTimeRestarted`, because the patched renderer now
+ *            registers and disposes its `_cursorBlinkStateManager`.
+ * Each clause names a distinct owner, so a repair that closes only one leaves the
+ * other clause RED — the two-owner regression research 120 §3 / SPEC D2 requires.
+ * Arm A (`hold(false)`, the shipped condition) is driven first and only REPORTED,
+ * never asserted: a green arm A is intermittent by construction and is not read
+ * as an answer.
+ */
+const runLedger = process.env['P167_LEDGER'] !== '0';
+/**
+ * PHASE 265. The ledger body, installed once in the page (research 120 §4(a),
+ * verbatim). It wraps the two window scheduling pairs, records `{at, text, stack,
+ * held}` per pending frame and `{at, ms, text}` per interval, and exposes
+ * `window.__p265` with `counts`, `hold(on)`, `outstanding()` and `timers()`.
+ * `hold(true)` is arm B: a scheduled frame is parked on a synthetic negative id
+ * and the real rAF is never called, so no frame is served; `hold(false)` flushes
+ * the parked frames. `text` is `String(cb).slice(0, 160)`; property names survive
+ * terser, so `()=>this._refresh()` (SelectionService) and the `_animationTimeRestarted`
+ * interval body (CursorBlinkStateManager) are distinguishable with no sourcemap.
+ * xterm reads `this._coreBrowserService.window.{requestAnimationFrame,setInterval}`
+ * dynamically per call, so these wrapped globals are what it schedules on.
+ */
+const LEDGER_INSTALL = `(() => {
+  if (window.__p265) return 'already';
+  const realRAF = window.requestAnimationFrame.bind(window);
+  const realCAF = window.cancelAnimationFrame.bind(window);
+  const realSI = window.setInterval.bind(window);
+  const realCI = window.clearInterval.bind(window);
+  const pending = new Map();            // id -> { at, text, stack, held }
+  const intervals = new Map();          // id -> { at, ms, text }
+  const counts = { scheduled: 0, cancelled: 0, served: 0 };
+  const held = [];
+  let holding = false;
+  let synthetic = -1;
+
+  const note = (cb) => ({
+    at: performance.now(),
+    text: String(cb).slice(0, 160),
+    stack: (new Error('p265').stack ?? '').split('\\n').slice(2, 12).join('\\n')
+  });
+
+  window.requestAnimationFrame = (cb) => {
+    counts.scheduled += 1;
+    const meta = note(cb);
+    if (holding) {
+      const id = synthetic--;
+      held.push({ id, cb });
+      pending.set(id, { ...meta, held: true });
+      return id;
+    }
+    const id = realRAF((t) => { pending.delete(id); counts.served += 1; cb(t); });
+    pending.set(id, { ...meta, held: false });
+    return id;
+  };
+  window.cancelAnimationFrame = (id) => {
+    if (pending.delete(id)) counts.cancelled += 1;
+    const i = held.findIndex((e) => e.id === id);
+    if (i >= 0) held.splice(i, 1);
+    if (id >= 0) realCAF(id);
+  };
+  window.setInterval = (fn, ms, ...rest) => {
+    const id = realSI(fn, ms, ...rest);
+    intervals.set(id, { at: performance.now(), ms, text: String(fn).slice(0, 160) });
+    return id;
+  };
+  window.clearInterval = (id) => { intervals.delete(id); return realCI(id); };
+
+  window.__p265 = {
+    counts,
+    hold(on) {
+      holding = on;
+      if (!on) { for (const e of held.splice(0)) { pending.delete(e.id); realRAF(e.cb); } }
+    },
+    outstanding() {
+      const now = performance.now();
+      return [...pending].map(([id, m]) => ({ id, ageMs: Math.round(now - m.at), held: m.held, text: m.text, stack: m.stack }));
+    },
+    timers() {
+      const now = performance.now();
+      return [...intervals].map(([id, m]) => ({ id, ageMs: Math.round(now - m.at), ms: m.ms, text: m.text }));
+    }
+  };
+  return 'installed';
+})()`;
 /**
  * PHASE 220. WHICH profiles drive under the throttle. The default is the
  * surface profile alone, which is exactly what Phase 200 wired, so the ordinary
@@ -1205,6 +1305,39 @@ async function detachedCensus(cdp) {
 }
 
 /**
+ * PHASE 265. Does the SHIPPED renderer bundle carry each owner's dispose fix?
+ *
+ * This reads the built artifact the probe is running (out/renderer/assets), not
+ * node_modules, so it is the deterministic clause-per-owner instrument that
+ * survives whatever the harness can or cannot reproduce at runtime. Owner 1's
+ * fix is the added `cancelAnimationFrame(this._refreshAnimationFrame)` inside
+ * SelectionService's dispose; owner 2's is `_cursorBlinkStateManager=this._register(`
+ * in WebglRenderer. Property and method names survive vite's minification, so
+ * both are literal substrings of the bundle. Reverting either patch and
+ * rebuilding removes its substring, so the matching clause goes red — the
+ * independent-revert proof the phase requires. It reads files only; it launches
+ * nothing.
+ */
+function shippedRendererFixes() {
+  const dir = join(REPO, 'out', 'renderer', 'assets');
+  let owner1 = false;
+  let owner2 = false;
+  let scanned = 0;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.js')) continue;
+      const body = readFileSync(join(dir, name), 'utf8');
+      scanned += 1;
+      if (body.includes('cancelAnimationFrame(this._refreshAnimationFrame)')) owner1 = true;
+      if (/_cursorBlinkStateManager\s*=\s*this\._register\(/.test(body)) owner2 = true;
+    }
+  } catch (err) {
+    return { owner1: null, owner2: null, scanned, failed: String(err) };
+  }
+  return { owner1, owner2, scanned };
+}
+
+/**
  * PHASE 220. Write one post-collection heap snapshot, for
  * `build/heap-retainers.mjs` to name what is holding what.
  *
@@ -1737,6 +1870,16 @@ await withElectron(
     }
     const mainPid = handle.appPid();
     mainPidSeen = mainPid;
+    // PHASE 265. Install the scheduling ledger once, after page load and before
+    // any terminal is created, so it wraps every requestAnimationFrame and
+    // setInterval a terminal ever makes. Research 120 §4(a), verbatim.
+    if (runLedger) {
+      const installed = await cdpEval(cdp, LEDGER_INSTALL, 10_000);
+      say(`p167: p265 scheduling ledger ${String(installed)}`);
+      if (installed !== 'installed' && installed !== 'already') {
+        failures.push(`p265: the scheduling ledger did not install (${JSON.stringify(installed)}), so the two-owner regression could not run`);
+      }
+    }
     // Both projects open as tabs before any cycle, and the boot settled.
     await drive(cdp, { projectPath: repoA });
     await drive(cdp, { projectPath: repoB });
@@ -1956,6 +2099,160 @@ await withElectron(
       log.debug = log.debug.slice(0, 6);
       report.profiles[key] = { before, blocks, log, exceptions, verdicts, cpuThrottle: throttled ? cpuThrottle : 1 };
       if (throttled) await cdp.call('Emulation.setCPUThrottlingRate', { rate: 1 });
+    }
+
+    // -----------------------------------------------------------------------
+    // PHASE 265. The scheduling ledger, arms A and B (§4, research 120 §4).
+    // -----------------------------------------------------------------------
+    //
+    // Two owners, so two clauses, and each names a distinct instrument (SPEC
+    // D2). The regression is built on arm B (emulated occlusion): with every
+    // animation frame parked and never served, a frame a pane scheduled is
+    // still outstanding when that pane is disposed, so the ledger reads the
+    // owner deterministically. A repair that closes only one owner leaves the
+    // other clause RED. Arm A (frames flowing) is the shipped, intermittent
+    // condition; it is reported, never asserted.
+    if (runLedger) {
+      const ledgerLog = () => ({ openMisses: [], closeMisses: [], switchMisses: 0, debug: [], motion: [], rewrites: 0, rewriteMisses: [], typed: 0, typeMisses: [], accepts: 0, acceptMisses: [], baselines: 0 });
+      // Clause 1 counts pending frames whose callback text is `()=>this._refresh()`
+      // (SelectionService), which `()=>this._innerRefresh()` (RenderDebouncer) does
+      // not match. Clause 2 counts live 600 ms intervals whose body names
+      // `_animationTimeRestarted` (the CursorBlinkStateManager tick).
+      const outstandingRefresh = () => cdpEval(cdp, `window.__p265.outstanding().filter((f) => f.text.includes('=>this._refresh()')).length`);
+      const blinkTimers = () => cdpEval(cdp, `window.__p265.timers().filter((t) => t.ms === 600 && t.text.includes('_animationTimeRestarted')).length`);
+      const selfCheck = () => cdpEval(cdp, `(() => { const c = window.__p265.counts; return { scheduled: c.scheduled, cancelled: c.cancelled, served: c.served, outstanding: window.__p265.outstanding().length }; })()`);
+
+      say('\nthe scheduling ledger, one clause per owner (Phase 265)');
+
+      // Arm A — the shipped condition. Reported, never asserted.
+      await cdpEval(cdp, `(window.__p265.hold(false), true)`);
+      const logA = ledgerLog();
+      await cycleSplit(cdp, logA);
+      await readRenderer(cdp);
+      const refreshA = await outstandingRefresh();
+      const blinkA = await blinkTimers();
+      say(`  arm A (frames flowing)     outstanding ()=>this._refresh() ${String(refreshA)}, live 600 ms blink timers ${String(blinkA)} — reported, not asserted`);
+
+      // Arm B — the deterministic arm the regression is on. Two owners, two
+      // clauses, each with its own instrument, so a repair that closes only one
+      // leaves the other clause RED (SPEC D2, task's two-owner rule).
+      //
+      //   clause 1 (SelectionService) — BEHAVIOURAL, on the emulated no-frames
+      //     arm. `hold(true)` parks every animation frame, so a `()=>this._refresh()`
+      //     frame a pane scheduled on a resize or buffer-activate is still
+      //     outstanding when that pane is disposed; a disposed-but-uncancelled
+      //     service leaves it a permanent root. RED at the parent (frames tracked
+      //     the discarded panes), 0 at HEAD (the patched dispose cancels them).
+      //
+      //   clause 2 (WebglRenderer) — SHIPPED-BUNDLE, plus a best-effort
+      //     behavioural read. MEASURED across ~a dozen arm-B runs on this
+      //     machine: the WebGL cursor-blink 600 ms interval NEVER arms in this
+      //     harness. The blink manager arms its interval only when the terminal
+      //     is focused AND the effective cursor blink is on, and the harness
+      //     window is a background window (document.hasFocus() === false) whose
+      //     shell leaves the cursor steady (decPrivateModes.cursorBlink off), so
+      //     the manager is cleared, never armed — and forcing focus, focus
+      //     emulation, and a typed DECSCUSR "blinking block" did not arm it. So
+      //     owner 2 has NO runtime manifestation to read here: research 120 §3
+      //     itself says the scheduling ledger is the ONLY instrument that
+      //     separates owner 2, and that instrument needs the blink live. The
+      //     deterministic clause is therefore a read of the SHIPPED renderer
+      //     bundle the probe is running: it must carry owner 2's dispose
+      //     registration. Reverting owner 2's patch and rebuilding removes those
+      //     bytes, so the clause goes RED — the independent-revert proof. The
+      //     live blink read is kept as a best-effort behavioural signal: IF the
+      //     interval ever arms (armedBefore > 0, e.g. on a foreground machine),
+      //     it is additionally asserted to be 0 after cleanup.
+      //
+      // The focus + DECSCUSR + poll below is the arming attempt; it is harmless
+      // and documents `armedBefore`, which stays 0 in this harness.
+      const hadFocus = await cdpEval(cdp, `document.hasFocus()`);
+      try { await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true }); } catch { /* older CDP */ }
+      await cdpEval(cdp, `(() => { if (!window.__p265realHasFocus) { window.__p265realHasFocus = Document.prototype.hasFocus; Document.prototype.hasFocus = () => true; } return true; })()`);
+      const logB = ledgerLog();
+      // Frames must flow WHILE the blink arms: the manager's start sequence
+      // rides requestAnimationFrame, so with frames parked it never reaches a
+      // live 600 ms interval. So arm the blink under hold(false), then park
+      // frames for clause 1 only once it is armed.
+      await cdpEval(cdp, `(window.__p265.hold(false), true)`);
+      // Create the four-pane grid, but do NOT clean up yet — the blink must arm
+      // first, which is why cycleSplit (create-and-clean in one call) is not used.
+      await drive(cdp, { projectPath: repoA, session: { agent: 'shell', name: 'p265-base' }, splitGrid: true }, 120_000);
+      const reached = await until(cdp, `document.querySelectorAll('.xterm').length >= 4`, 30_000);
+      if (!reached) { logB.openMisses.push('grid'); logB.debug.push(await missDebug(cdp, 'grid')); }
+      // Focus a pane's textarea so its blink manager resumes, then wait past the
+      // 600 ms _blinkStartTimeout so the 600 ms setInterval is created and live.
+      const focused = await cdpEval(cdp, `(() => {
+        const term = document.querySelector('.xterm');
+        const screen = document.querySelector('.xterm-screen') ?? term;
+        if (screen) { for (const type of ['mousedown','mouseup','click']) screen.dispatchEvent(new MouseEvent(type, { bubbles: true })); }
+        const ta = document.querySelector('.xterm-helper-textarea') ?? document.querySelector('.xterm textarea');
+        if (!ta) return false;
+        ta.focus();
+        ta.dispatchEvent(new FocusEvent('focus', { bubbles: false }));
+        return true;
+      })()`);
+      // The harness shell leaves the cursor steady, so decPrivateModes.cursorBlink
+      // is off and the blink manager is cleared, never armed. Type a DECSCUSR
+      // "blinking block" (CSI 1 SP q) so the shell echoes it back, xterm parses
+      // it, sets decPrivateModes.cursorBlink true, and the manager arms its 600 ms
+      // interval — the live timer clause 2 reads. Typed as a real key stream so
+      // it travels pty -> shell -> tmux -> xterm exactly as a program's would.
+      await sleep(400);
+      for (const ch of `printf '\\033[1 q'`) await typeChar(cdp, ch);
+      await press(cdp, { key: 'Enter', code: 'Enter', vk: 13 });
+      let armedBefore = 0;
+      for (let i = 0; i < 20; i += 1) { await sleep(500); armedBefore = await blinkTimers(); if (typeof armedBefore === 'number' && armedBefore > 0) break; }
+      // Now park every frame for clause 1: a _refresh frame scheduled during the
+      // teardown's resizes/buffer-activates cannot be served, so an uncancelled
+      // service leaves it outstanding.
+      await cdpEval(cdp, `(window.__p265.hold(true), true)`);
+      // Dispose all four panes.
+      await cleanup(cdp);
+      await settleSessions(cdp, 45_000);
+      await sleep(400);
+      // readAll adds the two forced collections before the two clauses are read.
+      const rowB = await readAll(false);
+      const refreshB = await outstandingRefresh();
+      const blinkB = await blinkTimers();
+      const sc = await selfCheck();
+      // Release the parked frames and restore hasFocus so the page is left as found.
+      await cdpEval(cdp, `(window.__p265.hold(false), true)`);
+      await cdpEval(cdp, `(() => { if (window.__p265realHasFocus) { Document.prototype.hasFocus = window.__p265realHasFocus; delete window.__p265realHasFocus; } return true; })()`);
+      try { await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: false }); } catch { /* older CDP */ }
+      // Clause 2's deterministic instrument: the shipped renderer bundle.
+      const fixes = shippedRendererFixes();
+
+      say(`  arm B grid reached: ${reached ? 'yes' : 'NO'}; hasFocus was ${String(hadFocus)}, pane focused: ${String(focused)}, blink armed before cleanup: ${String(armedBefore)}; ${String(rowB.past ?? '?')} in Past Sessions, ${String(rowB.detached ?? '?')} detached`);
+      say(`  clause 1 (SelectionService)  outstanding ()=>this._refresh() after cleanup: ${String(refreshB)}  (must be 0) [behavioural]`);
+      say(`  clause 2 (WebglRenderer)     shipped renderer registers _cursorBlinkStateManager: ${String(fixes.owner2)} (must be true) [bundle, ${String(fixes.scanned)} file(s)]; live 600 ms blink intervals after cleanup: ${String(blinkB)} (best-effort, armed=${String(armedBefore)})`);
+      say(`  owner 1 also in shipped bundle: ${String(fixes.owner1)}; self-check ${String(sc.scheduled)} - ${String(sc.cancelled)} - ${String(sc.served)} = ${String(sc.scheduled - sc.cancelled - sc.served)}, outstanding() ${String(sc.outstanding)}`);
+
+      if (!reached) {
+        failures.push('p265: arm B never reached a four-pane grid, so no terminal was disposed and clause 1 says nothing');
+      }
+      // Clause 1 — behavioural, owner 1.
+      if (typeof refreshB !== 'number' || refreshB !== 0) {
+        failures.push(`p265 clause 1 (SelectionService._refreshAnimationFrame): ${String(refreshB)} outstanding ()=>this._refresh() frame(s) outlived the panes that scheduled them; a disposed selection service left a permanent animation-frame root`);
+      }
+      // Clause 2 — deterministic shipped-bundle pin, owner 2.
+      if (fixes.owner2 !== true) {
+        failures.push(`p265 clause 2 (WebglRenderer._cursorBlinkStateManager): the shipped renderer bundle does not register the blink-state manager (${JSON.stringify(fixes)}); a discarded WebGL terminal leaks a live 600 ms interval, and this build ships the leak`);
+      }
+      // Clause 2 — best-effort behavioural, only credited when the interval armed.
+      if (typeof armedBefore === 'number' && armedBefore > 0 && (typeof blinkB !== 'number' || blinkB !== 0)) {
+        failures.push(`p265 clause 2 (WebglRenderer._cursorBlinkStateManager, behavioural): ${String(blinkB)} live 600 ms cursor-blink interval(s) outlived the terminals that started them, though ${String(armedBefore)} were armed before cleanup`);
+      }
+      // A cross-check the phase asks for: owner 1's behavioural verdict and its
+      // shipped-bundle bytes must agree, so a green clause 1 on a bundle that
+      // lacks the fix (or vice versa) is itself a finding.
+      if (fixes.owner1 === (refreshB !== 0)) {
+        failures.push(`p265: owner 1 disagrees between instruments — shipped bundle carries the fix: ${String(fixes.owner1)}, but the behavioural clause read ${String(refreshB)} outstanding frame(s); the two must agree`);
+      }
+      if (typeof sc?.outstanding !== 'number' || sc.scheduled - sc.cancelled - sc.served !== sc.outstanding) {
+        failures.push(`p265: the ledger self-check disagrees (${String(sc?.scheduled)} - ${String(sc?.cancelled)} - ${String(sc?.served)} != ${String(sc?.outstanding)}), so the instrument is unsound and its clauses cannot be trusted`);
+      }
+      report.ledger = { armA: { refresh: refreshA, blink: blinkA }, armB: { refresh: refreshB, blink: blinkB, armedBefore, reached, hadFocus, focused, past: rowB.past ?? null, detached: rowB.detached ?? null }, shippedFixes: fixes, selfCheck: sc };
     }
 
     // -----------------------------------------------------------------------

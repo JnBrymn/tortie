@@ -23,6 +23,12 @@ import {
   createBaselineStore,
   type BaselineStore
 } from './store';
+// PHASE 265: the store door is owned at quit. `admitBaselineStore` refuses a
+// write once admission is closed (rather than beginning one) and otherwise
+// wraps the store's in-flight promise with `trackBaselineWork`, so the ordered
+// disposer can join it. The door stays thin: the admission and the tracking
+// both live in ./shutdown, which the shutdown test drives directly.
+import { admitBaselineStore } from './shutdown';
 
 /** `<userData>/gmux/baselines` — sibling of snapshots/ and dropped-images/. */
 export function baselinesDir(): string {
@@ -57,7 +63,9 @@ export function baselineStore(): BaselineStore {
 export function registerBaselinesIpc(ipc: IpcMain): void {
   const get = (): BaselineStore => baselineStore();
   handle(ipc, 'baselines:load', (_event, key) => get().load(key));
-  handle(ipc, 'baselines:store', (_event, input) => get().store(input));
+  handle(ipc, 'baselines:store', (_event, input) =>
+    admitBaselineStore(() => get().store(input))
+  );
 }
 
 /**

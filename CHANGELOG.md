@@ -4,6 +4,12 @@ Each commit appears once under Added, Changed or Fixed. Every bullet stays on on
 
 The operator set the style on 2026-08-23 by rewriting every entry, and it binds every entry after. An item is one or two sentences. It says what a person can now do or what no longer goes wrong, in plain words, and then stops. A limit that a person will hit goes in the same item in one clause, e.g. "Saves have no undo", and a limit nobody will hit stays in the commit body. No measured numbers unless the number is the point. No build story, no file names, no gate names. The lead paragraph says what the release is about in two or three sentences and lists nothing.
 
+## Unreleased
+
+### Fixed
+
+- Splitting and closing terminals over a long session no longer leaves memory behind. Each pane's scheduled redraw and its cursor blink now stop the moment the pane goes away, so the app stays as light after a day of rearranging panes as it was at launch.
+
 ## 0.104.0 (2026-09-12)
 
 This release is mostly about Architecture. With it on, the map is now drawn from the repository itself, grouped by what it builds and starts, with what each part exposes and how far each part is proven, and an agent you have confirmed can be asked to say what each part is for. Alongside it, the files you open now belong to the project you opened them in, so switching projects switches what is in front of you without closing anything, and a large Markdown document shows its first screen at once and fills in the rest while you read.
