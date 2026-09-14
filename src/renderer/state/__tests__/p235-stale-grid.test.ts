@@ -55,7 +55,13 @@ const reading = (
   path: string | null = null
 ): MachineAgentsView['agents'][number] => ({ agentId, presence, path });
 
-/** The answer his Mac Pro really gave, in shape: 3 found and 9 not. */
+/**
+ * The answer his Mac Pro really gave, in shape: 3 found and the rest not. The
+ * 1bbcd7c1 measurement in this file's header predates opencode; opencode joins
+ * the answer as one more `absent` so the fixture stays a COMPLETE reply for the
+ * grown registry — an agent missing from the reply defaults to pressable, which
+ * is the very staleness this file pins, so the fixture must name every one.
+ */
 const LIVE: MachineAgentsView = {
   machineId: 'mac-pro',
   askedAt: 1_757_000_000_000,
@@ -71,7 +77,8 @@ const LIVE: MachineAgentsView = {
     reading('qwen', 'absent'),
     reading('pi', 'absent'),
     reading('omp', 'absent'),
-    reading('grok', 'absent')
+    reading('grok', 'absent'),
+    reading('opencode', 'absent')
   ]
 };
 
@@ -95,11 +102,11 @@ const PARENT: MachineAgentsView = {
 
 describe('the grid never grows when the machine goes away', () => {
   it('is the parent’s defect, stated as the two counts', () => {
-    // 13 tiles, being 12 agents and Shell. Connected, 4 could be pressed.
-    expect(buildAgentOptions(null, BOTH, LIVE)).toHaveLength(13);
+    // 14 tiles, being 13 agents and Shell. Connected, 4 could be pressed.
+    expect(buildAgentOptions(null, BOTH, LIVE)).toHaveLength(14);
     expect(offered(LIVE)).toBe(4);
-    // At the parent, losing the machine made every one of the 13 pressable.
-    expect(offered(PARENT)).toBe(13);
+    // At the parent, losing the machine made every one of the 14 pressable.
+    expect(offered(PARENT)).toBe(14);
   });
 
   it('offers what was last known, and never more', () => {
@@ -117,7 +124,7 @@ describe('the grid never grows when the machine goes away', () => {
       .map((one) => one.agentId)
       .sort();
     expect(greyed).toEqual(said);
-    expect(greyed).toHaveLength(9);
+    expect(greyed).toHaveLength(10);
   });
 
   it('states no path from a connection that is gone', () => {
@@ -171,9 +178,9 @@ describe('a machine nobody has asked, which is the charter’s OTHER half', () =
 
   it('STATED LIMIT: it therefore offers MORE than a connected machine does', () => {
     const invented = machineAgentsFor([], 'never-asked');
-    // 13 of 13 against 4 of 13. This is the charter reading this phase did not
+    // 14 of 14 against 4 of 14. This is the charter reading this phase did not
     // move, and the assertion is here so that closing it cannot be silent.
-    expect(offered(invented)).toBe(13);
+    expect(offered(invented)).toBe(14);
     expect(offered(LIVE)).toBe(4);
     expect(offered(invented)).toBeGreaterThan(offered(LIVE));
     // And a machine that DID answer once is the half that is closed, so the

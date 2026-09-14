@@ -252,7 +252,7 @@ export function derivedByRecords(
 /**
  * How many leading JSON records this rule needs read, or 0 when it needs none.
  * A `none` or `path` rule reads no bytes at all, which is what keeps the
- * question free for the five descriptors that answer `none` and for muse's
+ * question free for the six descriptors that answer `none` and for muse's
  * path rule, which compares a directory name and opens nothing.
  */
 export function derivedRecordLines(rule: DerivedStreamRule): number {

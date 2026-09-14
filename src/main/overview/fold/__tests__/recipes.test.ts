@@ -129,8 +129,18 @@ describe('the flags that decide what a fold costs', () => {
   });
 });
 
-describe('the six rows that are absent, and they stay absent', () => {
-  const ABSENT = ['gemini', 'qwen', 'muse', 'antigravity', 'deepseek', 'droid'];
+describe('the seven rows that are absent, and they stay absent', () => {
+  // opencode joins them: this phase measured no overview-fold recipe for it, so
+  // it is named absent rather than silently unaccounted for.
+  const ABSENT = [
+    'gemini',
+    'qwen',
+    'muse',
+    'antigravity',
+    'deepseek',
+    'droid',
+    'opencode'
+  ];
 
   it('has no recipe for an agent nobody measured', () => {
     for (const id of ABSENT) {

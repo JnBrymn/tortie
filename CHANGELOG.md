@@ -6,6 +6,10 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 ## Unreleased
 
+### Added
+
+- opencode is now a supported agent: launch it, resume a conversation, and have it come back after a quit or reboot, the same as every other agent Tortie knows. Its conversation is not captured yet, because the bundled recorder does not know opencode, and two opencode sessions started in one folder cannot be told apart when they come back.
+
 ### Fixed
 
 - Splitting and closing terminals over a long session no longer leaves memory behind. Each pane's scheduled redraw and its cursor blink now stop the moment the pane goes away, so the app stays as light after a day of rearranging panes as it was at launch.

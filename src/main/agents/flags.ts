@@ -45,7 +45,8 @@ export type RegistryAgentId =
   | 'qwen'
   | 'pi'
   | 'omp'
-  | 'grok';
+  | 'grok'
+  | 'opencode';
 
 /** Where knowledge of a flag comes from. */
 export type FlagProvenance =
@@ -586,6 +587,35 @@ export const AGENT_FLAG_PRESETS: Record<RegistryAgentId, AgentFlagCatalog> = {
       '--session-id <uuid> pre-assigns a NEW session id; an existing id is refused with a verbatim double "Error: Error:" line',
       '--no-auto-update is accepted by 1.0.4 but hidden from its --help (measured 2026-08-16); Tortie does not pass it',
       'The source aliases yolo and dangerously-skip-permissions for --always-approve are NOT printed by the live long help, so they are not cataloged'
+    ]
+  },
+  // Phase 266 (research 121). Measured from `opencode --help` on the operator's
+  // install (1.18.30, 2026-09-13). opencode's only autonomy flag is `--auto`,
+  // which auto-approves permissions; it gates a tool CALL, not the prompt, so
+  // BYPASS_FLAGS keeps opencode empty (cases.ts) and this preset is offered as
+  // a deliberate, danger-styled choice rather than a startup gate answer.
+  opencode: {
+    binary: 'opencode',
+    helpVerifiedVersion: '1.18.30',
+    resumeRepass: 'required-unverified',
+    resumeNote:
+      'opencode resume flags (default TUI command, `opencode --help` 2026-09-13): -c/--continue, -s/--session <id>, --fork (with --continue/--session). Tortie resumes by `--session <id>`. `--auto`/`--model`/`--agent` are all ROOT options on the same argv as `--session`, so re-passing composes syntactically; the help does not demonstrate the combination explicitly, hence required-unverified.',
+    presets: [
+      {
+        flag: '--auto',
+        label: 'Auto-approve permissions',
+        description:
+          'Auto-approve permissions that are not explicitly denied (help text verbatim, marked "dangerous!"). opencode\'s only autonomy flag.',
+        danger: true,
+        provenance: 'VERIFIED'
+      }
+    ],
+    valueFlagNotes: [
+      '-m/--model <provider/model>',
+      '--agent <agent>',
+      '-s/--session <id> (resume; see resume.template)',
+      '--prompt <prompt>',
+      '--mini starts the minimal interactive interface'
     ]
   }
 };

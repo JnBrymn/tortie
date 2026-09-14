@@ -168,7 +168,11 @@ export function parseProviderIds(help: string): SpecstoryProviderId[] | null {
 /** Registry rows whose fidelity was measured — the fail-safe provider set. */
 function verifiedProviders(): SpecstoryProviderId[] {
   return AGENT_REGISTRY.flatMap((e) =>
-    e.specstory !== undefined && e.specstory.verified === 'verified'
+    // The `provider !== null` check narrows off the Phase-266 unsupported arm
+    // (`{ provider: null }`, which carries no `verified`) before reading it.
+    e.specstory !== undefined &&
+    e.specstory.provider !== null &&
+    e.specstory.verified === 'verified'
       ? [e.specstory.provider]
       : []
   );
@@ -368,7 +372,10 @@ export async function captureSupportFor(
     provider,
     bin: active,
     registry,
-    confidence: registry?.verified === 'verified' ? 'measured' : 'new'
+    confidence:
+      registry !== null && registry.provider !== null && registry.verified === 'verified'
+        ? 'measured'
+        : 'new'
   };
 }
 
@@ -419,7 +426,9 @@ export async function captureMatrix(): Promise<CaptureMatrix> {
       supported.push({
         agentId,
         provider,
-        discovered: row?.verified !== 'verified',
+        // discovered = NOT a verified measured registry row. The null-provider
+        // arm (Phase 266) has no `verified` and is treated as discovered too.
+        discovered: !(row !== null && row.provider !== null && row.verified === 'verified'),
         providerName: nameOf.get(provider) ?? null
       });
       continue;
@@ -531,7 +540,10 @@ export async function wrapForCapture(
       // nobody has measured how it reports exit codes, so gmux records the
       // pessimistic value. 'collapsed' only ever makes the death report say
       // "at least 1"; 'exact' would make it assert a number gmux invented.
-      exitCodeFidelity: support.registry?.exitCodeFidelity ?? 'collapsed',
+      exitCodeFidelity:
+        support.registry !== null && support.registry.provider !== null
+          ? support.registry.exitCodeFidelity
+          : 'collapsed',
       agentArgv: [...inner],
       ...(noCloud ? { noCloud: true } : {})
     },

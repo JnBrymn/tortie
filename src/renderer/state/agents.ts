@@ -221,7 +221,10 @@ const SEED_AGENTS: readonly SeedAgent[] = [
   { id: 'qwen', label: 'Qwen', unverified: false },
   { id: 'pi', label: 'Pi', unverified: false },
   { id: 'omp', label: 'Oh My Pi', unverified: false },
-  { id: 'grok', label: 'Grok', unverified: false }
+  { id: 'grok', label: 'Grok', unverified: false },
+  // Phase 266: opencode's own lowercase spelling; order and unverified mirror
+  // the registry row (conformance:agents §3 checks this).
+  { id: 'opencode', label: 'opencode', unverified: false }
 ];
 
 /** Seed short labels, by id. Compiled agents only, and that is the point. */

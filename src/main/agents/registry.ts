@@ -48,6 +48,11 @@ import type {
   MultilineKeyTable
 } from '@shared/types';
 import { DEFAULT_IMAGE_DROP, DEFAULT_MULTILINE_KEY, LF } from '@shared/agent-defaults';
+// Phase 266: the ONE spelling of opencode's SQLite session-db path, shared so
+// this row's `storeDb` and the harvest reader/descriptor never drift (spec §2
+// D1). Owned by Builder B in `src/shared/` (append-only); imported, never
+// spelled inline here.
+import { OPENCODE_DB_TEMPLATE } from '@shared/opencode-store';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,25 +166,41 @@ export type SpecstoryProviderId = string;
 /**
  * How this agent behaves UNDER `specstory run` (research 13 §1.1, re-measured
  * hands-on 2026-08-11 against the bundled specstory 2.8.0, and re-measured on every test run by specstory/__tests__/wrap.integration.test.ts).
+ *
+ * A DISCRIMINATED UNION since Phase 266 (opencode, research 121, spec §2 D6).
+ * The `{ provider: null }` arm is the HONEST "the bundled specstory has no
+ * provider for this agent, so capture is deliberately off". It is NOT the same
+ * as OMITTING `specstory`: an absent field lets `providerIdFor` fall through to
+ * `probed.has(id) ? id : null` (capture.ts), so the day a future specstory
+ * build advertises this agent's own id as a provider, capture would AUTO-enable
+ * with no measured exit-code fidelity and no human flip. The explicit null arm
+ * makes `providerIdFor` return null WITHOUT probing, so capture stays off until
+ * a human edits the row. Faking an `exitCodeFidelity` for an unsupported
+ * provider would be dishonest, so the null arm carries none.
  */
-export interface AgentSpecstoryCapture {
-  provider: SpecstoryProviderId;
-  /**
-   * What the wrapper's own exit status says about the agent's.
-   *
-   * 'exact' — the provider mirrors the child's code (`os.Exit(code)`).
-   * 'collapsed' — ANY non-zero child exit arrives as 1. Measured: a child
-   * exiting 42 comes back 42 through claude/cursor/gemini and 1 through
-   * codex/deepseek/droid/antigravity. This is not cosmetic: Phase 12.7 death
-   * forensics and Phase 13 status detection both read exit codes, so a
-   * captured session in this group has a WEAKER death record than an
-   * uncaptured one, and gmux records that rather than pretending otherwise.
-   */
-  exitCodeFidelity: 'exact' | 'collapsed';
-  /** 'verified' = the fidelity above was measured, not read off source. */
-  verified: 'verified' | 'unverified';
-  notes?: string;
-}
+export type AgentSpecstoryCapture =
+  | {
+      provider: SpecstoryProviderId;
+      /**
+       * What the wrapper's own exit status says about the agent's.
+       *
+       * 'exact' — the provider mirrors the child's code (`os.Exit(code)`).
+       * 'collapsed' — ANY non-zero child exit arrives as 1. Measured: a child
+       * exiting 42 comes back 42 through claude/cursor/gemini and 1 through
+       * codex/deepseek/droid/antigravity. This is not cosmetic: Phase 12.7 death
+       * forensics and Phase 13 status detection both read exit codes, so a
+       * captured session in this group has a WEAKER death record than an
+       * uncaptured one, and gmux records that rather than pretending otherwise.
+       */
+      exitCodeFidelity: 'exact' | 'collapsed';
+      /** 'verified' = the fidelity above was measured, not read off source. */
+      verified: 'verified' | 'unverified';
+      notes?: string;
+    }
+  /** Checked against the bundled specstory CLI and NOT supported by it; capture
+   *  stays off until a human flips the row. `notes` MUST name the specstory
+   *  version checked, so a later reader can tell a stale "no" from a fresh one. */
+  | { provider: null; notes: string };
 
 /** How to ask the binary who it is / what version it runs. */
 export interface VersionProbe {
@@ -374,6 +395,19 @@ export interface AgentRegistryEntry {
    * session-id harvest). `~/` and `$VARS` allowed.
    */
   storeDirs: string[];
+  /**
+   * The single SQLite DATABASE FILE this agent keeps its sessions in, when it
+   * uses a db instead of a directory of per-session files (Phase 266, research
+   * 121, spec §2 D1). Template form (`~/` allowed), the exact bytes Tortie
+   * opens READ ONLY. Absent for every file-store agent — `storeDirs` is a list
+   * of DIRECTORIES scanned as watcher roots and `readdir`'d, a different kind
+   * of thing, so a db path must not be smuggled into it. opencode is the only
+   * holder today: `storeDirs` names the containing directory (its existence is
+   * the install-and-in-use signal) and `storeDb` names the db inside it. The
+   * PATH is a shared constant so the registry and the harvest reader never
+   * drift; do not spell it inline.
+   */
+  storeDb?: string;
   /**
    * How this agent reaches a disk, per its own provider (Phase 49). REQUIRED
    * on purpose: a new registry row (grok, Phase 59) cannot compile without
@@ -1464,6 +1498,134 @@ export const AGENT_REGISTRY: readonly AgentRegistryEntry[] = [
     // imageDrop ABSENT: unmeasured, so DEFAULT_IMAGE_DROP (path text) applies.
     // specstory ABSENT: the bundled specstory CLI has no grok provider.
     unverified: false
+  },
+  {
+    // PHASE 266 — opencode (research 121, spec §4 A1). The FIRST registry row
+    // whose sessions live in ONE SQLite DATABASE rather than a directory of
+    // per-session files: see `storeDb` below and the read-only reader in
+    // src/main/manifest/harvest/. Installed and driven live against 1.18.30,
+    // so the hands-on fields (multilineKey, imageDrop) are VERIFIED, not
+    // docs-only.
+    id: 'opencode',
+    displayName: 'opencode', // the product's own lowercase spelling
+    kind: 'cli',
+    launchable: true,
+    status: 'shipped-main',
+    confidence: 'high',
+    binaries: ['opencode'],
+    // The installer writes ~/.opencode/bin/opencode; reach that real bin dir
+    // on the probe path. No stray `opencode` on PATH is a concern the way
+    // `claude`/`agent` are, so the versionProbe needs no identitySubstring.
+    extraProbeDirs: ['~/.opencode/bin'],
+    // The CONTAINING DIRECTORY is the install-and-in-use signal (detection
+    // does `expandDirs(storeDirs).some(existsSync)`); the sessions themselves
+    // are ROWS in the db named by `storeDb`, not files under this dir, so the
+    // directory scan finds nothing to readdir and the harvest reads the db.
+    storeDirs: ['~/.local/share/opencode'],
+    // The SQLite session db. Shared constant (spec §2 D1) so this row and the
+    // harvest reader never drift; NOT spelled inline. Read READ ONLY.
+    storeDb: OPENCODE_DB_TEMPLATE, // '~/.local/share/opencode/opencode.db'
+    // Research 121 / spec §4 A1, read from opencode's own docs 2026-09-13.
+    // DISPLAY AND CLIPBOARD ONLY — Tortie NEVER runs it. `curl … | bash` is a
+    // script, not a package manager.
+    install: {
+      canonical: {
+        command: 'curl -fsSL https://opencode.ai/install | bash',
+        docUrl: 'https://opencode.ai/docs/',
+        readOn: '2026-09-13'
+      },
+      alternates: [
+        { label: 'npm', command: 'npm install -g opencode-ai' },
+        { label: 'Homebrew', command: 'brew install anomalyco/tap/opencode' },
+        { label: 'self update', command: 'opencode upgrade' }
+      ],
+      canonicalIsPackageManager: false,
+      signature: null
+    },
+    // `opencode --version` prints the bare version on one line with no ANSI
+    // (measured 2026-09-13: `1.18.30`). first-line default; no identity token
+    // needed (spec §1 F1).
+    versionProbe: { args: ['--version'] },
+    launch: { argv: ['opencode'], quirks: [] },
+    resume: {
+      strategy: 'flag-uuid',
+      // The default command is the TUI `opencode [project]`, which accepts
+      // `-s, --session <id>` (measured from `opencode --help` 2026-09-13).
+      // `--session` is a top-level OPTION, not a subcommand, so extras trail
+      // (the default resumeExtrasPosition).
+      template: ['--session', SESSION_ID_SLOT],
+      idCapture: {
+        mode: 'harvest',
+        // WEAK, and the reason is that the SQLite store's `directory` column is
+        // not a per-pane identity: two opencode panes started in one cwd are
+        // not separable, exactly like deepseek. The key stays cwd-newest (spec
+        // §2 D3) even though the store happens to be a SQLite index — the
+        // ownership evidence is still only the directory — so the claim ladder
+        // and deriveResumeConfidence apply unchanged and the claim is TAKEABLE.
+        key: 'cwd-newest',
+        source:
+          'newest top-level session.id (parent_id IS NULL, time_archived IS NULL) whose `directory` column matches the pane cwd via samePath, read READ ONLY from ~/.local/share/opencode/opencode.db (session table)',
+        // first-turn is the safe, harness-supported default (spec §2 D4).
+        // Whether the TUI writes the session row at OPEN or at FIRST TURN is
+        // Builder B's / the verifier's scratch-HOME measurement; `opencode run`
+        // wrote the row only after the turn (research 121 F6), and first-turn
+        // matches deepseek, so the harness waits after the turn to harvest.
+        availableAt: 'first-turn',
+        confidence: 'weak'
+      },
+      sessionStore:
+        '~/.local/share/opencode/opencode.db (session table, row keyed by the `directory` column)',
+      // requiresOriginalCwd OMITTED (= false): resume is `--session <id>` and
+      // the id is globally unique in the one db, so the conversation is found
+      // regardless of cwd. resumeExtrasPosition OMITTED (= trailing): --session
+      // is a top-level yargs option, order-independent.
+      notes:
+        'RESUME IS HARVEST, NOT ARM-AT-LAUNCH (research 121, spec §1 F5). The TUI takes `-s/--session <id>`, `-c/--continue` and `--fork` (measured from `opencode --help` 2026-09-13), but there is NO flag that PRE-ASSIGNS a chosen session id at create: `-s` continues an EXISTING session. The source has an internal `given` id path (id.ts) and an HTTP `sessionID` payload, but neither is reachable from the run/TUI command line, so Tortie does not invent a pre-assign flag — a wrong one is a dead pane. ' +
+        'THE STORE IS ONE SQLite DB, not per-session files. `session.id` is a `ses_` DESCENDING monotonic id, so the newest session for a cwd sorts FIRST ascending (`ORDER BY id ASC LIMIT 1`); age comes from the `time_created` COLUMN, NOT from decoding the id (Identifier.timestamp explicitly "does not work with descending IDs", spec §1 F4). ' +
+        'The `directory` column is the ABSOLUTE cwd but is NOT realpath-guaranteed by opencode, so the harvest matches with samePath, never a raw string equality (spec §1 F2). ' +
+        'WEAK like deepseek: two opencode panes started in one directory are not separable; the claim is takeable (claim-strength.ts), not confirmed.'
+    },
+    // READ ONLY store: Tortie never writes opencode's db, so it is not a
+    // cross-agent reconstruction target.
+    reconstructionTarget: false,
+    // Idle animation was NOT driven in a pane (this build was restricted to
+    // read-only tmux), so this stays at the FLOOR and is marked 'partial'.
+    // opencode's TUI is event-driven (opentui/solid) with no idle spinner at a
+    // resting prompt, so animatesWhenIdle is false pending a pane measurement.
+    activity: { tier: 'screen', animatesWhenIdle: false, verified: 'partial' },
+    // No opencode.svg is shipped yet, so this falls back to the terminal glyph
+    // (acceptable, like antigravity/muse) — do not block on the asset.
+    iconKey: 'opencode',
+    // Every letter of "opencode" is spoken for: o is Go to symbol (⇧⌘O), e/n
+    // are ⇧⌘E/⇧⌘N, and p/c/d are held by pi/claude/droid. A per-agent mnemonic
+    // must not collide with a built-in ⇧⌘<letter> (src/shared keymap +
+    // focus-chord.test.ts refuse ⇧⌘ B E F N O U Z), so a free out-of-name
+    // letter is used. 'y' is free of every app and macOS chord.
+    defaultHotkeyHint: 'y',
+    multilineKey: {
+      sequence: LF,
+      verified: true,
+      notes:
+        "opencode's default `input_newline` keybind is `shift+return,ctrl+return,alt+return,ctrl+j` (source packages/tui/src/config/keybind.ts, opencode 1.18.30). Tortie's Shift+Enter emits ⌃J (LF), which is bound to input.newline, so a newline is inserted rather than the prompt submitted."
+    },
+    imageDrop: {
+      strategy: 'paste-path',
+      insert: 'paste',
+      verified: true,
+      notes:
+        "Bracket-pasting a bare absolute path makes opencode read the file itself and attach it as an [Image N]/[PDF N] chip (source prompt/index.tsx pasteInputText -> readLocalAttachment, opencode 1.18.30); file:// URLs and macOS backslash-escaped spaces are handled. TRAP: paste the path ALONE — a paste of >=3 lines or >150 chars is collapsed to a `[Pasted ~N lines]` summary instead of attached."
+    },
+    // Capture is OFF: the bundled specstory has no opencode provider (D6). The
+    // explicit `provider: null` arm keeps `providerIdFor` from auto-enabling
+    // capture the day a specstory build advertises an `opencode` id.
+    specstory: {
+      provider: null,
+      notes:
+        'specstory 2.8.0 (bundled) lists antigravity, claude, codex, copilotide, cursor, cursoride, deepseek, droid, gemini and muse — not opencode, so capture is off. Flip this row when a bundled specstory ships an opencode provider.'
+    },
+    unverified: false,
+    notes:
+      'Phase 266 (research 121): the first SQLite-store agent. Sessions are ROWS in ~/.local/share/opencode/opencode.db, read READ ONLY by src/main/manifest/harvest/. Capture is off (no specstory provider). Launch / resume / restore only; no plugin, MCP, ACP, serve/web, attach or GitHub flow is integrated.'
   },
   {
     id: 'cursoride',

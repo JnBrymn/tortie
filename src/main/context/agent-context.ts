@@ -1219,6 +1219,9 @@ const SKILLS_CLI_NAMES: Record<AgentRegistryId, string | null> = {
   antigravity: 'antigravity-cli',
   deepseek: null,
   muse: null,
+  // The bundled skills CLI (src/main/skills/commands.ts) has no opencode
+  // target, so opencode cannot be a skill-install target — the honest null.
+  opencode: null,
   cursoride: null,
   copilotide: null
 };

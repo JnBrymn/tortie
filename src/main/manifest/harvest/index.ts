@@ -29,6 +29,17 @@ export {
 export { isDescendantOf, resetProcessParentCache } from './process-table';
 
 /**
+ * PHASE 266. opencode's store is one READ-ONLY SQLite database, not a directory
+ * of files. Its reader lives in its own module (it opens better-sqlite3) and is
+ * consumed by the `opencode` descriptor's `scanStore` in ./stores.ts.
+ */
+export {
+  newestOpencodeSessionIdForCwd,
+  opencodeDbPath,
+  readOpencodeSessions
+} from './opencode-store';
+
+/**
  * PHASE 215. The shared question every harvest descriptor must answer, and the
  * codex predicate that answers it. Pure, and the same function serves the
  * local file read, the remote head read and the boot repair.

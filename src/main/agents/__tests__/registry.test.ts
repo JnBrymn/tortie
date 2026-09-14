@@ -51,15 +51,16 @@ const ALL_IDS: AgentRegistryId[] = [
   'pi',
   'omp',
   'grok',
+  'opencode',
   'cursoride',
   'copilotide'
 ];
 
 describe('registry shape', () => {
-  it('contains exactly the 14 researched agents, ids unique', () => {
-    expect(AGENT_REGISTRY).toHaveLength(14);
+  it('contains exactly the 15 researched agents, ids unique', () => {
+    expect(AGENT_REGISTRY).toHaveLength(15);
     expect([...AGENT_IDS].sort()).toEqual([...ALL_IDS].sort());
-    expect(new Set(AGENT_IDS).size).toBe(14);
+    expect(new Set(AGENT_IDS).size).toBe(15);
   });
 
   it('every entry has displayName, ≥1 binary, and an icon key', () => {
@@ -90,8 +91,8 @@ describe('capture-only IDE entries', () => {
     expect(() => getLaunchableEntry(id as never)).toThrow(/capture-only/);
   });
 
-  it('launchable ids are the 12 CLIs (no IDE pair)', () => {
-    expect(LAUNCHABLE_AGENT_IDS).toHaveLength(12);
+  it('launchable ids are the 13 CLIs (no IDE pair)', () => {
+    expect(LAUNCHABLE_AGENT_IDS).toHaveLength(13);
     expect(LAUNCHABLE_AGENT_IDS).not.toContain('cursoride');
     expect(LAUNCHABLE_AGENT_IDS).not.toContain('copilotide');
   });
@@ -193,7 +194,8 @@ describe('resume templates', () => {
       qwen: '--resume',
       pi: '--session-id', // idempotent: the flag it launched with
       omp: '--resume', // pi's successor; pre-assign --session-id is gone
-      grok: '--resume' // launch flag is --session-id; the two differ, unlike pi
+      grok: '--resume', // launch flag is --session-id; the two differ, unlike pi
+      opencode: '--session' // TUI has no pre-assign flag; id is harvested from the db
     };
     for (const id of LAUNCHABLE_AGENT_IDS) {
       expect(getRegistryEntry(id).resume.template[0], id).toBe(VERB[id]);
@@ -245,7 +247,9 @@ describe('resume templates', () => {
       const c = getRegistryEntry(id).resume.idCapture;
       return c.mode === 'harvest' && c.confidence === 'weak';
     });
-    expect([...weak].sort()).toEqual(['deepseek', 'omp']);
+    // opencode joins the weak set: two panes in one cwd are not separable, the
+    // newest session.id for that directory is all the db gives (research 121).
+    expect([...weak].sort()).toEqual(['deepseek', 'omp', 'opencode']);
   });
 
   it('marks the cwd-scoped agents so restore cannot drift their directory', () => {

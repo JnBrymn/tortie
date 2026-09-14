@@ -81,7 +81,14 @@ export const BYPASS_FLAGS: Readonly<Record<LaunchableAgentId, readonly string[]>
   // empty (helpVerifiedVersion: null). Left blank rather than guessed: an
   // invented flag would produce a dead pane the day droid arrives, and the
   // whole point of research 22 is that guessed flags are how we got here.
-  droid: []
+  droid: [],
+  // opencode reaches its TUI prompt with NO gate answered. Its `--auto`
+  // ("auto-approve permissions that are not explicitly denied") gates a tool
+  // CALL, not the prompt — exactly like omp — and the conformance turns run no
+  // tools, so empty is right. Passing `--auto` would also need a matching
+  // VERIFIED entry in AGENT_FLAG_PRESETS to keep assertBypassFlagsAreCataloged
+  // green; opencode has no preset catalog, so the assertion skips it. (Phase 266)
+  opencode: []
 };
 
 /**

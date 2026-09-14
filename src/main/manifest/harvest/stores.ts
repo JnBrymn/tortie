@@ -63,6 +63,11 @@ import {
   codexHomeOfRollout,
   codexStateFor
 } from './codex-state';
+// PHASE 266. opencode's store is one SQLite database, not a directory of
+// files, so its descriptor reads rows through this READ-ONLY reader instead of
+// a readdir walk. The reader is in its own module (it opens better-sqlite3);
+// this file only composes synthetic candidates from the rows it returns.
+import { opencodeDbPath, readOpencodeSessions } from './opencode-store';
 import {
   codexDerivedRecord,
   codexRecordId,
@@ -249,6 +254,26 @@ export interface HarvestDescriptor {
    * create path is untouched; only the boot rescue looks them up.
    */
   rescueOnly?: boolean;
+  /**
+   * PHASE 266. What KIND of store this is. Absent (the default) means a
+   * directory of files — every descriptor before opencode — walked by
+   * ./watch.ts's `scan()` readdir. `'sqlite'` means ONE database file, read by
+   * `scanStore` below instead of a readdir walk. ./watch.ts branches on this
+   * ONCE, in its poll and its event handler, and the whole settle path
+   * (grace, rivals, the claim ladder, `deriveResumeConfidence`) is SHARED, not
+   * duplicated.
+   */
+  storeKind?: 'files' | 'sqlite';
+  /**
+   * PHASE 266. For a `'sqlite'` store: read the database and return this pane's
+   * candidate sessions as SYNTHETIC candidate paths, newest first. A synthetic
+   * path is opaque to ./watch.ts and is decoded only by THIS descriptor's own
+   * `identify`/`confirm`, so a session's id, its creation time and its
+   * directory ride through the SAME `consider()` settle path the file agents
+   * use — without any file existing on disk. Never throws (the reader degrades
+   * to an empty list on a missing/locked/mid-write db).
+   */
+  scanStore?(ctx: HarvestContext, de: DescriptorEnv): string[];
   /** Directories to watch and scan. May not exist yet — that is fine. */
   roots(ctx: HarvestContext, de: DescriptorEnv): string[];
   /** Are candidates files or directories? */
@@ -428,6 +453,52 @@ function xdgDataHome(de: DescriptorEnv): string {
   return xdg !== undefined && xdg.length > 0
     ? xdg
     : join(de.home, '.local', 'share');
+}
+
+/**
+ * PHASE 266. A SQLite store has no directory of candidate files, so opencode's
+ * candidates are SYNTHETIC paths: opaque strings ./watch.ts carries verbatim
+ * through the same `consider()` settle path the file agents use, decoded only
+ * here by `identify` (the id + its creation time) and `confirm` (the folder).
+ *
+ * The separator is NUL (`\0`): it is the one byte a filesystem path can never
+ * contain, so no real directory value can collide with the delimiter, and a
+ * real file path (which never contains a NUL) is never mistaken for one of
+ * these. `identify` returns null for anything that is not this shape, so a
+ * `-wal` change event that reaches `consider()` as a real path is a no-op.
+ */
+const OPENCODE_SYNTH_PREFIX = 'opencode-session\0';
+
+interface OpencodeSynthFields {
+  sessionId: string;
+  nameTs: number;
+  directory: string;
+}
+
+function opencodeSynthPath(fields: OpencodeSynthFields): string {
+  return (
+    OPENCODE_SYNTH_PREFIX +
+    `${fields.sessionId}\0${fields.nameTs}\0${fields.directory}`
+  );
+}
+
+function parseOpencodeSynthPath(path: string): OpencodeSynthFields | null {
+  if (!path.startsWith(OPENCODE_SYNTH_PREFIX)) return null;
+  const parts = path.slice(OPENCODE_SYNTH_PREFIX.length).split('\0');
+  const sessionId = parts[0];
+  const nameTs = Number(parts[1]);
+  // A directory can hold anything but a NUL, so it is exactly parts[2]; join
+  // the tail defensively in case a future field is appended before it.
+  const directory = parts.slice(2).join('\0');
+  if (
+    sessionId === undefined ||
+    sessionId.length === 0 ||
+    !Number.isFinite(nameTs) ||
+    directory.length === 0
+  ) {
+    return null;
+  }
+  return { sessionId, nameTs, directory };
 }
 
 export const DESCRIPTORS: Partial<Record<LaunchableAgentId, HarvestDescriptor>> = {
@@ -986,6 +1057,89 @@ export const DESCRIPTORS: Partial<Record<LaunchableAgentId, HarvestDescriptor>> 
     graceMs: 5_000,
     timeoutMs: HARVEST_WINDOW_MS,
     pollIntervalMs: 1_000
+  },
+
+  /**
+   * opencode (Phase 266, docs/research/121). The FIRST agent whose store is one
+   * SQLite database rather than a directory of files, so `storeKind` is
+   * `'sqlite'` and the candidates come from `scanStore` reading rows, not from
+   * a readdir walk. The store happens to be a SQLite INDEX carrying id + cwd in
+   * one row, but the only ownership evidence is still the DIRECTORY, so the key
+   * is `cwd-newest` (deepseek's family), the confidence is `weak`, and the
+   * documented weakness is identical: two opencode panes started in one folder
+   * are not separable, and the claim stays takeable rather than confirmed.
+   *
+   * The reader excludes sub-sessions and archived sessions IN THE QUERY, so a
+   * derived stream never reaches the harvest — see `derivedStream` below.
+   */
+  opencode: {
+    key: 'cwd-newest',
+    confidence: 'weak',
+    storeKind: 'sqlite',
+    /**
+     * PHASE 266. opencode HAS derived streams: the `session` table carries a
+     * `parent_id` (sub-sessions) and a `time_archived`, and a resume must never
+     * name one. Unlike the file stores there is no path segment or JSON record
+     * for the pipeline to test — the exclusion is enforced in the reader's SQL
+     * (`parent_id IS NULL AND time_archived IS NULL`), so a derived row is never
+     * surfaced as a candidate in the first place. The pipeline's own question
+     * therefore has nothing left to refuse, and the kind is `none` with the
+     * measured evidence attached, exactly as a `none` must be.
+     *
+     * Measured READ ONLY over a snapshot copy of the operator's own store,
+     * 2026-09-13.
+     */
+    derivedStream: {
+      kind: 'none',
+      measured:
+        'The store is ~/.local/share/opencode/opencode.db, one SQLite file. ' +
+        'The `session` table carries `id` (a descending `ses_` id), the ' +
+        'ABSOLUTE `directory`, `time_created`, and — the derived-stream ' +
+        'dimensions — a `parent_id` (opencode writes sub-sessions into the ' +
+        'SAME table; there is a `session_parent_idx` index on it) and a ' +
+        '`time_archived`. The READ-ONLY reader (./opencode-store.ts) excludes ' +
+        'both in the query, `parent_id IS NULL AND time_archived IS NULL`, so ' +
+        'a sub-session or an archived session is never harvested as this ' +
+        "pane's resumable id. The snapshot held 3 rows, all 3 top-level " +
+        '(parent_id NULL) and 0 archived, so no derived row is present today; ' +
+        'the filter is the guarantee for the day one is. `Identifier.timestamp` ' +
+        'is NOT used to age a row (it does not decode a descending id, research ' +
+        '121 F4) — the `time_created` column is authoritative.'
+    },
+    roots: (_ctx, de) => [join(de.home, '.local', 'share', 'opencode')],
+    entry: 'file',
+    maxDepth: 0,
+    // `time_created` IS the session's start time and it is authoritative, so a
+    // row older than the spawn is a verdict on its own: this harvest runs at
+    // CREATE, and only a session written at or after the pane's spawn can be
+    // this pane's. (There is no mtime to give a synthetic path a second vote.)
+    nameTsIsAuthoritative: true,
+    scanStore: (_ctx, de) =>
+      readOpencodeSessions(opencodeDbPath(de.home)).map((row) =>
+        opencodeSynthPath({
+          sessionId: row.sessionId,
+          nameTs: row.timeCreatedMs,
+          directory: row.directory
+        })
+      ),
+    identify: (path) => {
+      const fields = parseOpencodeSynthPath(path);
+      if (fields === null) return null;
+      return { sessionId: fields.sessionId, nameTs: fields.nameTs };
+    },
+    confirm: async (path, ctx) => {
+      const fields = parseOpencodeSynthPath(path);
+      if (fields === null) return 'unknown';
+      // The `scanStore` query already narrowed to resumable rows; this proves
+      // the cwd the file agents' `confirm` proves, via `samePath` and never a
+      // raw string `=` (opencode does not realpath its `directory`).
+      return (await samePath(fields.directory, ctx.cwd)) ? 'match' : 'mismatch';
+    },
+    // A flat store whose row appears at create/first-turn, so the window is
+    // long and the accept is never a bare "newest row" without a cwd match.
+    graceMs: 5_000,
+    timeoutMs: HARVEST_WINDOW_MS,
+    pollIntervalMs: 2_000
   }
 };
 
@@ -998,7 +1152,7 @@ export const DESCRIPTORS: Partial<Record<LaunchableAgentId, HarvestDescriptor>> 
  * derived record and no derived record can ever become a rival, a grace
  * acceptance or a claim.
  *
- * It costs NOTHING for the five descriptors that answer `none`: no path is
+ * It costs NOTHING for the six descriptors that answer `none`: no path is
  * walked and no byte is read. It costs muse one comparison of a directory
  * name, and it costs codex one bounded head read, of a file `confirm` was
  * about to read anyway.

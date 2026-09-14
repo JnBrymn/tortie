@@ -53,7 +53,9 @@ const DOC_HOSTS = {
   qwen: 'github.com',
   pi: 'pi.dev',
   omp: 'omp.sh',
-  grok: 'x.ai'
+  grok: 'x.ai',
+  // Phase 266. The canonical install and the docs both live on opencode.ai.
+  opencode: 'opencode.ai'
 };
 
 /** First words that mean "this route is a package manager". */

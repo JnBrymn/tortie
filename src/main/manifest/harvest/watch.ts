@@ -688,7 +688,7 @@ export function watchForSessionId(
     // claim. It is asked HERE, ahead of the freshness arithmetic and ahead of
     // `confirm`, because a sub agent inherits its parent's cwd verbatim and is
     // NEWER than the thread that spawned it, so every rule below this line
-    // prefers it. The five descriptors that answer `none` pay nothing at all
+    // prefers it. The six descriptors that answer `none` pay nothing at all
     // for it, and muse pays one comparison of a directory name.
     if (await candidateIsDerivedStream(d, roots, path)) return;
 
@@ -860,7 +860,16 @@ export function watchForSessionId(
     const startedAt = Date.now();
     try {
       const found: string[] = [];
-      for (const root of roots) await scan(root, 0, d, found);
+      // PHASE 266. A SQLite store has no directory of candidate files, so the
+      // ONE branch is here: read the rows through the descriptor's `scanStore`
+      // instead of a readdir walk. Everything after it — `consider`, the
+      // settle path, grace, rivals, the claim ladder — is the SAME code the
+      // file agents run. `scanStore` never throws (the reader degrades to []).
+      if (d.storeKind === 'sqlite' && d.scanStore !== undefined) {
+        for (const p of d.scanStore(ctx, de)) found.push(p);
+      } else {
+        for (const root of roots) await scan(root, 0, d, found);
+      }
       for (const p of found) await consider(p, 'poll');
       scannedAt = Math.max(scannedAt, startedAt);
     } catch {
@@ -882,6 +891,14 @@ export function watchForSessionId(
   const onEvents: parcelWatcher.SubscribeCallback = (err, events) => {
     if (settled) return;
     if (err) return; // the poll is the guaranteed path
+    // PHASE 266. For a SQLite store the watcher subscribes to the db's PARENT
+    // DIRECTORY, so an event names the `.db` (or its `-wal`/`-shm`) rather than
+    // a candidate file. There is nothing to `consider` off a path here; a
+    // change means new rows, so re-read the store through the shared poll path.
+    if (d.storeKind === 'sqlite') {
+      void runScan();
+      return;
+    }
     // The whole batch is registered before anything is chosen, exactly as the
     // scan does it. One FSEvents callback can carry two records written in the
     // same instant, and choosing on the first of them would be the enumeration
