@@ -84,7 +84,9 @@ async function refresh(tab: EditorTab): Promise<Partial<EditorTab>[]> {
       current = { ...current, ...patch };
     },
     byId: () => current,
-    worktreeTabsIn: () => [tab]
+    worktreeTabsIn: () => [tab],
+    // Phase 268: the auto-save stop this harness never reaches.
+    autoStop: () => false as const
   });
   await io.refreshRepo('/repo');
   return patches;

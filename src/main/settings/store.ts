@@ -41,18 +41,22 @@ import { dirname, join } from 'node:path';
 import { app, safeStorage } from 'electron';
 import type {
   ArchSettings,
+  AutoSaveSettings,
   FoldSettings,
   GmuxSettings,
   GmuxSettingsPatch
 } from '@shared/settings';
 import {
   archKey,
+  clampAutoSaveDelay,
   clampSavedScrollbackLines,
   clampScrollbackLines,
   dangerKey,
   defaultGmuxSettings,
   foldKey,
+  isAutoSaveMode,
   noArchChosen,
+  noAutoSave,
   noFoldChosen,
   sanitizeChromeDepth,
   sanitizeChromeHue,
@@ -530,7 +534,32 @@ export function sanitizeSettings(raw: unknown): GmuxSettings {
   // before this phase means.
   out.usage = sanitizeUsageSettings(obj['usage']);
 
+  // Auto save (Phase 268). Membership on the mode and a clamp on the delay,
+  // and no seal: a timer writes the person's own files through the guarded
+  // door and starts nothing. An invalid row drops WHOLE to off, which is the
+  // shipped answer and what every settings file written before this phase
+  // means.
+  out.autoSave = sanitizeAutoSaveSettings(obj['autoSave']);
+
   return out;
+}
+
+/**
+ * Coerce a parsed `autoSave` value into a valid choice (Phase 268).
+ *
+ * The same discipline as `sanitizeArchSettings` below: a non-object or an
+ * unknown mode drops the WHOLE row to off rather than merging half of it,
+ * because half a choice here would be a timer with no mode or a mode with a
+ * delay nobody chose, and the thing at the other end of it is a write to the
+ * person's file. A valid mode with a silly delay keeps the mode and clamps the
+ * delay, because the mode is the decision and the delay is a number.
+ */
+export function sanitizeAutoSaveSettings(raw: unknown): AutoSaveSettings {
+  if (raw === null || typeof raw !== 'object') return noAutoSave();
+  const obj = raw as Record<string, unknown>;
+  const mode = obj['mode'];
+  if (!isAutoSaveMode(mode)) return noAutoSave();
+  return { mode, delayMs: clampAutoSaveDelay(obj['delayMs']) };
 }
 
 /**

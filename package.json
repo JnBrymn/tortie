@@ -75,6 +75,8 @@
     "measure:semantic": "npm run build && node build/harness-socket.mjs --fresh gmux-p259 'node build/p259/measure-semantic.mjs'",
     "probe:p259": "npm run build && node build/harness-socket.mjs --fresh gmux-p259 'node build/p259/probe-p259.mjs'",
     "probe:p250": "npm run build && node build/harness-socket.mjs --fresh gmux-p250 'node build/p247/path-open.mjs'",
+    "probe:p268": "npm run build && node build/harness-socket.mjs --fresh gmux-p268 'node build/p268/probe-p268-autosave.mjs'",
+    "ablation:p268": "node build/p268/ablation.mjs",
     "probe:p249": "npm run build && node build/p249/probe-p249.mjs",
     "probe:p243": "npm run build && node build/harness-socket.mjs --fresh gmux-p243 'node build/probe-p243-durable.mjs'",
     "probe:p236": "npm run build && node build/probe-p236-chip.mjs",

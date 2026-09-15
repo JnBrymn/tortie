@@ -15,6 +15,11 @@ import {
   writePopOutFocus
 } from '../state/pop-out-focus';
 import type { PopOutFocus } from '../state/pop-out-focus';
+import {
+  AUTO_SAVE_DELAY_CHOICES,
+  clampAutoSaveDelay
+} from '@shared/settings';
+import type { AutoSaveMode } from '@shared/settings';
 import { ScrollbackSection } from './ScrollbackSection';
 import { useSettingsStore } from './settings-store';
 import { Switch } from './Switch';
@@ -294,6 +299,88 @@ function PopOutFocusRow(): React.JSX.Element {
 }
 
 /**
+ * PHASE 268 — auto save (issue 24). Two rows, and the second one is drawn only
+ * when it does something.
+ *
+ * THE CAPTION IS THE ONE THING A PERSON HAS TO KNOW, and it is one sentence:
+ * the timer takes the same check ⌘S takes, so a file an agent changed is never
+ * written over. Everything else about it — what happens when one is, which
+ * files are skipped — is behaviour they meet at the moment it matters, in the
+ * sentence the stop itself says, rather than a paragraph on a resting face.
+ *
+ * `Never` is the shipped answer: a person's files are not opted into timed
+ * writes by an upgrade. The File menu's checkbox toggles this same field
+ * between `Never` and `After a delay`, so the two surfaces cannot disagree.
+ */
+function AutoSaveRows(): React.JSX.Element {
+  const autoSave = useSettingsStore((s) => s.settings.autoSave);
+  const update = useSettingsStore((s) => s.update);
+
+  return (
+    <>
+      <div className="set-row tall">
+        <div className="set-row-text">
+          <span className="set-row-label">Auto save</span>
+          <span className="set-row-caption">
+            {`Tortie saves through the same check ${keyDisplay(
+              'editor.save'
+            )} uses, so a file an agent changed is never written over.`}
+          </span>
+        </div>
+        <select
+          className="set-select"
+          aria-label="Auto save"
+          value={autoSave.mode}
+          onChange={(e) => {
+            void update({
+              autoSave: {
+                mode: e.target.value as AutoSaveMode,
+                delayMs: autoSave.delayMs
+              }
+            });
+          }}
+        >
+          <option value="off">Never</option>
+          <option value="afterDelay">After a delay</option>
+          <option value="onFocusChange">When the editor loses focus</option>
+        </select>
+      </div>
+      {/* A control that does nothing is worse than no control: the delay
+          applies to `afterDelay` alone, so it is drawn for that mode alone. */}
+      {autoSave.mode === 'afterDelay' ? (
+        <div className="set-row tall">
+          <div className="set-row-text">
+            <span className="set-row-label">Save after</span>
+            <span className="set-row-caption">
+              How long Tortie waits after you stop typing.
+            </span>
+          </div>
+          <select
+            className="set-select"
+            aria-label="Save after"
+            value={String(autoSave.delayMs)}
+            onChange={(e) => {
+              void update({
+                autoSave: {
+                  mode: autoSave.mode,
+                  delayMs: clampAutoSaveDelay(Number(e.target.value))
+                }
+              });
+            }}
+          >
+            {AUTO_SAVE_DELAY_CHOICES.map((ms) => (
+              <option key={ms} value={String(ms)}>
+                {ms === 1000 ? '1 second' : `${String(ms / 1000)} seconds`}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * Phase 24. One read only row: the running version, and what the updater is
  * doing about it. Data comes from the `updates:state` invoke channel, fetched
  * when the section mounts. The row does not live update; reopening Settings
@@ -361,6 +448,15 @@ export function GeneralSection(): React.JSX.Element {
       <div className="set-card">
         <DefaultAgentRow />
         <PopOutFocusRow />
+      </div>
+
+      {/* Phase 268. A group of its own, between Sessions and the shell
+          command card, because auto save is about the editor rather than
+          about a session — and the delay row lives beside the mode it
+          belongs to rather than in a second place. */}
+      <div className="set-group-label">Editor</div>
+      <div className="set-card">
+        <AutoSaveRows />
       </div>
 
       {/* Phase 51. The tortie shell command: install and remove are the two

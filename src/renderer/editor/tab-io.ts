@@ -83,6 +83,11 @@ import {
 import { dirOf } from './paths';
 import { fileInRepo } from './tab-identity';
 import { guardedSave } from './save-write';
+// PHASE 268. The reason a save was asked for, and the vocabulary of a stop.
+// This module holds NO timer state: the controller next door owns the map of
+// stops and the whole "shown once" rule, and reaches this side through
+// `TabIoDeps.autoStop`.
+import type { AutoSaveStopWhy, SaveReason } from './auto-save';
 import {
   SAVE_COMPARE_LABEL,
   SAVE_OVERWRITE_LABEL,
@@ -140,6 +145,16 @@ export interface TabIoDeps {
   byId(id: string): EditorTab | undefined;
   /** Open WORKTREE tabs in this repo — history tabs are never refreshed. */
   worktreeTabsIn(repoPath: string): EditorTab[];
+  /**
+   * PHASE 268. Record that auto save stopped for this tab, and say so ONCE.
+   *
+   * The guarded door below calls it instead of opening a dialog or raising a
+   * toast, because a modal is a question put to somebody who pressed
+   * something and a timer pressed nothing. It always answers false, which is
+   * "nothing was written", so every `auto` arm is one line. The record itself
+   * lives in ./auto-save, which is also what stops the timer re-arming.
+   */
+  autoStop(id: string, why: AutoSaveStopWhy): false;
 }
 
 export interface TabIo {
@@ -171,8 +186,16 @@ export interface TabIo {
   loadImage(id: string, path: string): Promise<void>;
   /** The same image at HEAD — the BEFORE side of the comparison. */
   loadImageHead(id: string): Promise<void>;
-  /** Write one tab to disk. Resolves false when nothing was written. */
-  save(id: string): Promise<boolean>;
+  /**
+   * Write one tab to disk. Resolves false when nothing was written.
+   *
+   * PHASE 268. `reason` defaults to `explicit`, so ⌘S and every existing
+   * caller are byte-identical to what they were. `auto` is the timer, and it
+   * changes exactly two things: it refuses the plain, unguarded door outright
+   * (issue 16 is what an unguarded write on a timer costs), and it never opens
+   * a dialog — a refusal becomes one stop record and one sentence instead.
+   */
+  save(id: string, reason?: SaveReason): Promise<boolean>;
   refreshRepo(repoPath: string): Promise<void>;
 }
 
@@ -1195,10 +1218,17 @@ export function createTabIo(deps: TabIoDeps): TabIo {
   const saveInProject = async (
     id: string,
     tab: EditorTab,
-    value: string
+    value: string,
+    reason: SaveReason
   ): Promise<boolean> => {
     const expect = await sha256Hex(tab.savedContents);
-    if (expect === null) return saveOutsideProject(id, tab, value, tab.savedContents);
+    // PHASE 268. A page with no digest program at all cannot be guarded, so
+    // there is no precondition to write behind and a timer stops rather than
+    // falling through. ⌘S is unchanged.
+    if (expect === null) {
+      if (reason === 'auto') return deps.autoStop(id, { kind: 'link' });
+      return saveOutsideProject(id, tab, value, tab.savedContents);
+    }
     const result = await guardedSave({
       root: tab.repoPath,
       path: tab.path,
@@ -1212,7 +1242,18 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     // A symbolic link, which the channel will not turn into a regular file.
     // It takes the plain door, which now reads the file first.
     // ./save-sentences SaveRefusalWord carries the argument.
-    if (result.outcome === 'unguarded') return saveOutsideProject(id, tab, value, tab.savedContents);
+    //
+    // PHASE 268. IT IS THE ONE DOOR AUTO SAVE MAY NOT TAKE, and this is the
+    // arm a later round reopens for convenience. The plain door's own stale
+    // answer opens a DIALOG, and its read-then-write window is one IPC round
+    // trip wide (./save-sentences, the stated limit). A timer opens no dialog
+    // and does not get an unguarded write, so it stops here and says so once.
+    // `conformance:save` rule 11b is what keeps this test in front of the
+    // door name.
+    if (result.outcome === 'unguarded') {
+      if (reason === 'auto') return deps.autoStop(id, { kind: 'link' });
+      return saveOutsideProject(id, tab, value, tab.savedContents);
+    }
     if (result.outcome === 'stale') {
       // PHASE 240 FIX ROUND. A `stale` ANSWER IS NOT ALWAYS A CHANGE ON DISK,
       // and as this phase first shipped it was always read as one.
@@ -1239,6 +1280,9 @@ export function createTabIo(deps: TabIoDeps): TabIo {
       // one: the sentence would name the encoding rather than the writer.
       // Nothing is written either way, and the next ⌘S answers `wrote`.
       if ((await diskReading(tab, tab.savedContents)).kind === 'same') {
+        if (reason === 'auto') {
+          return deps.autoStop(id, { kind: 'refused', why: 'notUtf8' });
+        }
         useApp
           .getState()
           .toast('error', saveRefusalSentence('notUtf8', tab.name), {
@@ -1246,11 +1290,18 @@ export function createTabIo(deps: TabIoDeps): TabIo {
           });
         return false;
       }
+      // PHASE 268. Something really did write under the buffer, which is issue
+      // 16's own event. The choice stays the explicit save's: `offerStaleChoice`
+      // is a question, and the timer that reached here asked nobody anything.
+      if (reason === 'auto') return deps.autoStop(id, { kind: 'stale' });
       const again = result.sha256;
       offerStaleChoice(tab, value, () => {
         void overwrite(id, tab, value, again);
       });
       return false;
+    }
+    if (reason === 'auto') {
+      return deps.autoStop(id, { kind: 'refused', why: result.why });
     }
     useApp
       .getState()
@@ -1269,7 +1320,10 @@ export function createTabIo(deps: TabIoDeps): TabIo {
    * what `npm run conformance:save` reads by matching braces: `save`'s own
    * body must not name `fs:writeFile`.
    */
-  const save = async (id: string): Promise<boolean> => {
+  const save = async (
+    id: string,
+    reason: SaveReason = 'explicit'
+  ): Promise<boolean> => {
     const tab = deps.byId(id);
     if (!gmux || tab === undefined) return false;
     // History is immutable: ⌘S on a commit tab is a no-op, never a write of
@@ -1350,8 +1404,16 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     // question that matters for a draft — has somebody put a file here since
     // it opened.
     const neverSaved = tab.draft != null && tab.savedContents === '';
-    return !neverSaved && fileInRepo(tab.repoPath, tab.path)
-      ? saveInProject(id, tab, value)
+    const guarded = !neverSaved && fileInRepo(tab.repoPath, tab.path);
+    // PHASE 268. AUTO SAVE NEVER TAKES THE PLAIN DOOR. It is unguarded, and
+    // issue 16 measured what an unguarded write costs when somebody else got
+    // there first: 173 bytes of an agent's paragraph, with nothing said. A
+    // person's ⌘S still takes it, with the reading and the three answers in
+    // front of it; a timer stops instead and the buffer keeps the typing.
+    // build/p268/SPEC.md section 0, and `conformance:save` rule 11.
+    if (reason === 'auto' && !guarded) return false;
+    return guarded
+      ? saveInProject(id, tab, value, reason)
       : saveOutsideProject(id, tab, value, tab.savedContents);
   };
 

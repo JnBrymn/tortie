@@ -29,6 +29,10 @@ import { openRecentOnMachine } from './open-recent-on-machine';
 import { pullPendingShellOpen } from '../state/shell-open';
 import { useLayout } from '../state/layout';
 import { useEditor } from '../editor/store';
+// PHASE 268. File > Auto Save writes one settings field and reads it back
+// through the same store the Settings window writes, so the two surfaces can
+// never disagree about what the mode is.
+import { useSettingsStore } from '../settings/settings-store';
 // Phase 18. The guard (no file open, or overlay mode) lives inside
 // toggleEditorFill, so the button, Shift+Cmd+B and the menu item cannot drift.
 // PHASE 165: from its own leaf, so the menu reaches it without the panel.
@@ -184,6 +188,19 @@ export function runMenuAction(action: AnyMenuActionWithProjects): void {
     case 'save-file': {
       const ed = useEditor.getState();
       if (ed.panelOpen && ed.activeTab() !== null) void ed.save();
+      return;
+    }
+    // PHASE 268. File > Auto Save. It toggles off ↔ afterDelay and nothing
+    // else, which is what VS Code's own `toggleAutoSave` does; the two other
+    // modes are a Settings choice. The row's tick is NOT set here — the
+    // setting is written, main rebuilds the menu, and the rebuilt template
+    // reads the new value.
+    case 'toggle-auto-save': {
+      const settings = useSettingsStore.getState();
+      const { mode, delayMs } = settings.settings.autoSave;
+      void settings.update({
+        autoSave: { mode: mode === 'off' ? 'afterDelay' : 'off', delayMs }
+      });
       return;
     }
     case 'close-editor-tab': {

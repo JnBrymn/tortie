@@ -34,6 +34,10 @@ const ARMS = [
   'next-project',
   'prev-project',
   'save-file',
+  // Phase 268. File > Auto Save, the checkbox under Save. The arm writes one
+  // settings field and nothing else: the tick is main's, rebuilt from the
+  // value after settings:set.
+  'toggle-auto-save',
   'close-editor-tab',
   'toggle-editor',
   // Phase 227. Edit > Next Change, Previous Change, Rewind Change and Undo

@@ -113,7 +113,9 @@ function ioOver(tab: EditorTab): ReturnType<typeof createTabIo> {
       patches.push(patch);
     },
     byId: () => tab,
-    worktreeTabsIn: () => []
+    worktreeTabsIn: () => [],
+    // Phase 268: the auto-save stop this harness never reaches.
+    autoStop: () => false as const
   });
 }
 

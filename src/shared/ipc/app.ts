@@ -127,6 +127,13 @@ export type MenuActionId =
   | 'next-project'
   | 'prev-project'
   | 'save-file'
+  // PHASE 268. File > Auto Save, a checkbox that toggles off ↔ afterDelay.
+  // UNACCELERATED, for the reason Open Folder on a Machine… and Clone
+  // Repository carry no chord: every built-in chord is one a person can no
+  // longer record as a per-agent hotkey (menu.ts:653). The click forwards and
+  // does not set the mark — the setting is written, `settings:set` rebuilds
+  // the menu, and the rebuilt template reads the new value.
+  | 'toggle-auto-save'
   | 'close-editor-tab'
   | 'toggle-editor'
   // Phase 227. Edit > Next Change, Previous Change, Rewind Change and Undo

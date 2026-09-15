@@ -126,7 +126,9 @@ function ioOverStore(): ReturnType<typeof createTabIo> {
         .getState()
         .tabs.filter(
           (t) => t.repoPath === repoPath && t.commit === null && t.remote === undefined
-        )
+        ),
+    // Phase 268: the auto-save stop this harness never reaches.
+    autoStop: () => false as const
   });
 }
 

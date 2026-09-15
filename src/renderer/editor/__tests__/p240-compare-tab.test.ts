@@ -162,7 +162,9 @@ describe('the refusals', () => {
     const io = createTabIo({
       patch: () => undefined,
       byId: () => tab,
-      worktreeTabsIn: () => []
+      worktreeTabsIn: () => [],
+      // Phase 268: the auto-save stop this harness never reaches.
+      autoStop: () => false as const
     });
     expect(await io.save(tab.id)).toBe(false);
     expect(writeFile).not.toHaveBeenCalled();
@@ -193,7 +195,9 @@ describe('the refusals', () => {
               t.archMap === undefined &&
               t.diagnostics === undefined &&
               t.compare === undefined
-          )
+          ),
+      // Phase 268: the auto-save stop this harness never reaches.
+      autoStop: () => false as const
     });
     await io.refreshRepo(REPO);
     expect(readFile).not.toHaveBeenCalled();

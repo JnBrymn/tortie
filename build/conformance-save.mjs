@@ -66,12 +66,39 @@
  *   8. A word added to the channel gets a sentence or it does not compile, and
  *      no sentence is the generic one the phase replaced.
  *   9. A gate nothing names is how a gate decays.
+ *  10. THE AUTO SAVE MODULE NAMES NO WRITE AND NO PLAIN DOOR (Phase 268). Its
+ *      one route to disk is `deps.save`, which the store hands in as
+ *      `io.save(id, 'auto')`. A timer that writes the buffer is issue 16 on a
+ *      loop, so `src/renderer/editor/auto-save.ts` may not name `writeFile`,
+ *      `writeGuarded`, `writePlain`, `saveOutsideProject` or `setInterval` at
+ *      all.
+ *  11. `save` REFUSES THE PLAIN DOOR FOR THE AUTO REASON, and the refusal is
+ *      read BEFORE the door name appears in its body. The plain door is
+ *      unguarded and a timer does not get an unguarded write.
+ *  11b. `saveInProject`'s `unguarded` ARM REFUSES IT TOO. That arm is the
+ *      symbolic link, and the shape at this phase's parent — a bare
+ *      `return saveOutsideProject(…)` — is the hole a later round reopens,
+ *      because it reads like a fallback rather than like a door.
+ *  12. THE STOP IS RECORDED BEFORE THE SENTENCE, AND ONLY ONCE. A 1000 ms
+ *      timer against a file an agent is rewriting would otherwise be a toast a
+ *      second, so `recordStop` asks `stopped.has` first and toasts last.
+ *  13. AUTO SAVE INVENTS NO REFUSAL SENTENCE. Its composer reaches
+ *      `saveRefusalSentence` and `staleSaveTitle`, so a person meets one idea
+ *      rather than two.
+ *  14. THE TIMER IS ARMED AFTER THE TAB IS PATCHED, never before. The
+ *      controller asks the skip list about the tab as the store HOLDS it, and
+ *      on the clean-to-dirty edge the tab is only dirty after `patchTab`
+ *      lands. `npm run probe:p268` measured the wrong order at this phase's
+ *      first build: a burst of characters saved, because the second keystroke
+ *      takes the other branch and sees a dirty tab, and a SINGLE character
+ *      never saved at all. It is one line, in one direction, and it is exactly
+ *      the kind of thing a later round moves back.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { functionBodyOf, namedFunctions, stripComments } from './scan-source.mjs';
+import { blockAt, functionBodyOf, namedFunctions, stripComments } from './scan-source.mjs';
 
 const TAG = '[conformance:save]';
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -82,6 +109,8 @@ const say = (line) => console.log(`${TAG} ${line}`);
 const TAB_IO = 'src/renderer/editor/tab-io.ts';
 const SAVE_WRITE = 'src/renderer/editor/save-write.ts';
 const SENTENCES = 'src/renderer/editor/save-sentences.ts';
+const AUTO_SAVE = 'src/renderer/editor/auto-save.ts';
+const EDITOR_STORE = 'src/renderer/editor/store.ts';
 
 const source = (rel) => stripComments(readFileSync(join(repoRoot, rel), 'utf8'));
 
@@ -177,6 +206,60 @@ function tailAfter(code, name, marker) {
   if (body === undefined) return null;
   const at = body.indexOf(marker);
   return at === -1 ? null : body.slice(at);
+}
+
+/**
+ * The body of an object-literal METHOD, braces matched. Null when absent.
+ *
+ * PHASE 268. `namedFunctions` reads `function f(` and `const f = (`, and a
+ * store action is neither: `markDirty(id, dirty) { … }` is a shorthand method
+ * on the object the store factory returns. Rule 14 asks about one of those, so
+ * it needs a reader that can find one. It takes the FIRST declaration of the
+ * name followed by `(`…`) {` on one line, which is what a store action is.
+ */
+function methodBody(code, name) {
+  // A `function f(` or `const f = (` declaration first, so this reader is
+  // total over both shapes and a later refactor from one to the other cannot
+  // make the rule read nothing and pass.
+  const declared = namedFunctions(code).get(name);
+  if (declared !== undefined) return declared;
+  const at = code.search(new RegExp(`(^|[\\s,;{])${name}\\s*\\([^)\\n]*\\)\\s*\\{`, 'm'));
+  if (at === -1) return null;
+  const open = code.indexOf('{', code.indexOf('(', at));
+  return open === -1 ? null : blockAt(code, open);
+}
+
+/**
+ * Is `first` mentioned before `second` in the part of `name`'s body that
+ * follows `marker`? null when the function, the marker or either mention is
+ * absent.
+ *
+ * PHASE 268. Rule 11b asks about ONE ARM of `saveInProject` rather than about
+ * its whole body, and the first draft of it asked the whole body — which
+ * `build/p268/ablation.mjs` caught on its third ablation. The parent's symlink
+ * hole passed, because another arm of the same function tests the reason
+ * EARLIER, so `'auto'` really does appear before `saveOutsideProject` while
+ * the unguarded arm falls straight through to the plain door. The question is
+ * about the arm, so the reader starts at the arm.
+ */
+function tailOrder(code, name, marker, first, second) {
+  const tail = tailAfter(code, name, marker);
+  return orderInTail(tail, marker, first, second);
+}
+
+/** The same question over a body the caller already has. */
+function orderIn(body, marker, first, second) {
+  if (body === null) return null;
+  const at = body.indexOf(marker);
+  return orderInTail(at === -1 ? null : body.slice(at), marker, first, second);
+}
+
+function orderInTail(tail, _marker, first, second) {
+  if (tail === null) return null;
+  const a = tail.indexOf(first);
+  const b = tail.indexOf(second);
+  if (a === -1 || b === -1) return null;
+  return a < b;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +446,195 @@ const FIXTURES = [
       '  return { outer };\n' +
       '}',
     check: (c) => innermostNaming(c, 'writeFile').join(',') === 'outer'
+  },
+  // -- Phase 268, rules 10 to 13 ------------------------------------------
+  {
+    name: 'an auto save module that writes through the bridge is caught',
+    catches: true,
+    code: 'export function createAutoSave(deps) { const run = async (id) => { await gmuxBridge().fs.writeFile(p, v); }; return { run }; }',
+    check: (c) => AUTO_SAVE_FORBIDDEN.some((n) => c.includes(n))
+  },
+  {
+    name: 'an auto save module that only calls deps.save is clean',
+    catches: false,
+    code: 'export function createAutoSave(deps) { const run = async (id) => { await deps.save(id); }; return { run }; }',
+    check: (c) => !AUTO_SAVE_FORBIDDEN.some((n) => c.includes(n))
+  },
+  {
+    name: 'an auto save module polling on an interval is caught',
+    catches: true,
+    code: 'export function createAutoSave(deps) { setInterval(() => deps.save(id), 1000); }',
+    check: (c) => AUTO_SAVE_FORBIDDEN.some((n) => c.includes(n))
+  },
+  {
+    name: 'a save whose auto guard precedes the plain door is clean',
+    catches: false,
+    code:
+      "const save = async (id, reason = 'explicit') => { const guarded = inRepo(); " +
+      "if (reason === 'auto' && !guarded) return false; " +
+      'return guarded ? saveInProject(id, reason) : saveOutsideProject(id); };',
+    check: (c) => bodyOrder(c, 'save', "reason === 'auto'", 'saveOutsideProject') === true
+  },
+  {
+    name: 'a save with the ternary and NO auto guard is caught',
+    catches: true,
+    code:
+      "const save = async (id, reason = 'explicit') => { const guarded = inRepo(); " +
+      'return guarded ? saveInProject(id, reason) : saveOutsideProject(id); };',
+    check: (c) => bodyOrder(c, 'save', "reason === 'auto'", 'saveOutsideProject') === null
+  },
+  {
+    name: 'a save whose auto guard sits AFTER the plain door is caught',
+    catches: true,
+    code:
+      "const save = async (id, reason = 'explicit') => { " +
+      'if (!inRepo()) return saveOutsideProject(id); ' +
+      "if (reason === 'auto') return false; return saveInProject(id, reason); };",
+    check: (c) => bodyOrder(c, 'save', "reason === 'auto'", 'saveOutsideProject') === false
+  },
+  {
+    name: "saveInProject's unguarded arm that tests the reason first is clean",
+    catches: false,
+    code:
+      "const saveInProject = async (id, tab, v, reason) => { const r = await guardedSave({}); " +
+      "if (r.outcome === 'unguarded') { if (reason === 'auto') return deps.autoStop(id, { kind: 'link' }); " +
+      'return saveOutsideProject(id, tab, v); } return false; };',
+    check: (c) =>
+      tailOrder(c, 'saveInProject', "'unguarded'", "'auto'", 'saveOutsideProject') === true
+  },
+  {
+    name: "THE SYMLINK HOLE: saveInProject's unguarded arm falling straight through is caught",
+    catches: true,
+    // The shape at this phase's parent, and the one a later round reopens.
+    code:
+      "const saveInProject = async (id, tab, v, reason) => { const r = await guardedSave({}); " +
+      "if (r.outcome === 'unguarded') return saveOutsideProject(id, tab, v); return false; };",
+    check: (c) =>
+      tailOrder(c, 'saveInProject', "'unguarded'", "'auto'", 'saveOutsideProject') === null
+  },
+  {
+    name:
+      'THE HOLE THE ABLATION FOUND: an EARLIER arm testing the reason does not clear the unguarded one',
+    catches: true,
+    // This shape passed the first draft of rule 11b, which asked the whole
+    // body. `'auto'` really is before `saveOutsideProject` here, and the
+    // unguarded arm is still the parent's fall-through.
+    code:
+      "const saveInProject = async (id, tab, v, reason) => { const e = await sha256Hex(tab.savedContents); " +
+      "if (e === null) { if (reason === 'auto') return false; return saveOutsideProject(id, tab, v); } " +
+      "const r = await guardedSave({}); " +
+      "if (r.outcome === 'unguarded') return saveOutsideProject(id, tab, v); " +
+      "if (r.outcome === 'stale') { if (reason === 'auto') return deps.autoStop(id, { kind: 'stale' }); " +
+      'offerStaleChoice(tab, v, () => undefined); return false; } return false; };',
+    check: (c) =>
+      bodyOrder(c, 'saveInProject', "'auto'", 'saveOutsideProject') === true &&
+      tailOrder(c, 'saveInProject', "'unguarded'", "'auto'", 'saveOutsideProject') === false
+  },
+  {
+    name: 'a recordStop that checks membership before it toasts is clean',
+    catches: false,
+    code:
+      'const recordStop = (id, why) => { if (stopped.has(id)) return; stopped.set(id, why); ' +
+      'cancelTimer(id); deps.toast(autoSaveStopSentence(why, name)); };',
+    check: (c) =>
+      bodyOrder(c, 'recordStop', 'stopped.has', 'toast') === true &&
+      bodyMentions(c, 'recordStop', 'stopped.set') === true
+  },
+  {
+    name: 'a recordStop that toasts FIRST is caught',
+    catches: true,
+    code:
+      'const recordStop = (id, why) => { deps.toast(autoSaveStopSentence(why, name)); ' +
+      'if (stopped.has(id)) return; stopped.set(id, why); };',
+    check: (c) => bodyOrder(c, 'recordStop', 'stopped.has', 'toast') === false
+  },
+  {
+    name: 'a recordStop with no membership check at all is caught',
+    catches: true,
+    code: 'const recordStop = (id, why) => { stopped.set(id, why); deps.toast(say(why)); };',
+    check: (c) => bodyOrder(c, 'recordStop', 'stopped.has', 'toast') === null
+  },
+  {
+    name: 'a markDirty that patches before it arms is clean',
+    catches: false,
+    code:
+      'const markDirty = (id, dirty) => { const tab = byId(id); if (tab === undefined) return; ' +
+      'if (tab.dirty === dirty) { autoSave.noteChanged(id); return; } ' +
+      'patchTab(id, { dirty }); autoSave.noteChanged(id); };',
+    check: (c) =>
+      orderIn(methodBody(c, 'markDirty'), 'patchTab(', 'patchTab(', 'noteChanged') === true
+  },
+  {
+    name: 'THE ORDER THE PROBE CAUGHT: arming before the patch is caught',
+    catches: true,
+    code:
+      'const markDirty = (id, dirty) => { const tab = byId(id); if (tab === undefined) return; ' +
+      'autoSave.noteChanged(id); if (tab.dirty === dirty) return; patchTab(id, { dirty }); };',
+    check: (c) =>
+      orderIn(methodBody(c, 'markDirty'), 'patchTab(', 'patchTab(', 'noteChanged') === null
+  },
+  {
+    name: 'a markDirty that never arms at all is caught',
+    catches: true,
+    code:
+      'const markDirty = (id, dirty) => { const tab = byId(id); if (tab.dirty === dirty) return; ' +
+      'patchTab(id, { dirty }); };',
+    check: (c) =>
+      orderIn(methodBody(c, 'markDirty'), 'patchTab(', 'patchTab(', 'noteChanged') === null
+  },
+  {
+    name: 'a markDirty written as a STORE METHOD is found, not only as a const',
+    catches: false,
+    code:
+      'export const useEditor = create((set, get) => ({\n' +
+      '  markDirty(id, dirty) {\n' +
+      '    if (byId(id).dirty === dirty) { autoSave.noteChanged(id); return; }\n' +
+      '    patchTab(id, { dirty });\n' +
+      '    autoSave.noteChanged(id);\n' +
+      '  }\n' +
+      '}));',
+    check: (c) =>
+      orderIn(methodBody(c, 'markDirty'), 'patchTab(', 'patchTab(', 'noteChanged') === true
+  },
+  {
+    name: 'a stop composer that reuses the shipped sentences is clean',
+    catches: false,
+    code:
+      "export function autoSaveStopSentence(why, name) { if (why.kind === 'stale') " +
+      'return `${staleSaveTitle(name)}, so nothing was written. ${STOPPED}`; ' +
+      'return `${saveRefusalSentence(why.why, name)} ${STOPPED}`; }',
+    check: (c) => {
+      const body = functionBodyOf(c, 'autoSaveStopSentence') ?? '';
+      return body.includes('saveRefusalSentence') && body.includes('staleSaveTitle');
+    }
+  },
+  {
+    name: 'a stop composer with a refusal string of its own is caught',
+    catches: true,
+    code:
+      'export function autoSaveStopSentence(why, name) { ' +
+      "return `Tortie did not save ${name}. Auto save is off for it now.`; }",
+    check: (c) => {
+      const body = functionBodyOf(c, 'autoSaveStopSentence') ?? '';
+      return !(body.includes('saveRefusalSentence') && body.includes('staleSaveTitle'));
+    }
   }
+];
+
+/**
+ * What `src/renderer/editor/auto-save.ts` may not name (rule 10).
+ *
+ * `deps.save` is its one route to disk, and everything here is a way round it:
+ * the two channels, the plain door and the function that reaches it, and
+ * `setInterval`, which is a timer nothing cancels on a close or an eviction.
+ */
+const AUTO_SAVE_FORBIDDEN = [
+  'writeFile',
+  'writeGuarded',
+  'writePlain',
+  'saveOutsideProject',
+  'fs:writeFile',
+  'setInterval'
 ];
 
 {
@@ -684,6 +955,161 @@ const WRITE_CHANNELS = ['fs:writeFile', 'fs:writeGuarded'];
     fail('9. build/verification-checks.mjs does not classify conformance:save');
   }
   say('9. the gate is named in package.json and classified in build/verification-checks.mjs');
+}
+
+// ---------------------------------------------------------------------------
+// Rule 10. The auto save module names no write and no plain door (Phase 268).
+//
+// Issue 24 asks for a timer. Issue 16 is what a write that does not ask costs,
+// and research 100 section 1 measured it at 173 bytes of an agent's paragraph
+// with nothing said. So auto save reaches disk through `deps.save` — which the
+// store hands in as `io.save(id, 'auto')`, the same function ⌘S calls — and
+// through nothing else. There is no unguarded fallback to add later.
+// ---------------------------------------------------------------------------
+
+{
+  const code = source(AUTO_SAVE);
+  const named = AUTO_SAVE_FORBIDDEN.filter((n) => code.includes(n));
+  if (named.length > 0) {
+    fail(
+      `10. ${AUTO_SAVE} names ${named.join(', ')}; its one route to disk is deps.save, which the store hands in as io.save(id, 'auto')`
+    );
+  } else if (!code.includes('deps.save(')) {
+    fail(`10. ${AUTO_SAVE} never calls deps.save, so this rule read nothing`);
+  } else {
+    say(
+      `10. the auto save module names none of ${String(AUTO_SAVE_FORBIDDEN.length)} ways round the guarded door, and reaches disk through deps.save alone`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 11. `save` refuses the plain door for the auto reason, and refuses it
+// BEFORE the door is named.
+// ---------------------------------------------------------------------------
+
+{
+  const code = source(TAB_IO);
+  const ordered = bodyOrder(code, 'save', "reason === 'auto'", 'saveOutsideProject');
+  if (ordered === null) {
+    fail(
+      "11. save in " + TAB_IO + " does not test `reason === 'auto'` before it names saveOutsideProject, so a timer can reach the unguarded door"
+    );
+  } else if (ordered === false) {
+    fail('11. save tests the auto reason AFTER it names the plain door, which is too late');
+  } else {
+    say("11. save refuses the plain, unguarded door for reason 'auto' before the door is named");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 11b. `saveInProject`'s `unguarded` arm refuses it too — the symlink.
+//
+// The parent's shape was `if (result.outcome === 'unguarded') return
+// saveOutsideProject(…)`, with no reason test, and it reads like a fallback
+// rather than like a door. The plain door's own stale answer opens a DIALOG,
+// which a timer may not do, and its read-then-write window is one IPC round
+// trip wide. This is the arm a later round reopens for convenience.
+// ---------------------------------------------------------------------------
+
+{
+  const code = source(TAB_IO);
+  // Read from the ARM rather than from the whole body. An earlier arm of the
+  // same function tests the reason too, so a body-wide question answers yes
+  // while this arm falls straight through — build/p268/ablation.mjs found
+  // exactly that on its third ablation.
+  const ordered = tailOrder(
+    code,
+    'saveInProject',
+    "'unguarded'",
+    "'auto'",
+    'saveOutsideProject'
+  );
+  if (ordered === null) {
+    fail(
+      "11b. saveInProject's unguarded arm falls through to saveOutsideProject with no test of the reason — this is the symlink hole"
+    );
+  } else if (ordered === false) {
+    fail('11b. saveInProject names the plain door before it tests the reason in that arm');
+  } else {
+    say("11b. saveInProject's unguarded arm tests the reason before it names the plain door");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 12. The stop is recorded before the sentence, and only once.
+// ---------------------------------------------------------------------------
+
+{
+  const code = source(AUTO_SAVE);
+  const ordered = bodyOrder(code, 'recordStop', 'stopped.has', 'toast');
+  const sets = bodyMentions(code, 'recordStop', 'stopped.set');
+  if (ordered === null || sets !== true) {
+    fail(
+      '12. recordStop in ' +
+        AUTO_SAVE +
+        ' does not ask `stopped.has` before it toasts and set `stopped.set`, so the sentence is not shown once'
+    );
+  } else if (ordered === false) {
+    fail('12. recordStop toasts BEFORE it checks whether this tab is already stopped');
+  } else {
+    say('12. recordStop refuses a second stop before it says anything, so the sentence is said once per tab');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 13. Auto save invents no refusal sentence.
+// ---------------------------------------------------------------------------
+
+{
+  const body = functionBodyOf(source(SENTENCES), 'autoSaveStopSentence');
+  if (body === null) {
+    fail(`13. ${SENTENCES} declares no autoSaveStopSentence, so this rule read nothing`);
+  } else {
+    const missing = ['saveRefusalSentence', 'staleSaveTitle'].filter(
+      (n) => !body.includes(n)
+    );
+    if (missing.length > 0) {
+      fail(
+        `13. autoSaveStopSentence does not reach ${missing.join(' or ')}, so it is inventing a refusal of its own`
+      );
+    } else if (/Tortie did not save \$\{/.test(body)) {
+      fail('13. autoSaveStopSentence writes a refusal sentence of its own');
+    } else {
+      say('13. the auto save stop composes from the sentences a ⌘S already says, and writes none of its own');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 14. The timer is armed AFTER the tab is patched.
+//
+// Read from the FIRST `patchTab(` in `markDirty` forward, because the branch
+// above it arms for a tab that is already dirty and arming there is right.
+// What this asks is about the EDGE: on the clean-to-dirty transition the arm
+// has to come after the patch, or the controller asks the skip list about a
+// tab the store still calls clean and arms nothing.
+// ---------------------------------------------------------------------------
+
+{
+  const code = source(EDITOR_STORE);
+  const ordered = orderIn(
+    methodBody(code, 'markDirty'),
+    'patchTab(',
+    'patchTab(',
+    'noteChanged'
+  );
+  if (ordered === null) {
+    fail(
+      '14. markDirty in ' +
+        EDITOR_STORE +
+        ' does not arm the auto save after it patches the tab — a single keystroke would arm nothing at all'
+    );
+  } else if (ordered === false) {
+    fail('14. markDirty arms the auto save before it patches the tab, so the skip list is asked about a tab that is still clean');
+  } else {
+    say('14. markDirty patches the tab before it arms the timer, so the skip list is asked about the tab the store holds');
+  }
 }
 
 // ---------------------------------------------------------------------------

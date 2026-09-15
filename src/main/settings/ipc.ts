@@ -84,16 +84,35 @@ function archVisibilityChanged(
   return before.arch.enabled !== after.arch.enabled;
 }
 
+/**
+ * PHASE 268. Did the auto-save MODE move? The File > Auto Save row draws its
+ * tick from it, so the menu is rebuilt when it does. The DELAY is deliberately
+ * not asked about: no menu row draws it, and rebuilding the whole application
+ * menu because a person moved a select from 1 second to 2 would be work for a
+ * template that comes back byte-identical.
+ */
+function autoSaveModeChanged(
+  before: GmuxSettings,
+  after: GmuxSettings
+): boolean {
+  return before.autoSave.mode !== after.autoSave.mode;
+}
+
 export function registerSettingsIpc(ipc: IpcMain): void {
   handle(ipc, 'settings:get', () => getSettings());
 
   handle(ipc, 'settings:set', (_e, patch) => {
     const before = getSettings();
     const next = updateSettings(patch);
-    if (hotkeysChanged(before, next) || archVisibilityChanged(before, next)) {
+    if (
+      hotkeysChanged(before, next) ||
+      archVisibilityChanged(before, next) ||
+      autoSaveModeChanged(before, next)
+    ) {
       // Accelerators are Session-menu items — the menu is the source of
       // nativeness (S13 Hotkeys). Rebuild picks up the new chord map, and
-      // since Phase 175 the Architecture rows' presence too.
+      // since Phase 175 the Architecture rows' presence too, and since Phase
+      // 268 the tick on File > Auto Save.
       rebuildAppMenu();
     }
     if (archVisibilityChanged(before, next) && !next.arch.enabled) {

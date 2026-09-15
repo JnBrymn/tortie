@@ -168,6 +168,13 @@ import {
 } from './tab-identity';
 import { compareTabName } from './save-sentences';
 import { createTabIo } from './tab-io';
+// PHASE 268. The auto-save timer, its skip list and its conflict stop. This
+// store is where it is BUILT and where every one of its four hooks is called,
+// because this store already owns the patch funnel, the dirty edge and every
+// dispose site — the three things a timer has to agree with.
+import { createAutoSave } from './auto-save';
+import type { AutoSaveStopWhy } from './auto-save';
+import { useSettingsStore } from '../settings/settings-store';
 // Direct module import, not the ./markdown barrel: the barrel re-exports the
 // preview component, whose skeleton comes from MonacoHost, which imports this
 // store — a cycle for the sake of one predicate.
@@ -325,6 +332,25 @@ interface EditorState {
    */
   clearPendingSelection(id: string): void;
   markDirty(id: string, dirty: boolean): void;
+  /**
+   * PHASE 268. The editor widget lost focus — the `onFocusChange` mode's one
+   * trigger, called from MonacoHost's `onDidBlurEditorWidget`.
+   *
+   * STATED LIMIT: a dirty tab that never held focus is never saved this way,
+   * because it cannot lose focus it never had. That is VS Code's behaviour
+   * too, and `afterDelay` is the mode for that case.
+   */
+  autoSaveOnBlur(id: string): void;
+  /**
+   * PHASE 268. Has auto save STOPPED for this tab, and why? A reader, and the
+   * only way anything outside ./auto-save can see the record. Read by the
+   * Phase 268 probe and by nothing in the shipped UI: the stop already said
+   * its one sentence, and a second surface saying it again is the toast a
+   * second this phase refuses.
+   */
+  autoSaveStopFor(id: string): AutoSaveStopWhy | undefined;
+  /** PHASE 268. Has auto save WRITTEN this tab? The eviction filter's term. */
+  autoSaveTouched(id: string): boolean;
   save(): Promise<void>;
   setMinimapEnabled(on: boolean): void;
   setDiffSideBySide(on: boolean): void;
@@ -419,13 +445,53 @@ export const useEditor = create<EditorState>((set, get) => {
   const gmux = gmuxBridge();
 
   const patchTab = (id: string, patch: Partial<EditorTab>): void => {
+    // PHASE 268. The BEFORE reading is taken here because this is the single
+    // funnel every tab-state change goes through, so one hook sees every
+    // successful write of every kind — the guarded save, its Overwrite, the
+    // plain door and the remote door all patch `savedContents` — and auto save
+    // needs no new call site in ./tab-io to know a stop is over.
+    const before = get().tabs.find((t) => t.id === id);
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t))
     }));
+    const after = get().tabs.find((t) => t.id === id);
+    if (after !== undefined) autoSave.notePatched(id, before, after);
   };
 
   const tabById = (id: string): EditorTab | undefined =>
     get().tabs.find((t) => t.id === id);
+
+  /**
+   * PHASE 268. The auto-save controller, declared BEFORE `io` because `io`
+   * borrows its `recordStop` and it borrows `io.save`. The circle is closed by
+   * the arrow below rather than by a second module: there is exactly one save
+   * function in this product and auto save calls it with a reason.
+   *
+   * `policy` is read LIVE from the settings store on every arm and every tick,
+   * so a mode or delay changed in the Settings window reaches this window with
+   * no new plumbing — `watchSettings()` is already running here (App.tsx:268)
+   * and a second subscription would be a second truth.
+   */
+  const autoSave = createAutoSave({
+    save: (id) => io.save(id, 'auto'),
+    byId: tabById,
+    openRoots: () =>
+      useApp
+        .getState()
+        .projects.filter((p) => isLocalTarget(targetOfProject(p)))
+        .map((p) => p.path),
+    policy: () => useSettingsStore.getState().settings.autoSave,
+    blocked: () => useApp.getState().confirm !== null,
+    // The save path's own sticky error toast, and no new surface: a person who
+    // has met a refused ⌘S meets the same thing here with one clause added.
+    toast: (text) => {
+      useApp.getState().toast('error', text, { sticky: true });
+    },
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (handle) => {
+      clearTimeout(handle as ReturnType<typeof setTimeout>);
+    }
+  });
 
   // Loading, saving and watcher-driven refresh live in ./tab-io — this store
   // is the state machine over the tab LIST; that module is the IO it
@@ -433,6 +499,12 @@ export const useEditor = create<EditorState>((set, get) => {
   const io = createTabIo({
     patch: patchTab,
     byId: tabById,
+    // PHASE 268. One line, so ./tab-io holds no timer state at all and the
+    // "shown once" rule has exactly one owner.
+    autoStop: (id, why) => {
+      autoSave.recordStop(id, why);
+      return false;
+    },
     // Phase 73: a REVIEW tab is excluded here for the same reason a history
     // tab is. Its repository is on another computer, this Mac's watcher knows
     // nothing about it, and re-running the worktree refresh over one would
@@ -946,6 +1018,10 @@ export const useEditor = create<EditorState>((set, get) => {
           disposeModels(slot.id);
           dropViewState(slot.id);
           forgetRewindJournal(slot.id);
+          // PHASE 268. The fourth member of the triple, at every site: a timer
+          // outliving the tab it was armed for is a write to a file nobody is
+          // looking at.
+          autoSave.forget(slot.id);
           tabs = tabs.map((t) => (t.id === slot.id ? tab : t));
         } else {
           tabs.push(tab);
@@ -961,13 +1037,25 @@ export const useEditor = create<EditorState>((set, get) => {
             const evict = own
               .filter(
                 (t) =>
-                  !t.dirty && t.id !== tab.id && t.id !== activeOf(s, projectId)
+                  !t.dirty &&
+                  // PHASE 268. With auto save on, a tab you were typing in two
+                  // seconds ago is CLEAN, and `lastUsed` is stamped on
+                  // activation only, never on typing — so it is the STALEST
+                  // candidate in this list. Evicting it disposes its Monaco
+                  // model, its view state and its rewind journal, which is the
+                  // loss Phase 260 exists to prevent arriving by a different
+                  // route. A tab auto save has written is work in progress,
+                  // which is what `!t.dirty` meant before there was a timer.
+                  !autoSave.touched(t.id) &&
+                  t.id !== tab.id &&
+                  t.id !== activeOf(s, projectId)
               )
               .sort((a, b) => a.lastUsed - b.lastUsed)[0];
             if (evict !== undefined) {
               disposeModels(evict.id);
               dropViewState(evict.id);
               forgetRewindJournal(evict.id);
+              autoSave.forget(evict.id);
               tabs = tabs.filter((t) => t.id !== evict.id);
             }
           }
@@ -1055,6 +1143,9 @@ export const useEditor = create<EditorState>((set, get) => {
       // this the next opening of the same file inherits this one's undo stack
       // and one press writes its bytes back. The journal's owner is the tab.
       forgetRewindJournal(id);
+      // PHASE 268. And the timer, for the same reason: a pending save armed on
+      // a tab that is gone would write bytes nobody can see any more.
+      autoSave.forget(id);
       set((s) => {
         const closing = s.tabs.find((t) => t.id === id);
         if (closing === undefined) return {};
@@ -1253,7 +1344,16 @@ export const useEditor = create<EditorState>((set, get) => {
 
     markDirty(id, dirty) {
       const tab = tabById(id);
-      if (tab === undefined || tab.dirty === dirty) return;
+      if (tab === undefined) return;
+      if (tab.dirty === dirty) {
+        // PHASE 268. Every content change past the edge re-arms the debounce.
+        // This is called from MonacoHost.tsx on EVERY change, and the store
+        // hears only the EDGES, so without this arm a burst would save a
+        // second after its FIRST keystroke rather than a second after its
+        // last.
+        autoSave.noteChanged(id);
+        return;
+      }
       // Monaco is read-only on a history tab, so this should never fire —
       // but a dirty commit tab would prompt to save an old revision over the
       // live file on close, which is not a risk worth leaving open.
@@ -1280,6 +1380,27 @@ export const useEditor = create<EditorState>((set, get) => {
       const patch: Partial<EditorTab> = { dirty };
       if (dirty && tab.preview) patch.preview = false; // edited → permanent
       patchTab(id, patch);
+      // PHASE 268, AND THE ORDER IS THE WHOLE OF IT: after the patch, never
+      // before. The controller asks the skip list about the tab as the store
+      // holds it, and on this edge the tab is only dirty AFTER `patchTab`
+      // lands — so arming first asked about a CLEAN tab, got `clean`, and
+      // armed nothing. Measured by `npm run probe:p268` at the first build of
+      // this phase: a burst of characters saved (the second keystroke sees a
+      // dirty tab in the branch above) and a SINGLE character never did, which
+      // is the shape arm C types. `conformance:save` rule 14 holds the order.
+      autoSave.noteChanged(id);
+    },
+
+    autoSaveOnBlur(id) {
+      autoSave.noteBlur(id);
+    },
+
+    autoSaveStopFor(id) {
+      return autoSave.stoppedFor(id);
+    },
+
+    autoSaveTouched(id) {
+      return autoSave.touched(id);
     },
 
     async save() {

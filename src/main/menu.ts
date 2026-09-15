@@ -265,6 +265,27 @@ function archRowsOn(): boolean {
 }
 
 /**
+ * Is auto save on (Phase 268)? ONE menu row reads this, being File > Auto
+ * Save, and it is a checkbox rather than three radios: the two other modes are
+ * a Settings choice, and a File menu asking "after a delay or on focus
+ * change?" is the paragraph the UI rules refuse.
+ *
+ * `archRowsOn()`'s twin, and the same posture on an unreadable store: ship the
+ * default, which is off. `rebuildAppMenu()` runs when settings:set moves the
+ * mode (src/main/settings/ipc.ts), so the tick follows in the same session
+ * with no relaunch, and the template is rebuilt from the value every time,
+ * which is what makes the Electron 43 trap at :313-320 unreachable here — this
+ * row's `checked` is never ASSIGNED on an existing item.
+ */
+function autoSaveOn(): boolean {
+  try {
+    return getSettings().autoSave.mode !== 'off';
+  } catch {
+    return false; // settings store unreadable — ship the default, which is off
+  }
+}
+
+/**
  * User-recorded per-agent hotkey items (S13 Hotkeys): one Session-menu item
  * per ASSIGNED chord — "the menu stays the source of nativeness". Pressing
  * one forwards `launch-agent:<id>` to the main window, which creates
@@ -685,6 +706,28 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         // it cannot be misread as pointing at another surface. `save-as` is a
         // different verb.
         item('Save', 'save-file', accel('editor.save'), 'save'),
+        // PHASE 268. Directly under Save, which is the verb it modifies, and
+        // where VS Code puts its own (File > Auto Save).
+        //
+        // NO MARK, argued. A macOS checkbox item already draws a state mark,
+        // so a glyph would sit beside a check; and Save's own `save` picture
+        // on the row above would then be one picture on two verbs inside one
+        // submenu, which is the defect build/assert-menu-glyphs.mjs exists to
+        // stop. The same argument the View menu's radios carry at :1032-1041.
+        //
+        // THE CLICK DOES NOT SET THE MARK. It forwards; the renderer writes
+        // the setting; settings:set rebuilds; the rebuilt template reads the
+        // new value. STATED LIMIT: a person who chose "when the editor loses
+        // focus" in Settings, unticked this row and re-ticked it lands on
+        // "after a delay". The alternative is a second persisted field
+        // remembering the last non-off mode, which is a second thing to
+        // sanitize for a gesture nobody has asked for.
+        {
+          label: 'Auto Save',
+          type: 'checkbox',
+          checked: autoSaveOn(),
+          click: () => sendMenuAction('toggle-auto-save')
+        },
         { type: 'separator' },
         // ⌘W closes an editor tab ONLY — never the main window, a session,
         // or a project (DESIGN.md §4). One exception (S13): when the

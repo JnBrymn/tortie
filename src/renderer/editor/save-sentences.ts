@@ -24,6 +24,15 @@
  */
 
 import type { FsGuardedWriteRefusal } from '@shared/fs-ops';
+// PHASE 268. The save chord is READ from the one place chords are spelled,
+// never typed here: src/shared/__tests__/keymap-single-source.test.ts is blunt
+// about it, and rightly — a sentence that names a chord the person has
+// re-recorded is a sentence that lies.
+import { keyDisplay } from '@shared/keymap';
+// PHASE 268. Type only, deliberately: ./auto-save imports the composer at the
+// foot of this file, so the two modules meet in the type graph and never in
+// the value graph.
+import type { AutoSaveStopWhy } from './auto-save';
 
 /**
  * The refusal words a LOCAL save can put in front of a person.
@@ -159,3 +168,47 @@ export function compareTabTooltip(name: string): string {
 /** The read-only band over the Compare tab, saying which side is which. */
 export const COMPARE_BAND_SENTENCE =
   'What is on disk now, on the left. Your unsaved version, on the right.';
+
+// -- auto save stopped (Phase 268) -------------------------------------------
+
+/**
+ * The clause every auto-save stop ends with. One sentence, and it names the
+ * way back.
+ *
+ * AUTO SAVE INVENTS NO REFUSAL. Every sentence below is composed from the ones
+ * above — the map a ⌘S already uses, and the dialog title a `stale` answer
+ * already opens with — so a person meets one idea rather than two, which is
+ * the rule this whole file was written to. `conformance:save` rule 13 is what
+ * keeps it that way, and rule 8's reader stops at the SENTENCES block above,
+ * so nothing here is a key in that map.
+ */
+function autoSaveStopped(): string {
+  return `Tortie stopped saving it on its own — press ${keyDisplay(
+    'editor.save'
+  )} when you are ready.`;
+}
+
+/**
+ * What a person reads when a timer's save was refused, said ONCE.
+ *
+ * `stale` is somebody else's write landing under the buffer, which is issue 16
+ * itself, so it borrows the dialog's own title and says what a timer cannot
+ * ask. `refused` is the ⌘S sentence, byte for byte, with one clause after it.
+ * `link` is the one case with nothing wrong behind it: a symbolic link belongs
+ * to the plain door and a timer may not take it, so it says so and points at
+ * ⌘S, which still saves it exactly as it does today.
+ */
+export function autoSaveStopSentence(
+  why: AutoSaveStopWhy,
+  name: string
+): string {
+  if (why.kind === 'stale') {
+    return `${staleSaveTitle(name)}, so nothing was written. ${autoSaveStopped()}`;
+  }
+  if (why.kind === 'link') {
+    return `Tortie does not save ${name} on its own, because it is a link. Press ${keyDisplay(
+      'editor.save'
+    )} to save it.`;
+  }
+  return `${saveRefusalSentence(why.why, name)} ${autoSaveStopped()}`;
+}

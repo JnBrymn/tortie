@@ -1002,6 +1002,21 @@ export const CHECKS = [
   // the Phase 167 plateau rule. At the parent the switch shows the first
   // project's tabs under the second and the eleventh open evicts a hidden one.
   electron('probe:p260'),
+  // PHASE 268. Auto save, through the guarded door, with a REAL concurrent
+  // writer. ONE Electron on a scratch profile with a scratch HOME under its
+  // own GMUX_HARNESS_DIR and the socket gmux-p268-<pid>, over one git project
+  // it builds itself. Eleven arms: off is off, it saves, it debounces to one
+  // write, a /bin/sh writing the file underneath the buffer leaves the tab
+  // dirty with the outsider's bytes intact and ONE toast, the stop is per tab,
+  // ⌘S's three-answer dialog is the only way forward, Phase 260's promise
+  // survives an eleventh open, a file outside every project never moves on a
+  // timer, onFocusChange lands at the blur, and the File menu action moves the
+  // mode both ways. It spawns no agent and spends no token.
+  electron('probe:p268'),
+  // PHASE 268's attack. It breaks conformance:save four ways, one clause each,
+  // and proves each reddens the rule that owns it — then restores the tree in
+  // a finally block. It launches no Electron and starts no process but node.
+  pure('ablation:p268'),
   // PHASE 261 item 1. The harness socket refusal, DRIVEN. ONE Electron at a
   // time, never two, on a scratch profile with a scratch HOME under its own
   // GMUX_HARNESS_DIR and the socket gmux-p261-<pid>. Five arms: the real app

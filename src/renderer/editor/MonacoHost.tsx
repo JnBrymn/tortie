@@ -15,6 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type * as monacoNs from 'monaco-editor';
 import { monacoThemeNameFor } from './monaco-theme-name';
+import { tabIsReadOnly } from './tab-readonly';
 import { useChromeTheme } from '../theme/chrome-theme';
 import {
   getLoadedMonaco,
@@ -134,50 +135,13 @@ function baseOptions(
   };
 }
 
-/**
- * The four reasons a tab is not an edit surface. Exported for its test.
- *
- * A deleted file has nothing left to write to. A truncated file holds only the
- * head of what is on disk, so a save would cut the rest off. A history tab
- * shows a file as it was at one commit, and the past is not an edit surface
- * (VS Code opens commit contents read-only for the same reason, because a save
- * would write an old revision over the live file).
- *
- * PHASE 96. `tab.remote` is the fourth reason and it was missing. A review tab
- * names a file on another computer, so `save` in ./tab-io.ts has refused it
- * since Phase 73 and says so out loud since Phase 90.3. Monaco was never told,
- * so a person typed freely into a tab whose every save is refused, and the band
- * ./EditorPanel.tsx draws over it already promised that typing changes nothing.
- * This makes that promise true.
- *
- * PHASE 101 MADE THE FOURTH REASON CONDITIONAL, and it is the only one that
- * is. `remoteWriteRoot` is the folder on that machine a person confirmed Tortie
- * may replace a file under, and null means there is none. A remote tab is an
- * edit surface when it is a non-empty string and is read only otherwise, so the
- * default for every machine, and for every build before this phase, is
- * unchanged. The other three reasons are unchanged and none of them is
- * conditional: a deleted file, a cut file and a past commit are not edit
- * surfaces on any machine.
- *
- * The caller reads the root from the link state main pushes, so the answer is
- * never older than the last confirmation. This function decides nothing about
- * whether a write is allowed. Main refuses that on the row on disk at call
- * time, and this only decides whether Monaco takes the keystroke.
- */
-export function tabIsReadOnly(
-  tab: EditorTab,
-  remoteWriteRoot: string | null
-): boolean {
-  // PHASE 240: a compare tab holds two versions and neither is on disk, so
-  // there is nothing under it a keystroke could legitimately change. It never
-  // reaches File mode — its mode chip offers nothing and setMode refuses — and
-  // this is the same belt-and-braces the commit tab has carried since Phase 12.
-  if (tab.deleted || tab.truncated || tab.commit !== null || tab.compare !== undefined) {
-    return true;
-  }
-  if (tab.remote === undefined) return false;
-  return remoteWriteRoot === null || remoteWriteRoot.length === 0;
-}
+// PHASE 268. `tabIsReadOnly` moved next door to ./tab-readonly.ts, unchanged,
+// and is re-exported here so every existing importer and its two tests read
+// the same name from the same place. The move is a cycle rather than a tidy:
+// the auto-save policy asks this exact question, this store's own header
+// already refuses `store -> … -> MonacoHost` for the markdown barrel, and
+// `store -> auto-save -> MonacoHost -> store` is that cycle by another route.
+export { tabIsReadOnly };
 
 /**
  * Per-tab options. Everything here is applied with `updateOptions()` on every
@@ -222,6 +186,10 @@ export function MonacoHost({
   const codeContainer = useRef<HTMLDivElement | null>(null);
   const codeEditor = useRef<monacoNs.editor.IStandaloneCodeEditor | null>(null);
   const contentListener = useRef<monacoNs.IDisposable | null>(null);
+  // PHASE 268. The `onFocusChange` auto-save mode's one trigger. It is a
+  // second disposable rather than work inside the content listener because
+  // they answer different events, and it is torn down in the same two places.
+  const blurListener = useRef<monacoNs.IDisposable | null>(null);
   const prevShownId = useRef<string | null>(null);
   const flash = useRef<monacoNs.editor.IEditorDecorationsCollection | null>(
     null
@@ -306,6 +274,8 @@ export function MonacoHost({
 
     contentListener.current?.dispose();
     contentListener.current = null;
+    blurListener.current?.dispose();
+    blurListener.current = null;
 
     // A landing flash belongs to the model it was set on. Drop it before the
     // model swaps, or a fast tab switch leaves a wash sitting on whatever
@@ -340,6 +310,15 @@ export function MonacoHost({
       if (current === undefined) return;
       markDirty(tab.id, model.getValue() !== current.savedContents);
     });
+
+    // PHASE 268. Leaving the editor is the gesture issue 24 describes: you
+    // click from the file into a terminal to tell the agent to read it. The
+    // store decides whether the mode is on and whether the tab is one a timer
+    // may write; this only reports the event.
+    blurListener.current =
+      ce?.onDidBlurEditorWidget(() => {
+        useEditor.getState().autoSaveOnBlur(tab.id);
+      }) ?? null;
 
     // Opening a file is an attention switch — the editor takes focus so
     // ⌘F / arrows / typing work immediately (Esc hands it back).
@@ -474,6 +453,7 @@ export function MonacoHost({
       flashTimer.current = null;
       flash.current = null; // owned by the editor; disposed with it
       contentListener.current?.dispose();
+      blurListener.current?.dispose();
       codeEditor.current?.dispose();
       codeEditor.current = null;
       prevShownId.current = null;

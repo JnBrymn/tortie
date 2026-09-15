@@ -92,7 +92,9 @@ function harness(initial: EditorTab) {
       if (id === tab.id) tab = { ...tab, ...patch };
     },
     byId: (id) => (id === tab.id ? tab : undefined),
-    worktreeTabsIn: () => [tab]
+    worktreeTabsIn: () => [tab],
+    // Phase 268: the auto-save stop this harness never reaches.
+    autoStop: () => false as const
   });
   return { io, get: () => tab };
 }

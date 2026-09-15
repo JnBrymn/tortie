@@ -181,6 +181,18 @@ export interface GmuxSettings {
    * the script until it ends; every post it makes is dropped.
    */
   usage: UsageSettings;
+  /**
+   * Does typing in a file save it on its own (Phase 268, issue 24)? DEFAULT
+   * OFF, and off means no timer is ever armed.
+   *
+   * It is NOT sealed, and it starts no process. What it does do is write a
+   * person's files on a timer, so the write itself goes through the SAME
+   * guarded door a ⌘S takes (`fs:writeGuarded`), with the digest of what
+   * Tortie last read as the precondition. A file something else wrote
+   * underneath the buffer is refused and auto save stops for that file until
+   * the person saves it themselves. See src/renderer/editor/auto-save.ts.
+   */
+  autoSave: AutoSaveSettings;
 }
 
 /**
@@ -341,6 +353,70 @@ export function noArchChosen(): ArchSettings {
 /** Has a person picked a harness and a model? Both are needed to spawn. */
 export function archIsChosen(arch: ArchSettings): boolean {
   return arch.agentId !== null && arch.model !== null;
+}
+
+/**
+ * PHASE 268 — auto save (issue 24, JnBrymn: "I keep forgetting to CTRL+S and
+ * then the agent gets confused when I tell it to read a file").
+ *
+ * VS Code's own vocabulary, because it is the vocabulary people already know,
+ * minus `onWindowChange`. That is a REFUSAL rather than an omission: Tortie is
+ * a single window app whose sessions live inside that window, so a person does
+ * not leave it to watch an agent, and Electron's window blur fires for the
+ * Settings window, a native menu and a screenshot, so the mode would write on
+ * gestures that are not "I left". `onFocusChange` already covers the gesture
+ * issue 24 describes, being clicking from the editor into a terminal to tell
+ * the agent to read the file. build/p268/SPEC.md section 2.
+ */
+export type AutoSaveMode = 'off' | 'afterDelay' | 'onFocusChange';
+
+export interface AutoSaveSettings {
+  /**
+   * 'off' is the default, and it is not a preference in the ordinary sense: a
+   * person's files are not opted into timed writes by an upgrade.
+   */
+  mode: AutoSaveMode;
+  /** Quiet time after the last keystroke before an `afterDelay` save. Clamped. */
+  delayMs: number;
+}
+
+export const AUTO_SAVE_MODES: readonly AutoSaveMode[] = [
+  'off',
+  'afterDelay',
+  'onFocusChange'
+];
+
+/** VS Code's own `files.autoSaveDelay` default. */
+export const DEFAULT_AUTO_SAVE_DELAY_MS = 1000;
+/**
+ * The floor is 250 rather than VS Code's 0. A zero delay is a guarded read and
+ * write PER KEYSTROKE against files agents hold open, which is a very different
+ * thing on this machine than it is in an editor with one writer.
+ */
+export const MIN_AUTO_SAVE_DELAY_MS = 250;
+export const MAX_AUTO_SAVE_DELAY_MS = 30_000;
+/** The four the Settings row offers. The field itself accepts anything in range. */
+export const AUTO_SAVE_DELAY_CHOICES: readonly number[] = [1000, 2000, 5000, 10_000];
+
+/** A whole delay in range, or the shipped default for anything that is not one. */
+export function clampAutoSaveDelay(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_AUTO_SAVE_DELAY_MS;
+  }
+  return Math.max(
+    MIN_AUTO_SAVE_DELAY_MS,
+    Math.min(MAX_AUTO_SAVE_DELAY_MS, Math.round(value))
+  );
+}
+
+/** Is this one of the three modes shipped? */
+export function isAutoSaveMode(value: unknown): value is AutoSaveMode {
+  return AUTO_SAVE_MODES.includes(value as AutoSaveMode);
+}
+
+/** Nothing is saved on a timer. The shipped answer, and a valid one forever. */
+export function noAutoSave(): AutoSaveSettings {
+  return { mode: 'off', delayMs: DEFAULT_AUTO_SAVE_DELAY_MS };
 }
 
 /**
@@ -724,7 +800,8 @@ export function defaultGmuxSettings(): GmuxSettings {
     colorScheme: DEFAULT_COLOR_SCHEME,
     fold: noFoldChosen(),
     arch: noArchChosen(),
-    usage: noUsageChosen()
+    usage: noUsageChosen(),
+    autoSave: noAutoSave()
   };
 }
 

@@ -58,6 +58,10 @@ import { registerP96RemoteSurfacesDrive } from './p96-remote-surfaces-drive';
 import { registerP95ScrollDrive } from '../terminal/p95-scroll-drive';
 // PHASE 207. The harness drive for build/probe-p207-hue.mjs, same shape.
 import { registerP207HueDrive } from '../theme/p207-hue-drive';
+// PHASE 268. The auto-save drive, read by build/p268/probe-p268-autosave.mjs.
+// It assigns one object to `window` and reads nothing until the probe calls a
+// method on it.
+import { registerP268AutoSaveDrive } from '../editor/p268-auto-save-drive';
 import { driveZoom } from '../zoom/shot-probe';
 import type { ZoomProbeSpec } from '../zoom/shot-probe';
 import { driveQuickOpen } from '../quickopen/shot-probe';
@@ -390,6 +394,11 @@ function armModuleLoadDrives(): void {
   registerP203AccountDrive();
   // PHASE 207 hook, same shape again, read by build/probe-p207-hue.mjs.
   registerP207HueDrive();
+
+  // PHASE 268 hook, same shape again, read by
+  // build/p268/probe-p268-autosave.mjs. It exposes the auto-save policy, each
+  // tab's dirty flag and stop record, and the toasts on screen.
+  registerP268AutoSaveDrive();
 }
 
 /**
