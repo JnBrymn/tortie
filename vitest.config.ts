@@ -44,6 +44,30 @@ export default defineConfig({
         ? [...configDefaults.exclude, 'src/**/__tests__/**/*.native.test.ts']
         : [...configDefaults.exclude],
     environment: 'node',
+    // A test budget wide enough to survive a loaded runner.
+    //
+    // Vitest's own default is 5,000 ms, and that number is what has cost
+    // this repository two whole runs. Neither test was slow: the release
+    // build for 0.105.0 lost `harvest-claim-race` at 5,014 ms, and Phase
+    // 80.1 lost `src/main/symbols/__tests__/store.test.ts` at 5,011 ms.
+    // Both sit far below the budget on a quiet machine — the slowest test
+    // body in the suite measures well under it — and both overran by a few
+    // milliseconds only because a CI runner starved a worker at the wrong
+    // moment.
+    //
+    // Raising this rather than the two tests is deliberate. The two are in
+    // unrelated domains, so the pair is evidence about the RUNNER and not
+    // about either test, and there is no way to predict which test a loaded
+    // runner starves next. A per-test budget would have to be guessed onto
+    // all 14,189 of them.
+    //
+    // The cost is bounded and it is the only cost: a test that genuinely
+    // hangs now fails in 15 s instead of 5 s. Nothing that passes today
+    // behaves differently, because a timeout is a ceiling and never a wait.
+    // A file needing more still says so itself — `vi.setConfig` and the
+    // third argument to `it` both still win, in either direction.
+    testTimeout: 15_000,
+    hookTimeout: 15_000,
     env: {
       // The alias above only covers OUR imports, because Vite rewrites the
       // modules it transforms. A dependency that requires electron itself is
