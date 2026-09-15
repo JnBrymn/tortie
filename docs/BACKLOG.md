@@ -27213,6 +27213,40 @@ on the harness shells and turned four tests red including a restored session com
 different command. The one line of it worth having — expanding `~` inside PATH ENTRIES rather than
 only the binary path — is a separate small entry, not this one.
 
+**Three limits its verifier found, recorded here because a later round inherits the entry and not the
+transcript.** The verdict reached the fix round TRUNCATED — findings 3 and 5 were never delivered to
+it or to the committer, and finding 4 arrived only by an oblique reference — so these are written
+down now rather than lost. None of them is a way for a value to escape: the seal held against eight
+hand edits, and the live pane proved the value reaches the session while the tmux globals, the
+manifest, both logs and `settings.json` stay clean of it.
+
+- **A REMOTE session ignores every name, in silence — and that is the issue-20 failure reproduced on
+  the surface this phase built.** `src/main/sessions/create-local.ts` returns on the remote branch at
+  `:283` while `envPassthroughFor` is applied at `:476`, and `remote-sessions.ts` names neither
+  `envPassthrough` nor `captureLoginShellEnv`. The Launch-defaults card is per AGENT, not per
+  machine, so a person who names a variable for claude and then starts claude on a remote machine
+  gets the agent's own model error and nothing from Tortie. Against the operator's standing rule that
+  **remote feels identical to local**, that is a real gap rather than a stated limit, and the obvious
+  next step is the `env-unresolved` notice firing for a remote create so the silence ends even before
+  the passthrough itself reaches remote. A follow-up owns it; this phase does not widen it.
+- **The seal covers `settings.json`. It does not cover the manifest.** `src/main/restore/restore.ts`
+  around `:962` reads `rec.envPassthrough` off the session row and hands it to `captureLoginShellEnv`,
+  whose only filter is `ENV_NAME_RE` — no seal, no refused-name list. So something that can write
+  `<userData>/gmux/manifest.db` can name a variable on an existing row and have it injected at the
+  next restore. **This is Phase 33's shape and this phase does not widen it by one byte**: the same
+  row already supplies `rec.argv`, so the manifest was always trusted there. The entry's security
+  paragraph says a name that arrives unsealed is refused, and that sentence is about `settings.json`
+  specifically.
+- **The cap runs before the seal, so sixteen junk names can evict a real one without saying which was
+  lost.** `sanitizeEnvPassthrough` in `src/shared/settings.ts` around `:822` caps at 16 in FILE ORDER,
+  before the seal is consulted, so a writer that prepends sixteen junk names drops the person's own
+  seventeenth at the shape layer. It **fails closed** — the seal then rejects all sixteen and not one
+  byte of any value is delivered — but the rejection names the junk and never names the one that went
+  missing, and no `env-unresolved` notice fires either, because the name no longer exists to be
+  unresolved. Denial, not escalation, and `launchDefaults` has the same sanitize-before-seal shape, so
+  it is not new here.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
