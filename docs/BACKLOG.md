@@ -27480,6 +27480,204 @@ this document exists is guessing which gaps are real. No judgement about which a
 investment: the document reports, and he decides.
 
 
+## Phase 272 — a person on 0.106.0 who cannot save any file, ever (issue 25, belucid, 2026-09-15)
+
+**Subject.** `fix(save): the refusal that names a cause it did not measure`
+
+**First body line.** `Phase 272: why no file saves`
+
+**Semver.** Patch if the cause is a defect and the fix is contained. The phase does NOT get to decide
+this in advance: if the reading says the cause is environmental rather than a defect, the phase ships
+the diagnosis and the refusal that tells the truth, and that is still a patch.
+
+**Tier 3, and two separate clauses earn it.** "Can it lose or corrupt the person's work?" — this is
+the save path, and the person reporting it cannot write a file at all, which is the most complete
+loss of work this product can inflict short of deleting one. "Did the operator personally report
+it?" — he did, relaying it, and the parent-commit measurement is therefore mandatory whatever else
+the phase does. The tier is not negotiable down to 2 because the surface is invisible in a unit test:
+the reporter's machine is the only place the defect has ever been seen.
+
+**Charter.** [Issue 25](https://github.com/gregce/tortie/issues/25), belucid, opened 2026-09-15. His
+words, and the second one is why this is Tier 3 rather than an edge case: *"Seem blocked by a
+spurious: 'Tortie did not save README.md, because its project is not open — open it again and save.
+Nothing was written.' Nothing odd here though... a plain open of the file from the file tree of the
+project, edit and save."* Then, after the operator asked: *"FWIW this doesn't seem to be an edge case
+for me. I can't save any file, ever."* He first reported it on **0.102.0**, was asked to upgrade, and
+**reproduced it on 0.106.0** with a fresh screenshot. So it is not fixed by anything in the four
+releases between, and it is not the Phase 240 door change alone.
+
+The operator has never seen it on his own machine, which is a fact about the two environments rather
+than about the report, and the phase treats it as the strongest clue it has.
+
+### What was already read from the tree before this entry was written, so no round re-derives it
+
+The sentence is `save-sentences.ts:96`, keyed `outside`. It is reachable from EXACTLY ONE place, and
+that place is a `try` block with a very wide `catch`:
+
+```
+// src/main/fs/guarded-write.ts:365-371
+let abs: string;
+try {
+  const realRoot = await resolveOpenProjectRoot(input.root, () => deps.listProjectRoots());
+  abs = (await resolveInsideRoot(realRoot, input.path)).abs;
+} catch (err) {
+  return refused('outside', sentenceOf(err));
+}
+```
+
+**AT LEAST FIVE DISTINCT CAUSES ENTER THAT CATCH AND ALL FIVE SAY THE SAME SENTENCE TO THE PERSON.**
+This is the finding the phase starts from, and it is the reason nobody can tell from the screenshot
+which one belucid has:
+
+1. `input.root` is not an absolute string — `resolveProjectRoot`, `paths.ts:92-101`, `INVALID_INPUT`.
+2. `input.root` does not resolve on disk — `realpath` threw, `paths.ts:102-106`. **`realpath` throws
+   for a missing folder AND for a folder the process may not traverse**, and the message the person
+   reads is the same either way.
+3. The root resolves but equals no open project — `PROJECT_NOT_FOUND`, `paths.ts:135-139`. This is
+   the ONLY cause the sentence actually describes.
+4. **`listProjectRoots()` itself threw.** It is `(await getGmuxCore()).listProjects()` through a LAZY
+   dynamic import (`fs/ipc.ts:112-115`), and `listProjects` is a live SQLite read of two tables
+   (`projects-repository.ts:153-159`). A core that has not resolved, a manifest that failed to open,
+   or a failing read of either table lands in this catch and tells the person their project is not
+   open.
+5. `resolveInsideRoot` refused the PATH rather than the root — outside the root, a NUL byte, or the
+   segment `.git` at any depth. The sentence's own comment at `save-sentences.ts:86-94` already
+   admits this route exists and argues nothing can reach it; that argument is a claim this phase
+   tests rather than inherits.
+
+**THE ONE PIECE OF INFORMATION THAT SEPARATES THEM IS COMPUTED AND THEN THROWN AWAY.** `refused()`
+carries `reason: sentenceOf(err)` (`guarded-write.ts:210-219`), the result crosses IPC with it, and
+**nothing reads it**: `grep` for `.reason` across `save-write.ts`, `save-sentences.ts` and
+`tab-io.ts` returns nothing, and `fs/ipc.ts:275-277` logs nothing. So the product already knows why
+it refused and tells neither the person nor the log.
+
+**The root the renderer sends is `tab.repoPath`** (`tab-io.ts:1407-1418` chooses the door,
+`save-write.ts:98-103` sends it). For the route belucid describes, the file tree, that is the tree's
+`rootPath` (`FileTree.tsx:499`), which is `localPathOf(target)` for the open project
+(`FilesSection.tsx:147,543`). **Other open routes set it from somewhere else** — `session-actions.tsx:571`
+sets `repoPath: list.repoPath` from a SESSION, whose cwd may be a subdirectory of the project — and
+a subdirectory is not an open project, so that route would refuse every save with this sentence and
+be correct to. The phase establishes whether belucid's route is the tree one he describes.
+
+### Three things measured while this entry was written, so the phase starts from them
+
+**READING A FILE NEVER ASKS THIS GATE, AND SAVING ALWAYS DOES.** `fs:readFile` (`fs/ipc.ts:222-234`)
+takes the path, calls `resolvePath`, and reads. It does not call `resolveOpenProjectRoot`, it does not
+call `realpath` on any root, and it does not consult the project list at all. So "I can open and edit
+any file but I cannot save any file" is not a paradox and is not evidence against a containment
+failure — it is exactly the shape the asymmetry predicts, and it removes the one objection that would
+have killed the permission hypothesis below.
+
+**CASE IS NOT THE CAUSE, MEASURED RATHER THAN ASSUMED.** `realpath` on macOS returns the volume's
+canonical spelling: on this machine `realpath('/private/tmp/rpcase/realname')` answered
+`/private/tmp/rpcase/RealName`. Both sides of the comparison go through it, so a case-variant spelling
+of an open project cannot reach this refusal, and any round tempted to blame case can stop.
+
+**FOR THE ROUTE HE DESCRIBES, BOTH SIDES COME FROM THE SAME TABLE ROW, WHICH IS WHY THIS IS STRANGE.**
+The tree's `rootPath` is `localPathOf(target)`, which is `target.path`
+(`shared/workspace-target.ts:117-121`), and the target is the open project whose list the renderer got
+from `projects:list`, which is `core.listProjects()` (`main/ipc.ts:216`) — the same call
+`listProjectRoots` makes (`fs/ipc.ts:112-115`). So `input.root` and the matching candidate should be
+byte-identical before either is resolved. **A comparison between a value and itself does not fail**,
+which means cause 3 is the LEAST likely of the five for this route and the phase should not start
+there. What remains is a `realpath` that throws on a folder whose contents the tree is happily
+drawing, or a `listProjectRoots()` that throws. Editor tabs are not persisted across restarts — only
+preferences are (`editor/store.ts:386-404`) — so a stale `repoPath` carried over from a previous run
+is not available as an explanation either.
+
+### The hypotheses, written down before the measurement so the phase cannot claim it knew
+
+Ranked by how well each explains "every file, forever, on two different versions, on his machine and
+not the operator's". Each must be confirmed or refuted by a reading, and a hypothesis nobody could
+refute is not evidence.
+
+- **H1, a permission the process does not have.** macOS gates `~/Documents`, `~/Desktop`,
+  `~/Downloads`, iCloud Drive and removable volumes behind TCC. If `realpath` on the project folder
+  fails with `EPERM`, cause 2 fires, every save in that project fails forever, and the person is told
+  their project is not open. **The counter-evidence the phase must deal with: he can READ and EDIT
+  the file**, so whatever fails is not a blanket denial of the folder. Establish whether `fs:readFile`
+  reaches disk by a route that never calls `realpath` on the root — if it does, read working while
+  save fails is exactly the shape H1 predicts, and if it does not, H1 is dead.
+- **H2, the manifest and the window disagree about what is open.** The renderer draws a project tab
+  from its own state; the guarded channel asks the manifest. If a row is missing, was written by an
+  older version, or the remote half of `listProjects()` fails, the window shows a project the channel
+  does not know. Cause 3 or 4.
+- **H3, the core never resolved on his machine.** Cause 4, and it predicts that EVERY channel behind
+  `getGmuxCore()` is dead for him while the window looks normal. Cheap to refute: name another
+  surface that would also be broken and ask him whether it is.
+- **H4, a spelling that survives `realpath` on one side only** — a case difference on a
+  case-insensitive volume, a trailing separator in the stored row, a firmlink, an external volume, a
+  network mount. Cause 3.
+- **H5, the route is not the one he thinks.** He says the file tree; if the tab was opened from a
+  session path link or Context, `repoPath` came from elsewhere and the refusal is correct behaviour
+  reported as a bug. This one would make the sentence right and the product still wrong, because the
+  person cannot act on it.
+
+### Mechanism
+
+**Do the reading before writing a line of product code.** The phase's first deliverable is
+`docs/research/125-issue-25-every-save-refused.md`, and its job is to make the five causes
+distinguishable and to say which one belucid has, or to say exactly what could not be determined
+from here and what he would need to send.
+
+Then the fix, and it has two halves that are independent of which hypothesis wins:
+
+1. **The refusal stops naming a cause it did not measure.** The `outside` word covers five causes and
+   the sentence asserts one. Separate them so each says what actually happened and what the person
+   can do, using the reason the channel already computes. `resolveOpenProjectRoot` already throws two
+   distinguishable codes (`INVALID_INPUT`, `PROJECT_NOT_FOUND`); a thrown `listProjectRoots` is a
+   third case and is not a refusal about the person's file at all. Every new sentence goes in
+   `save-sentences.ts` beside the family, under the Just enough words rule, and **a sentence that
+   cannot name a remedy is worse than one that does not guess a cause**.
+2. **The reason reaches a log.** It is already carried to the renderer and dropped. Main logs the
+   refusal word and the reason for a guarded write that fails containment, with no file CONTENTS and
+   no byte of the buffer — the path and the cause only. This is what makes the next report of this
+   answerable in one message instead of six.
+
+**What decides whether anything else changes: the reading.** If H2 or H4 wins, the repair is in the
+comparison and this phase makes it. If H1 or H3 wins, the repair may be elsewhere or may be an
+environment the product can only report honestly, and the phase says so rather than inventing a fix.
+
+### Proof, run rather than read
+
+Tier 3 takes real data plus two independent methods, one of which is an attack, plus a fix round on
+any needs_work.
+
+- **Measure the parent commit.** Mandatory, because the operator relayed it. Reproduce the refusal at
+  `1f311103` for each of the five causes, on purpose, in a scratch project, and read the sentence the
+  person would see. A cause that cannot be made to fire is a finding about the cause, not a pass.
+- **Method 1, re-derive the reachable set independently.** Do not trust the list of five above. Walk
+  every throw site reachable from inside that `try` — `resolveProjectRoot`, `resolveOpenProjectRoot`,
+  the lazy import, `listProjects`, `resolveInsideRoot` — and enumerate them by a different route than
+  the one that produced this entry. If the set is larger than five, the sentence is worse than this
+  entry says.
+- **Method 2, the attack, and it is the one that matters.** Attack the claim that this is rare.
+  `save-sentences.ts:86-94` argues that nothing in the product can reach the `.git` route; test that
+  by trying to open one through every opening gesture the app has, not by reading the comment. Then
+  attack the wider claim: try to reach the `outside` sentence with a project that IS open and a file
+  that IS inside it, by making the manifest and the window disagree — an older-shaped row, a
+  case-variant spelling, a folder replaced by a symlink under a running app, a removed and re-added
+  project. Every shape that reaches the sentence while the person has done nothing wrong is a defect
+  and goes in the document by name.
+- **One app run, and it drives every item.** Not one per claim. A scratch profile, a scratch HOME,
+  its own socket, ended in a `finally`.
+- **The gates the paths earn.** `conformance:save` and `conformance:redline-write` both own this
+  channel and both must be green; any new refusal word is pinned in whichever of them owns it, with
+  an ablation per new clause.
+
+### What is NOT in this phase
+
+The guarded channel's REFUSALS do not get weaker. Issue 16 is why the compare-and-swap exists, and a
+phase that makes saving easier by making the containment gate more permissive has traded one person's
+bug for everybody's data. **`resolveOpenProjectRoot` stays the gate every mutation asks** — create,
+rename, move and trash all ask it, and this phase does not give the save path a private, softer door.
+No new IPC channel: the reason is already on the wire. No telemetry and nothing leaves the machine;
+the log is local and holds no file contents. No change to the plain door or to the auto-save stop,
+which are Phase 268's and are not implicated. No redesign of the save dialog. And the phase does not
+close issue 25 on a code change alone — it closes when belucid confirms, or it stays open and says
+what is still unknown.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -28169,3 +28367,5 @@ cycle rather than only the evening it was written.
 - 2026-09-14, **PHASE 271 QUEUED, what every agent can actually do measured against what we say it can, research only, no semver.** The operator asked for a matrix of what exists in the CODE for each agent against what the docs claim, and said what he wants to be true: launch, activity, resume, attachments and Catch Me Up working and identical for every one. The thirteen lines tortie.sh publishes today are reproduced verbatim in the entry so a later reader can see what was being checked. **The entry's central refusal is the reason it is Tier 3**: `src/main/agents/registry.ts` already carries a self-assessment on nearly every capability of every row, so a matrix transcribed from its own `verified:` strings would agree with itself completely and prove nothing — the registry's self-assessment is one of the two CLAIM sides, not the evidence side, and the three sides (what tortie.sh publishes, what the registry declares, what a real code path can actually deliver) are kept apart by construction. The proof is an independent re-derivation that parses the registry as DATA rather than importing it and diffs the two matrices, plus an ATTACK that ablates `activity.native`, `specstory.provider`, `imageDrop` and `resume.idCapture` on a scratch copy and proves the claimed path goes dark — a field whose deletion changes nothing is decorative and the matrix says so. `conformance:resume:capture` supplies the resume column at 16 seconds with no turns and no tokens; `conformance:resume` proper is explicitly NOT run because the operator is not paying real turns for a survey. Two of the fifteen registry rows are IDE kinds and are named rather than scored, and a row present in the published table but absent from the registry, or the reverse, is itself a finding. **Nothing ships in this phase**: no registry row, no doc, no tortie.sh line, and no parity work, because a phase that starts building parity before the document exists is guessing which gaps are real.
 
 - 2026-09-15, **PHASE 271 LANDED — the agent capability matrix, research only, at `f7ed2654`, 0.106.0 unchanged.** `docs/research/123-agent-capability-matrix.md` plus two scripts under `build/p271/` that spawn nothing. No file under `src/` changed, no agent was launched, no token was spent, and the answer to what he asked for is one agent. **Claude Code is the only row with the full suite** — launch, id capture, resume, restore, activity, attachments, SpecStory capture and BOTH halves of Catch Me Up, all works. Codex CLI is second and its two partial cells are id capture and the resume that depends on it, because codex reads its id back at the first turn and 165 of 185 rollouts in his September shards were sub-agents. Droid is the other end: every one of its cells is unmeasured or absent, for one reason, which is that no machine Tortie has been audited on has the binary. **The biggest gap is Catch Me Up, and it is bigger than the published table admits in both directions.** It has two halves that cover different agents — ELEVEN agents' transcripts can be READ and only SIX can be FOLDED into a summary — so seven launchable agents have a Catch Me Up that stops halfway, opencode has neither half, and the four agents tortie.sh advertises it on are a SUBSET of the six that fold, missing Cursor CLI and Pi. Closing the fold half is the most token-expensive item in the document at roughly a day per agent, and two of the seven are unlikely to move at all (gemini is a sign-in problem, qwen has no flag that turns its tools off and sent 28,157 input tokens for a one-sentence question). The other two real gaps are smaller: FOUR agents have no SpecStory capture provider in the bundled 2.10.0 CLI, being qwen, pi, omp and grok, and tortie.sh names only two of them; and exactly TWO of thirteen need the original project folder to resume, being qwen and pi, not the three the published table implies. **22 disagreements**, ordered by how much a person would be misled. Two are wrong facts: tortie.sh says opencode's safe resume depends on the project directory and restore does not refuse when the folder is gone, and `registry.ts:542` says claude is the only agent with no cwd constraint while eleven of thirteen are cwd-free by that same file's own field values. One is live staleness — eleven registry lines still name the bundled specstory 2.8.0, and against the 2.10.0 this tree vendors **muse capture is ON**, read from the binary's own `run --help`, which lists ten providers including `muse (Muse Code)`. **The attack did its job and the finding is that nothing holds any of this.** Four declared fields are decorative: `activity.tier` is on every launchable row and read by nothing (the activity module reads the profile in six places and every one is `native` or `animatesWhenIdle`), `flagPresets` is declared once and populated never, `imageDrop.verified` has no consumer anywhere in `src/`, and `specstory.provider` is a string equal to its own row's id on all eight rows that declare it, so the VALUE can never pick a provider the fallback would not have picked. Behind them, `conformance:agents` never names `imageDrop`, `activity` or `specstory`, no other script under `build/` does either, and the unit suite pins two per-agent drop values in total — so flipping CodeWhale from `clipboard-attach` to `path-text`, or muse's `animatesWhenIdle` from true to false, changes what a person sees and goes green everywhere. A conformance script for the capability half is the cheapest item in section 5 and the only one that stops this document going stale. **What was REFUTED matters as much as what was found, and section 6 records four things so a later round does not re-open them.** The document's own first draft scored the whole Attachments column from `imageDrop.verified`, the field nothing reads, and got four cells wrong including two cells with identical behaviour and opposite verdicts; the fix round rebuilt that column from `strategy`, which is what the drop path actually reads. A verifier reported that `registry.ts` had been edited underneath the document — it had not, and the file is byte identical to `df273525` at sha256 `05df8cd6`; what it saw was another verifier's ablation in flight, restored by its own trap. A verifier reported a banner line number that was off by one. And a verifier reported droid's capture reading `measured` as a defect, which it is not: `confidence` is scoped to exit-code behaviour and droid's note says the wrapper was what got measured. The real defect beside it is that `verifiedProviders()` reads that same exit-code field to answer "does the binary have this provider", which it never claimed to know, so muse is excluded from the fail-safe set though 2.10.0 lists it and a failed probe would put muse capture out while claude's stayed lit. **The limits are stated rather than hidden.** This proves a resume command line is armed and recorded, not that a conversation comes back — six rows are SKIP in the capture run for that reason rather than for a defect, and `npm run conformance:resume` at about three minutes of real turns is what would close them. No pane was opened and no Electron was run, so nothing here is a statement about a drawn surface. The exit-code fidelity values were all measured against 2.8.0 and are carried forward unverified. Restore is one reading of one shared path rather than thirteen measurements. And every `command -v` result in it is a fact about one Mac. Gates, all foreground on the committed bytes: typecheck 0 at 1,303 production files with 0 boundary violations and 0 runtime cycles, build 0 with the contract inventory byte for byte, test 0 at 14,187 passed with 2 skipped over 903 files, smoke:t1 0 at 6/6. The suite needed three runs and the two red ones each lost exactly ONE test and a different one each time, `p141-resume-in-place.test.ts:612` and `open-with.test.ts:329`, both wall-clock races with tens of milliseconds of margin, both passing alone, both at a load average of 38 against the green run's 24 — the same runner starvation `1a05a5f4` widened the vitest budget for, and nothing in this phase is loaded by either test. **Nothing is queued off this.** Section 5 costs every gap and chooses none, and the highest-value hour in it is rewriting the thirteen tortie.sh sentences from the matrix, which fixes seven of the published-side findings in one editing pass on one file.
+
+- 2026-09-15, **PHASE 272 QUEUED, a person on 0.106.0 who cannot save any file, ever (issue 25, belucid), Tier 3, no workflow run yet.** He reads "Tortie did not save README.md, because its project is not open" on a plain open from the file tree, said "I can't save any file, ever", first hit it on 0.102.0 and REPRODUCED IT ON 0.106.0, so nothing in four releases touched it and the operator has never seen it on his own machine. **The certain finding, and it is a defect whatever belucid's cause turns out to be: that sentence has AT LEAST FIVE causes and asserts ONE.** `guarded-write.ts:365-371` wraps `resolveOpenProjectRoot` and `resolveInsideRoot` in one `try` whose `catch` returns `refused('outside')`, so a root that is not absolute, a `realpath` that threw (missing folder AND unreadable folder alike), a root that matches no open project, a `listProjectRoots()` that itself threw, and a path refused for being outside the root or holding `.git` all say the same words. **`refused()` already computes the distinguishing `reason` (`:210-219`), ships it across IPC, and NOTHING READS IT** — not the renderer, not a log — so the product knows why it refused and tells nobody. **Three things were measured while the entry was written.** Reading a file never asks this gate and saving always does (`fs/ipc.ts:222-234` calls no `realpath` and no project list), so "I can edit but never save" is the asymmetry rather than a paradox and does not refute a containment failure. Case is NOT the cause: `realpath` on this Mac answered `/private/tmp/rpcase/RealName` for the lowercase spelling, so a case variant cannot reach the refusal. And for the tree route BOTH SIDES COME FROM THE SAME TABLE ROW — the tree's `rootPath` is `target.path` from `projects:list`, which is the same `core.listProjects()` that `listProjectRoots` calls — so a comparison between a value and itself should not fail, which makes `PROJECT_NOT_FOUND` the LEAST likely of the five for his route and points at a `realpath` that throws on a folder the tree is drawing, or a `listProjectRoots()` that throws. Editor tabs are not persisted across restarts, so a stale `repoPath` is not available as an explanation. Five hypotheses are written down BEFORE the measurement so the phase cannot claim it knew, led by a macOS permission on a cloud-synced or removable location. **The phase ships two things regardless of which wins**: the refusal stops naming a cause it did not measure, and the reason reaches a local log with the path and the cause and no file contents. **What it must NOT do is weaken the gate** — issue 16 is why the compare-and-swap exists, `resolveOpenProjectRoot` stays the one gate create, rename, move and trash all ask, and the save path does not get a private softer door. It does not close issue 25 on a code change alone; it closes when belucid confirms.
