@@ -27737,6 +27737,137 @@ close issue 25 on a code change alone — it closes when belucid confirms, or it
 what is still unknown.
 
 
+## Phase 273 — a symlinked project saves, and a refusal stops naming a cause it did not measure (issue 25, belucid, 2026-09-15)
+
+**Subject.** `fix(save): a symlinked project saves, and a refusal says what it measured`
+
+**First body line.** `Phase 273: symlink resilience and an honest refusal`
+
+**Semver.** Patch. It repairs a shipped defect and adds no capability. The contract baseline moves if
+the refusal words change, which is a build artifact rather than a version.
+
+**Tier 3, and three clauses earn it.** It is the save path, so it can lose a person's work. The
+operator relayed it, so the parent-commit measurement is mandatory. And it changes
+`resolveInsideRoot`, which is the ONE containment gate that `fs:createFile`, `fs:rename`, `fs:move`,
+`fs:trash`, drag-out, Open With and the search context all ask — a mistake here does not break saving,
+it lets a write escape a project. The tier is not negotiable down.
+
+**Charter.** [Issue 25](https://github.com/gregce/tortie/issues/25) and **Phase 272's entry above,
+whose reproduction is the whole basis of this phase**. The operator's instruction of 2026-09-15: *"he
+likely has symlinks we should be resilient to those"*, and *"and then also address this, in that
+change"* pointing at the five-causes finding. Both halves are in this one phase because they are the
+same defect seen twice: the gate refuses for a reason it does not say, and the sentence says a reason
+it did not measure.
+
+### What is already proven, so no round re-derives it
+
+**THE CAUSE, run through the shipped functions.** Two spellings of one folder are compared:
+`addProject` stores `resolvePath(path)` (`sessions/core.ts:2891`), which is `path.resolve` and NOT
+`realpath`, so the stored project path keeps every symlink; `FileTree.tsx:501` builds each tab's path
+from that stored spelling by concatenation; `resolveProjectRoot` realpaths the ROOT
+(`paths.ts:103`); and `resolveInsideRoot` then compares them lexically at `paths.ts:190-193` with no
+`realpath` on the path. Measured over a real directory and a real symlink to it: the real spelling
+answered `SAVE PROCEEDS -> README.md`, the symlinked spelling answered
+`REFUSED -> "That path is outside the project."`
+
+**THE FIX IS SMALLER THAN IT LOOKS, AND THE SECURITY GUARD ALREADY WORKS.** Twelve lines below the
+throw, `paths.ts:205-206` calls `realpathOfAncestors(dirname(lexical))` and re-checks containment
+against the resolved parent. **For a symlinked project that check PASSES**, because the symlinked
+parent resolves to `realRoot`. The lexical test at `:193` is a cheap pre-filter that throws before the
+real guard can answer. So this is a pre-filter refusing what the guard would have admitted, not a
+missing guard.
+
+**THE DISCRIMINATOR IS ABSOLUTE VERSUS RELATIVE, AND IT EXPLAINS WHY ONLY SAVING BREAKS.**
+`lexical` is `resolve(trimmed)` for an absolute input but `resolve(realRoot, trimmed)` for a relative
+one — and a path resolved FROM `realRoot` is inside it by construction. The save path sends
+`tab.path`, which is absolute, so it breaks. `tree-ops.ts:767-770` sends `path: toRel(...)` for a
+rename and `:1175-1177` sends `paths: targets.map(toRel)` for a trash, both relative, so those work.
+That is why belucid can browse, rename and delete in a project he cannot save a single file in, and
+it is the first thing the phase should confirm with him.
+
+### Mechanism
+
+Two halves. Neither is optional and the second is the one that makes the next report of this
+answerable in one message.
+
+**HALF ONE — a symlinked project behaves like any other.** The phase picks its repair and argues for
+it in the commit body rather than inheriting a choice from this entry. The three candidates and what
+each costs:
+
+- **Resolve before the lexical check** (`resolveInsideRoot`). The narrowest change in lines and the
+  widest in blast radius, because every caller above shares this function. **It carries a trap the
+  phase must handle**: `realpathOfAncestors` throws when it walks to the filesystem root, and its
+  comment at `paths.ts:79-81` justifies that with "cannot happen for a path already proven to sit
+  under an existing root" — a premise the lexical check is what establishes. Relax that check and the
+  comment's reasoning is void; the phase either re-establishes it or rewrites the comment to match
+  what is true.
+- **Normalise at `addProject`** so the stored project path is the resolved one. It fixes every caller
+  at once and needs an answer for rows already in the manifest, and for what a person SEES: a project
+  opened as `~/work/proj` would start displaying its resolved path, which is a visible change nobody
+  asked for.
+- **Hold both spellings** — the path as opened and the path as resolved. The most faithful and the
+  most surface: a manifest column, a migration, and two values every reader must then choose between.
+
+**HALF TWO — the refusal stops naming a cause it did not measure.** `guarded-write.ts:365-371` wraps
+two different questions in one `try` and answers all of them with `outside`, which the renderer
+renders as "its project is not open". At least five causes land there: a root that is not an absolute
+string; a `realpath` that threw, which covers a missing folder and an unreadable one alike; a root
+that matches no open project, the only cause the sentence describes; a `listProjectRoots()` that
+itself threw, which is a lazy import plus a live SQLite read of two tables and is not about the
+person's file at all; and a path refused by `resolveInsideRoot`, which is belucid's. **The string that
+separates them is already computed** — `refused()` carries `reason: sentenceOf(err)` at
+`:210-219` — **sent across IPC, and read by nothing**: no `.reason` in `save-write.ts`,
+`save-sentences.ts` or `tab-io.ts`, and no log at `fs/ipc.ts:275-277`.
+
+So: separate the causes into words a person can act on, and make the reason reach a local log with the
+refusal word and the path and NO file contents. Every sentence goes in `save-sentences.ts` beside the
+family under Just enough words, and **a sentence that cannot name a remedy is better than one that
+guesses a cause** — the current one guesses, and for belucid it guesses wrong twice, because his
+project IS open and the refusal was about the path rather than the root.
+
+Adding a refusal word changes `FsGuardedWriteRefusal` (`shared/fs-ops.ts:339-348`), so the contract
+baseline is regenerated in the same commit with the moved lines named in the body.
+
+### Proof, run rather than read
+
+- **Measure the parent commit.** Mandatory. At `27159c2f`, a project opened through a symlink refuses
+  every save; after, it saves. Both readings in the commit body, from the running app rather than a
+  unit test, because a unit test is where this defect hid.
+- **Method 1, the attack, and it is the one that matters.** Do not test that saving works — test that
+  nothing ESCAPES. Build a project whose tree contains a symlink pointing OUT of it, a symlink to `/`,
+  a symlink to another open project, a relative traversal wearing a symlinked prefix, a path whose
+  ancestors partly do not exist, and `.git` reached through a link. Every one must still be refused
+  after the change, and each must be proved to have been refused BEFORE it too, so the phase can show
+  it admitted exactly one new shape and not a class. **A repair that makes saving work and cannot
+  demonstrate this is a failed phase.**
+- **Method 2, re-derive the caller matrix independently.** Enumerate every `resolveInsideRoot` call
+  site — 15 of them across `search/context.ts`, `fs/drag-out.ts`, `fs/file-ops.ts`,
+  `fs/guarded-write.ts` and `fs/open-with.ts` — and classify each by whether the path it passes is
+  absolute or relative, by reading the CALLERS in the renderer rather than the signatures. That table
+  is the true blast radius and belongs in the commit body. If a second caller sends absolute paths,
+  it is broken today in the same way and this phase fixes it too.
+- **One app run drives everything.** A scratch profile, a scratch HOME, its own socket, a project
+  opened through a real symlink, all ended in a `finally`. Drive the save, then a rename, a trash, a
+  new file and a drag-out in the same session, because they share the gate this phase changes.
+- **The gates the paths earn**, all of them: `conformance:save`, `conformance:redline-write` and
+  `conformance:pathdoors` own this channel and this module. New clauses get an ablation each.
+
+### What is NOT in this phase
+
+**The gate does not get weaker, and this is the refusal that binds every later round.** Issue 16 is
+why the compare-and-swap exists. `resolveOpenProjectRoot` stays the one gate create, rename, move,
+trash, drag-out and Open With all ask, and **the save path does not get a private, softer door**. If
+the phase cannot make a symlinked project work without admitting a new escape, it ships the honest
+refusal from half two and says so, and half one becomes its own phase with its own research.
+
+No new IPC channel: the reason is already on the wire. No telemetry, nothing leaves the machine, and
+the log holds a path and a cause and never a byte of the file. No change to the plain door, to auto
+save's stop, or to the three answers a stale save offers, which are Phases 240 and 268's and are not
+implicated. No redesign of the save dialog. Remote projects are out of scope: their paths are on
+another machine and never reach `realpath` here. And **the phase does not close issue 25 on a green
+gate** — it closes when belucid confirms on a build, or it stays open and says what is still unknown.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -28430,3 +28561,5 @@ cycle rather than only the evening it was written.
 - 2026-09-15, **PHASE 272 QUEUED, a person on 0.106.0 who cannot save any file, ever (issue 25, belucid), Tier 3, no workflow run yet.** He reads "Tortie did not save README.md, because its project is not open" on a plain open from the file tree, said "I can't save any file, ever", first hit it on 0.102.0 and REPRODUCED IT ON 0.106.0, so nothing in four releases touched it and the operator has never seen it on his own machine. **The certain finding, and it is a defect whatever belucid's cause turns out to be: that sentence has AT LEAST FIVE causes and asserts ONE.** `guarded-write.ts:365-371` wraps `resolveOpenProjectRoot` and `resolveInsideRoot` in one `try` whose `catch` returns `refused('outside')`, so a root that is not absolute, a `realpath` that threw (missing folder AND unreadable folder alike), a root that matches no open project, a `listProjectRoots()` that itself threw, and a path refused for being outside the root or holding `.git` all say the same words. **`refused()` already computes the distinguishing `reason` (`:210-219`), ships it across IPC, and NOTHING READS IT** — not the renderer, not a log — so the product knows why it refused and tells nobody. **Three things were measured while the entry was written.** Reading a file never asks this gate and saving always does (`fs/ipc.ts:222-234` calls no `realpath` and no project list), so "I can edit but never save" is the asymmetry rather than a paradox and does not refute a containment failure. Case is NOT the cause: `realpath` on this Mac answered `/private/tmp/rpcase/RealName` for the lowercase spelling, so a case variant cannot reach the refusal. And for the tree route BOTH SIDES COME FROM THE SAME TABLE ROW — the tree's `rootPath` is `target.path` from `projects:list`, which is the same `core.listProjects()` that `listProjectRoots` calls — so a comparison between a value and itself should not fail, which makes `PROJECT_NOT_FOUND` the LEAST likely of the five for his route and points at a `realpath` that throws on a folder the tree is drawing, or a `listProjectRoots()` that throws. Editor tabs are not persisted across restarts, so a stale `repoPath` is not available as an explanation. Five hypotheses are written down BEFORE the measurement so the phase cannot claim it knew, led by a macOS permission on a cloud-synced or removable location. **The phase ships two things regardless of which wins**: the refusal stops naming a cause it did not measure, and the reason reaches a local log with the path and the cause and no file contents. **What it must NOT do is weaken the gate** — issue 16 is why the compare-and-swap exists, `resolveOpenProjectRoot` stays the one gate create, rename, move and trash all ask, and the save path does not get a private softer door. It does not close issue 25 on a code change alone; it closes when belucid confirms.
 
 - 2026-09-15, **PHASE 272's CAUSE WAS FOUND AND REPRODUCED before the phase ran, and it is a symlink rather than anything environmental.** A project opened through a symlinked ancestor refuses EVERY save in that project, forever. The two sides of the containment check are built from different spellings of the same folder: `addProject` stores `resolvePath(path)` (`sessions/core.ts:2891`), which is `path.resolve` and NOT `realpath`, so the stored project path keeps the symlink; the tree builds each tab's path from that stored spelling by concatenation (`FileTree.tsx:501`); `resolveProjectRoot` then REALPATHS the root (`paths.ts:103`); and `resolveInsideRoot` compares them LEXICALLY, with no realpath on the path, throwing at `paths.ts:193`. So the gate asks whether an unresolved path sits inside a resolved root, `relative()` answers `../../link/proj/README.md`, and the throw becomes `refused('outside')`. **MEASURED through the shipped `resolveProjectRoot` and `resolveInsideRoot` over a real directory and a real symlink to it: the real spelling answered `SAVE PROCEEDS -> README.md` and the symlinked spelling answered `REFUSED -> "That path is outside the project."` — same folder, same file, only the spelling differs.** The probe ran as a throwaway test file under `src/main/fs/__tests__/` to get the repository's own path aliases, and was deleted in a `finally`; `git status` on `src/` is clean and no test file was added. It explains every fact in the report: every file because the root is wrong for all of them, forever because the stored spelling never changes, across 0.102.0 and 0.106.0 because nothing between them touched either side, reading fine because `fs:readFile` never asks this gate, and never on the operator's machine because his projects are opened by their real paths. **Two earlier guesses of mine are REFUTED and recorded as such rather than quietly dropped**: case cannot reach the refusal, because `realpath` on macOS returns the canonical spelling (measured); and the permission-or-cloud-filesystem guess is wrong, because `realpath` SUCCEEDS in the reproduction and the refusal comes from the string comparison after it — an external volume only ever mattered because people symlink to one. The sentence is now wrong twice over, since the project IS open and the refusal is about the PATH rather than the root, while the honest sentence the code actually threw is the one that gets discarded. The phase still has to confirm this is belucid's shape rather than merely A shape, and to choose the repair — normalise at `addProject`, realpath inside `resolveInsideRoot`, or hold both spellings — each with a different blast radius across create, rename, move, trash and drag-out, which all ask this same gate, and each owing an answer for what an existing manifest row does on upgrade.
+
+- 2026-09-15, **PHASE 273 QUEUED, a symlinked project saves and a refusal stops naming a cause it did not measure (issue 25), Tier 3, not yet run.** It carries BOTH halves the operator asked for in one phase, because they are the same defect seen twice: the gate refuses for a reason it does not say, and the sentence says a reason it did not measure. **Half one is the symlink**, whose cause Phase 272's entry above already reproduced through the shipped functions. **The fix is smaller than it looks and the security guard already works**: twelve lines below the throw, `paths.ts:205-206` realpaths the parent and re-checks containment, and for a symlinked project THAT CHECK PASSES — the lexical test at `:193` is a cheap pre-filter throwing before the real guard can answer, so this is a pre-filter refusing what the guard would have admitted rather than a missing guard. **The discriminator is absolute versus relative and it explains why only saving breaks**: `lexical` is `resolve(trimmed)` for an absolute input but `resolve(realRoot, trimmed)` for a relative one, and a path resolved FROM realRoot is inside it by construction — the save path sends `tab.path` absolute and breaks, while `tree-ops.ts:767-770` sends `toRel(...)` for a rename and `:1175-1177` for a trash and both work, which is why belucid can browse, rename and delete in a project he cannot save one file in, and is the first thing to confirm with him. Three repairs are named with their costs and the phase picks one in its commit body rather than inheriting a choice: resolve before the lexical check, which is narrowest in lines and widest in blast radius and **carries a trap — `realpathOfAncestors` justifies its root-walk throw at `paths.ts:79-81` with "cannot happen for a path already proven to sit under an existing root", a premise the lexical check is what establishes, so relaxing it voids that comment's reasoning**; normalise at `addProject`, which fixes every caller at once and owes an answer for existing manifest rows and for a person suddenly seeing a resolved path they did not type; or hold both spellings, most faithful and most surface. **Half two is the five causes**: one `try` at `guarded-write.ts:365-371` answers `outside` for a non-absolute root, a `realpath` that threw (missing and unreadable alike), a root matching no open project, a `listProjectRoots()` that itself threw, and a path refusal — and the string that separates them is computed at `:210-219`, shipped across IPC and read by nothing, so the product knows why it refused and tells neither the person nor a log. Adding a refusal word moves `FsGuardedWriteRefusal` and the contract baseline in the same commit. **THE PROOF IS AN ATTACK RATHER THAN A DEMONSTRATION**: the phase does not test that saving works, it tests that nothing ESCAPES — a symlink pointing out of the project, one to `/`, one into another open project, a relative traversal wearing a symlinked prefix, partly-missing ancestors, and `.git` reached through a link, each proved refused BEFORE as well as after, so the phase can show it admitted exactly one new shape and not a class. **A repair that makes saving work and cannot demonstrate that is a failed phase**, and if the phase cannot separate the two it ships half two alone and says so. The blast radius is re-derived independently as a table of all 15 `resolveInsideRoot` call sites classified absolute or relative by reading the CALLERS, because a second caller sending absolute paths is broken today in the same way. **The gate does not get weaker and the save path does not get a private softer door**; issue 25 does not close on a green gate but when belucid confirms on a build.
