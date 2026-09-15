@@ -319,6 +319,55 @@ describe('the shape a remote restore takes, read off its own source', () => {
     expect(code).not.toContain('RESUME_NOT_TYPED_HERE');
     expect(code).not.toContain('not-typed-here');
   });
+
+  /**
+   * PHASE 270, THE VERIFIER'S ROUND. THE SILENCE ENDS ON THIS PATH TOO.
+   *
+   * The build that went into verification composed the slot here and handed the
+   * plane its names — so the variables were injected — and then asked the
+   * machine nothing and raised nothing. A person whose machine had lost a
+   * variable was told once, on the first create, and never again on any restore
+   * of that same session, while the LOCAL restore has raised it since Phase 33.
+   * The standing rule is that remote feels identical to local.
+   *
+   * Asserted over `code` and never `source`, because the paragraph beside the
+   * call names both of these things on purpose and a comment must not be able
+   * to answer a question about what the code does.
+   */
+  it('asks the machine which names it has, and raises the notice', () => {
+    expect(code).toContain('probeRemoteEnvNames(ctx, passthrough)');
+    expect(code).toContain("kind: 'env-unresolved'");
+    expect(code).toContain('names: envProbe.missing');
+    expect(code).toContain('probeFailed: envProbe.probeFailed');
+  });
+
+  /**
+   * The notice may only name a session that EXISTS. The create path raises it
+   * after the row is on screen for the same reason, and `startMachineFeed` is
+   * the line that puts it there.
+   */
+  it('raises it only after the session is bound and on screen', () => {
+    const feed = code.indexOf('startMachineFeed(');
+    const raise = code.indexOf("kind: 'env-unresolved'");
+    expect(feed).toBeGreaterThan(-1);
+    expect(raise).toBeGreaterThan(feed);
+  });
+
+  /**
+   * THE COLD SERVER, which is the finding that blocked this phase on the CREATE
+   * path. A create or a restore carrying names runs the far side's login shell,
+   * and on a socket with no server that shell is what execs tmux — which then
+   * seeds its GLOBAL environment from it. This path has always made the call,
+   * at its step 3, several seconds before the create line; the rule is here so
+   * a later round cannot reorder it.
+   */
+  it('asserts the far server before it composes the create', () => {
+    const boot = code.indexOf('ensureRemoteServer(');
+    const create = code.indexOf('remoteCreateArgs({');
+    expect(boot).toBeGreaterThan(-1);
+    expect(create).toBeGreaterThan(-1);
+    expect(boot).toBeLessThan(create);
+  });
 });
 
 // ---------------------------------------------------------------------------

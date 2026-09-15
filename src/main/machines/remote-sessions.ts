@@ -204,6 +204,7 @@ import {
 import { readyRemoteContext } from './ready-context';
 import { REMOTE_STAMPS, oneLine, remoteStampArgs } from './remote-stamps';
 import { execOn } from './exec-plane';
+import { ensureRemoteServer } from './remote-server';
 import { machineColorOf, machineLabelOf, machineRow } from './store';
 // Phase 72, widened in Phase 84. The per machine program path, captured on that
 // machine and recorded against that machine's id. Since Phase 84 it is also
@@ -293,6 +294,21 @@ import {
 // session on another machine. It is pure, so `remoteCreateArgs` stays a
 // function the conformance gate can read without starting anything.
 import { assertRemoteEnvAllowed } from './remote-env';
+// PHASE 270. The far side resolves a person's named variables with its OWN
+// login shell. `./remote-env.ts` above does not move by one byte: no value is
+// composed here and none crosses the wire. The slot is pure; the probe and the
+// union rule are in `./remote-env-probe.ts`.
+import { REMOTE_ENV_SLOT } from './remote-env-carriage';
+import {
+  probeRemoteEnvNames,
+  remoteEnvNamesFor,
+  type RemoteEnvProbeResult
+} from './remote-env-probe';
+// PHASE 270. The one sentence a person reads when a session starts without a
+// variable its agent names. It is the kind Phase 33 registered and Phase 269
+// reused, raised here at the same moment the local create raises it: after the
+// session exists, so the notice can name a session that exists.
+import { postDurabilityNotice } from '../notice';
 
 // The re-export half of the Phase 123 move. Every existing caller of these four
 // names goes on reading them from this module.
@@ -801,6 +817,15 @@ export function remoteCreateArgs(input: {
   readonly sessionId: string;
   readonly argv: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * PHASE 270. Shell variable NAMES whose VALUES the FAR SIDE expands. Never a
+   * value, and never one byte of one.
+   *
+   * A non-empty list pushes exactly one element, {@link REMOTE_ENV_SLOT}, and
+   * no `-e` pair of its own. An empty or absent list pushes nothing and this
+   * function returns byte for byte what it returned at the parent commit.
+   */
+  readonly envNames?: readonly string[];
 }): string[] {
   const args = [
     'new-session',
@@ -834,12 +859,39 @@ export function remoteCreateArgs(input: {
   // nothing and sends nothing.
   const env = { ...managedPaneEnv(input.sessionId), ...input.env };
   assertRemoteEnvAllowed(env);
+  // PHASE 270. ONE element, and it is not a pair. The far side's own login
+  // shell replaces it with `-e NAME=value` for each name it has a usable value
+  // for, expanding those values itself, on that machine. THE NAMES NEVER REACH
+  // `env` ABOVE, so the allowlist is never consulted about a provider name and
+  // therefore never has to widen: the pair does not exist on this Mac at any
+  // instant. See `./remote-env-carriage.ts`.
+  //
+  // IT SITS BEFORE THE STAMPS, and that is the whole ordering rule. tmux
+  // applies `-e` pairs left to right and the last one for a name wins, so
+  // `GMUX_MANAGED` and `GMUX_SESSION_ID` override anything the far side
+  // manufactures, exactly as `paneEnvFor` puts `managedPaneEnv` last on this
+  // Mac. A passthrough name may not begin `GMUX_` anyway, and this is the
+  // second answer to the same question rather than the only one.
+  if ((input.envNames ?? []).length > 0) args.push(REMOTE_ENV_SLOT);
   for (const [key, value] of Object.entries(env)) {
     args.push('-e', `${key}=${value}`);
   }
   if (input.argv.length > 0) args.push('--', ...input.argv);
   return args;
 }
+
+/**
+ * How long a create that carries shell variable NAMES gets, being 20,000 ms.
+ *
+ * It is the create's own 10 s plus the login shell's own 10 s, because a create
+ * with names runs THROUGH the far machine's login shell rather than through the
+ * non-login shell ssh gives it, and a real profile has been measured at 3.4 s.
+ * `./remote-path.ts` budgets the same 10 s for the same reason.
+ *
+ * A CREATE WITH NO NAMES KEEPS EVERY NUMBER IT HAS TODAY. This is passed only
+ * on the branch that has names.
+ */
+export const REMOTE_CREATE_ENV_TIMEOUT_MS = 20_000;
 
 /** The list argv. Pure. */
 export function remoteListArgs(): string[] {
@@ -1483,11 +1535,61 @@ export async function remoteCreate(input: RemoteCreateInput): Promise<Session> {
   // Step 6. THE ABSOLUTE PATH IS WHAT LAUNCHES. See the header of this function
   // for the measurement that forced it and for what it costs.
   const launchArgv = bin.length > 0 ? [bin, ...argv.slice(1)] : argv;
+  // PHASE 270, issue 20. Step 6b. The shell variable NAMES this agent asks for,
+  // being the SAME union of agents.json and Settings the local create reads,
+  // through the same seal-checked door. It is `[]` for every compiled agent as
+  // shipped, so nobody who configured nothing pays for this: no probe is sent,
+  // no slot is composed and the deadline below does not move.
+  //
+  // ONE ROUND TRIP, and it asks the machine about the whole list at once. It
+  // NEVER REJECTS: a machine that could not be asked comes back as a failed
+  // probe, the create carries on, and the notice at the end says so.
+  //
+  // WHAT IT ANSWERS IS NAMES. No value is printed back to this Mac, no value is
+  // composed into any command line here, and nothing of this Mac's own
+  // environment is read for a session on another computer. The values are
+  // expanded by that machine's own login shell, on that machine, into the argv
+  // of that machine's own tmux, at the slot `remoteCreateArgs` puts in the line.
+  const passthrough = remoteEnvNamesFor(entry, input.agent);
+  // PHASE 270, THE VERIFIER'S ROUND, AND IT IS THE ONE FINDING THAT BLOCKED.
+  //
+  // THE SERVER IS BOOTED BEFORE A CREATE THAT CARRIES NAMES, so the login shell
+  // below is a tmux CLIENT and never the process that starts the server.
+  //
+  // MEASURED LIVE on the operator's Mac Pro, 2026-09-14, on a socket killed
+  // first so it was cold. A create carrying names reaches the far side as
+  // `"$SHELL" -lc <script> … tmux … new-session`, and on a machine with no
+  // server on Tortie's socket that login shell is what EXECS tmux — so tmux
+  // seeds its GLOBAL environment from it. The reading was
+  // `show-environment -g | grep -c '^<the name>'` = 1, and a SECOND session
+  // created on that same server carrying NO names at all read the value back.
+  // That is a cross-agent leak out of a per-agent opt-in, and it lasts for the
+  // life of the server, which by design outlives Tortie, so a rotated key would
+  // stay in the globals. On a warm server the same reading is 0, which is why
+  // every earlier run looked clean.
+  //
+  // `ensureRemoteServer` boots through `execOn`, which is the PLAIN ssh exec
+  // and not a login shell, so the server it starts holds no rc-exported value.
+  // This is the same call `restoreRemoteSession` already makes at step 3 of
+  // `./remote-restore.ts`, for its own reason, and letting it throw is that
+  // path's behaviour too: a machine whose server cannot be asserted is a
+  // machine this create was going to fail on.
+  //
+  // ONLY ON THE BRANCH THAT HAS NAMES. A create for an agent nobody configured
+  // does not go through a login shell at all — its far side is the bare tmux
+  // argv over ssh — so it cannot carry an rc-exported value into the globals,
+  // and it must not pay the dozen round trips this costs.
+  if (passthrough.length > 0) await ensureRemoteServer(ctx);
+  const envProbe: RemoteEnvProbeResult | null =
+    passthrough.length === 0
+      ? null
+      : await probeRemoteEnvNames(ctx, passthrough);
   const args = remoteCreateArgs({
     tmuxName,
     ...(cwd.length > 0 ? { cwd } : {}),
     sessionId,
-    argv: launchArgv
+    argv: launchArgv,
+    ...(passthrough.length > 0 ? { envNames: passthrough } : {})
   });
 
   // BEFORE the line is sent, and not after. The failure this exists for is a
@@ -1558,7 +1660,18 @@ export async function remoteCreate(input: RemoteCreateInput): Promise<Session> {
 
   let tmuxId: string;
   try {
-    const printed = await execOn(ctx, args);
+    const printed = await execOn(
+      ctx,
+      args,
+      // PHASE 270. Both only on the branch that has names, so a create for an
+      // agent nobody configured composes and waits exactly as it always has.
+      passthrough.length > 0
+        ? {
+            envNames: passthrough,
+            timeoutMs: REMOTE_CREATE_ENV_TIMEOUT_MS
+          }
+        : {}
+    );
     tmuxId = (printed.split('\n')[0] ?? '').trim();
   } catch (err) {
     // THE CONFIRMATION READ, and it is not the pane environment rescue.
@@ -1665,6 +1778,29 @@ export async function remoteCreate(input: RemoteCreateInput): Promise<Session> {
       noRemoteRowFor(input.name),
       `${input.machineId} created ${tmuxId} and did not list it back`
     );
+  }
+  // PHASE 270. The same sentence the local create raises, at the same moment
+  // and for the same reason: the session exists and is bound, so the notice can
+  // name a session that exists. It says one thing, being that this pane started
+  // without a variable its agent names. Nothing else on either machine would
+  // say so, and the agent inside it fails much later with a message about its
+  // provider rather than about a shell on another computer.
+  //
+  // `missing` names the variables THAT MACHINE had no usable value for, plus
+  // any name this rung refused as not a variable name. `probeFailed` means
+  // Tortie could not ask, which is not the same as the variable being absent —
+  // the create expands the values independently of this answer.
+  if (
+    envProbe !== null &&
+    (envProbe.missing.length > 0 || envProbe.probeFailed)
+  ) {
+    postDurabilityNotice({
+      kind: 'env-unresolved',
+      sessionId,
+      sessionName: oneLine(input.name),
+      names: envProbe.missing,
+      probeFailed: envProbe.probeFailed
+    });
   }
   return projectRow(row, stateOf(input.machineId));
 }

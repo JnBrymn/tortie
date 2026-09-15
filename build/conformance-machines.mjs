@@ -217,6 +217,23 @@
  * The numbers 60, 61 and 62 were never used. Seventy seven conditions are in
  * force, being 1 to 59 and 63 to 80:
  *
+ * PHASE 270 APPENDED 89 TO 98 and left the list where it was, in the same way.
+ * ITS VERIFIER'S ROUND APPENDED 99, the far server booted before a create that
+ * carries names, and turned 98's printed limit about the restore path into a
+ * failure. Both are recorded in the Phase 270 entry of docs/BACKLOG.md.
+ * They are one block at the foot of this file and they are about one sentence:
+ * a session on another machine reads THAT machine's shell, the NAMES travel and
+ * no value does. 89 is that `REMOTE_ENV_ALLOWED` did not move and that sixteen
+ * legal passthrough names still compose no pair but the two stamps; 90 and 97
+ * are the slot, once, before the stamps, and never in an argv that is not a
+ * create; 91 is byte identity with the parent over four shapes for every create
+ * that carries no name; 92 is thirteen hostile name shapes dropped whole and
+ * then forced past that filter into the composer; 93 bounds the one `eval`
+ * behind its own guard in both frozen texts; 94 is the 4096 cap agreeing in
+ * three places; 95 is that the catalogue did not widen beyond one read; 96 is
+ * that neither text can name a value, by a rule rather than a list; and 98 is
+ * that the silence ended, read out of the files that raise the notice.
+ *
  * 55. `repo-facts` is not a one value read in the catalogue; it names a git verb
  *     other than `rev-parse`; `ALLOWED_GIT_VERBS` is not exactly `ls-files`,
  *     `rev-parse`, `show` and `status`; the script text or the bytes the door
@@ -3044,8 +3061,12 @@ const INDEX_PATH_GUARD =
  * 35's own walk classifies as a read because `ALLOWED_WRITERS` did not grow.
  * PHASE 234 MOVED IT FROM TWENTY SIX TO TWENTY EIGHT BY TWO MORE READS, being
  * `arch-read` and `arch-git`, and `ALLOWED_WRITERS` did not grow for either.
+ * PHASE 270 MOVED IT FROM TWENTY EIGHT TO TWENTY NINE BY ONE MORE READ, being
+ * `env-names`, which asks a machine which of a person's named shell variables
+ * it has and answers with NAMES. `ALLOWED_WRITERS` did not grow for it either,
+ * and condition 95 below asserts its own seven rules besides.
  */
-const REMOTE_SCRIPT_COUNT = 28;
+const REMOTE_SCRIPT_COUNT = 29;
 
 {
   // 35. The catalogue's shape.
@@ -3139,6 +3160,30 @@ const REMOTE_SCRIPT_COUNT = 28;
             `single quoted one is text rather than the value.`
         );
       }
+    }
+    // PHASE 270 ADDED THE FIRST TEXT THAT HANDS A SECOND SHELL A PROGRAM.
+    // `env-names` asks the far machine's own LOGIN shell which variables it
+    // has, because the shell ssh gives a command is not a login shell and never
+    // reads that person's rc files, and that program is a single quoted
+    // constant inside `"$SHELL" -lc '…'`. THE VALUES IT NEEDS ARE PASSED IN THE
+    // ENVIRONMENT rather than as the inner shell's positionals, which is what
+    // keeps the rule above intact: every `$1` and `$2` in the text is still the
+    // OUTER script's own, still read into a local in double quotes, and a
+    // positional inside the single quotes would still fail.
+    //
+    // The single quotes are what make that true, so they are counted. An inner
+    // program may hold none of its own, therefore a text holds exactly two per
+    // inner program. A third closes the program early, and what the far
+    // machine's login shell would then run is not what this gate read.
+    if (row.innerSpans > 0 && row.singleQuotes !== row.innerSpans * 2) {
+      fail(
+        `remote script ${row.id} hands an inner shell ${String(row.innerSpans)} ` +
+          `program(s) and holds ${String(row.singleQuotes)} single quote(s). ` +
+          `It holds exactly two per program, because an inner program may ` +
+          `contain none of its own — a third closes the program early, and what ` +
+          `the far machine's login shell would then run is not what this gate ` +
+          `read.`
+      );
     }
     scriptVerdicts.push({
       id: row.id,
@@ -9362,6 +9407,645 @@ process.stdout.write(
       `GmuxError: the completed "no server running" answer still reads ` +
       `provenAbsent, and every malformed payload is refused whole and keeps ` +
       `the row.\n`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 270, conditions 89 to 98. A remote session reads the REMOTE machine's
+// shell, and the silence ends
+// ---------------------------------------------------------------------------
+//
+// Phase 269 shipped per-agent shell variable NAMES and they worked on this Mac
+// alone. `src/main/machines/remote-sessions.ts` named neither `envPassthrough`
+// nor `captureLoginShellEnv`, and `src/main/sessions/create-local.ts` returns on
+// its remote branch before the union rule is reached, so a create on another
+// machine ignored every name IN SILENCE — issue 20's own failure reappearing on
+// the surface built to end it.
+//
+// This phase asks that machine's OWN login shell which of those names it has a
+// usable value for, and puts the values on that machine's own `new-session`
+// line through a slot its own login shell expands. THE NAMES TRAVEL AND NO
+// VALUE DOES, in either direction. These ten conditions are the executable half
+// of that sentence, and the first of them is the one the rest lean on:
+// `REMOTE_ENV_ALLOWED` did not move by one name.
+{
+  const p270 = data.phase270 ?? {};
+  const present = p270.present ?? {};
+  const say = (what) => `condition 89 to 98 cannot be judged: ${what}`;
+
+  // A MISSING MODULE IS A FAILURE AND NEVER A SKIP. A gate that quietly passes
+  // when its subject is absent is not a gate.
+  for (const [flag, what] of [
+    ['carriage', 'src/main/machines/remote-env-carriage.ts is not there'],
+    ['probe', 'src/main/machines/remote-env-probe.ts is not there'],
+    ['slotExported', 'REMOTE_ENV_SLOT is not exported'],
+    ['guardExported', 'REMOTE_ENV_NAME_GUARD is not exported'],
+    ['createScriptExported', 'REMOTE_ENV_CREATE_SCRIPT is not exported'],
+    ['namesForExported', 'remoteEnvNamesFor is not exported by either module'],
+    ['composeExported', 'composeEnvCreateCommand is not exported'],
+    ['markerExported', 'remoteEnvProbeMarker is not exported'],
+    ['filterExported', 'filterRemoteEnvNames is not exported'],
+    ['droppedExported', 'droppedRemoteEnvNames is not exported']
+  ]) {
+    if (present[flag] !== true) fail(say(what));
+  }
+  const sites = present.namesForSites ?? [];
+  if (sites.length > 1) {
+    fail(
+      `the union rule that decides which names an agent has is exported by ` +
+        `${String(sites.length)} module(s), being ${sites.join(' and ')}. It ` +
+        `has ONE spelling. Two copies of it is how a local session and a ` +
+        `remote session come to disagree about what an agent carries.`
+    );
+  }
+
+  // --- 89. The allowlist did not move, and nothing new became a pair --------
+  //
+  // This is condition 47's neighbourhood rather than its replacement. Condition
+  // 47 above asserts the set and the one name Phase 84 measured and refused.
+  // This asserts the thing THIS phase could have broken: that asking for
+  // sixteen legal passthrough names still composes no pair but the two stamps.
+  // The value never becomes a pair on this Mac at any instant, which is why the
+  // allowed set never had to widen.
+  {
+    const allowed = [...(p270.allowed ?? [])].sort();
+    if (JSON.stringify(allowed) !== JSON.stringify(['GMUX_MANAGED', 'GMUX_SESSION_ID'])) {
+      fail(
+        `Phase 270 left ${String(allowed.length)} name(s) in REMOTE_ENV_ALLOWED, ` +
+          `being ${allowed.join(', ') || 'none'}. The phase's own bound is that ` +
+          `the set does not move: the names travel and the far machine's own ` +
+          `login shell expands the values, on that machine, so nothing of this ` +
+          `Mac's ever needed to cross.`
+      );
+    }
+    if (p270.measuredAndRefused !== 'PATH' || allowed.includes('PATH')) {
+      fail(
+        `REMOTE_ENV_MEASURED_AND_REFUSED reads ` +
+          `${JSON.stringify(p270.measuredAndRefused)} and the allowed set ` +
+          `${allowed.includes('PATH') ? 'holds' : 'does not hold'} PATH. Phase ` +
+          `84 measured that an -e pair for PATH does not reach a pane at all, ` +
+          `and Phase 270 is not the round that reopens it.`
+      );
+    }
+    const pairs = p270.pairsWithSixteen ?? {};
+    if (pairs.threw !== null && pairs.threw !== undefined) {
+      fail(
+        `a create carrying sixteen legal passthrough NAMES was refused: ` +
+          `${String(pairs.threw)}. A name is not a value, nothing about it ` +
+          `reaches the allowlist, and such a create must compose.`
+      );
+    } else if (
+      JSON.stringify([...(pairs.names ?? [])].sort()) !==
+      JSON.stringify(['GMUX_MANAGED', 'GMUX_SESSION_ID'])
+    ) {
+      fail(
+        `a create carrying sixteen legal passthrough names composed -e pairs ` +
+          `for ${[...(pairs.names ?? [])].join(', ') || 'nothing'}. It composes ` +
+          `exactly the two identity stamps and nothing else, because the ` +
+          `passthrough values are expanded on the far side and never exist as ` +
+          `a pair on this Mac.`
+      );
+    }
+    const refusal = String(p270.oldRouteStillRefuses ?? '');
+    if (!refusal.includes('ANTHROPIC_API_KEY')) {
+      fail(
+        `a create carrying a provider name on its OLD env route was not ` +
+          `refused with that name. Phase 73's refusal fires before anything is ` +
+          `composed, and this phase's new route must not reopen the old one.`
+      );
+    }
+  }
+
+  // --- 90. The slot ---------------------------------------------------------
+  //
+  // One element, never a pair, and it stands BEFORE the stamps. tmux applies
+  // `-e` left to right and the last one for a name wins, so the two identity
+  // stamps still override anything the far side manufactures — which is the
+  // same ordering `paneEnvFor` gives `managedPaneEnv` on this Mac.
+  {
+    const slot = p270.slot ?? null;
+    const counts = p270.slotCounts ?? {};
+    if (slot !== '__TORTIE_ENV_SLOT__') {
+      fail(
+        `the slot the far side replaces reads ${JSON.stringify(slot)}. It is a ` +
+          `marker in the same recipe as REMOTE_PATH_MARKER and ` +
+          `REMOTE_SCRIPT_MARKER, and a different string from both, so an answer ` +
+          `to one door can never be read as an answer to another.`
+      );
+    }
+    if (counts.withNames !== 1) {
+      fail(
+        `a create carrying one name composed ${String(counts.withNames)} slot(s). ` +
+          `It composes exactly one: two would make the far side inject the ` +
+          `pairs twice and none would make the names silent again, which is the ` +
+          `defect this phase exists to end.`
+      );
+    }
+    if (counts.without !== 0) {
+      fail(
+        `a create carrying NO name composed ${String(counts.without)} slot(s). ` +
+          `An agent nobody configured pays nothing for this feature.`
+      );
+    }
+    if (counts.inList !== false) {
+      fail(
+        'the slot appears in the list argv every reconcile sends. It belongs ' +
+          'to a create and to nothing else.'
+      );
+    }
+  }
+
+  // --- 91. Byte identity at the parent --------------------------------------
+  //
+  // A create with no names returns what it returned before this phase, byte for
+  // byte, over four shapes: with and without a folder, with and without an
+  // argv, and with a name holding a space. These are captured from the parent
+  // commit and written here as literals, because comparing the implementation
+  // against itself passes whatever the implementation did.
+  {
+    const ID = '0d1f6f2e-70a1-4a1c-9f2f-5c0b1a2d3e4f';
+    const PINNED = [
+      ['new-session','-d','-P','-F','#{session_id}','-s','work','-c','/srv/repo','-e','GMUX_MANAGED=1',`-e`,`GMUX_SESSION_ID=${ID}`,'--','claude','--model','opus'],
+      ['new-session','-d','-P','-F','#{session_id}','-s','work','-e','GMUX_MANAGED=1','-e',`GMUX_SESSION_ID=${ID}`,'--','claude'],
+      ['new-session','-d','-P','-F','#{session_id}','-s','work','-c','/srv/repo','-e','GMUX_MANAGED=1','-e',`GMUX_SESSION_ID=${ID}`],
+      ['new-session','-d','-P','-F','#{session_id}','-s','a b','-e','GMUX_MANAGED=1','-e',`GMUX_SESSION_ID=${ID}`,'--','pi','--session-id','u']
+    ];
+    const shapes = p270.pinnedShapes ?? [];
+    PINNED.forEach((want, at) => {
+      const got = shapes[at] ?? null;
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        fail(
+          `a create with no passthrough name, shape ${String(at + 1)} of four, ` +
+            `composed ${JSON.stringify(got)}. At the parent commit it composed ` +
+            `${JSON.stringify(want)}. Every session on every machine that ` +
+            `nobody configured a variable for goes through this line unchanged.`
+        );
+      }
+    });
+  }
+
+  // --- 92. The hostile NAME battery -----------------------------------------
+  //
+  // A variable name is chosen by a person and it is the only thing this phase
+  // puts into a shell script on another computer. Thirteen shapes that are not
+  // variable names are dropped WHOLE on this Mac, before anything is composed
+  // and therefore before anything is sent. Then each is FORCED past that filter
+  // straight into the composer, because the argument the phase rests on is that
+  // the other two layers hold on their own: the quoting here, and the far side's
+  // own `case` guard inside the frozen text.
+  {
+    const filtered = p270.filtered ?? {};
+    if (filtered.threw !== null && filtered.threw !== undefined) {
+      fail(
+        `driving the name filter threw ${JSON.stringify(filtered.threw)}. It ` +
+          `is read by this gate in a plain node process with no Electron ` +
+          `behind it, so its settings read is guarded and it contributes no ` +
+          `names rather than throwing.`
+      );
+    } else {
+      const kept = filtered.kept ?? [];
+      const hostile = p270.hostile ?? [];
+      const leaked = kept.filter((one) => hostile.includes(one));
+      if (leaked.length > 0) {
+        fail(
+          `the name filter kept ${String(leaked.length)} shape(s) that are not ` +
+            `variable names, being ${JSON.stringify(leaked)}. Every one is ` +
+            `dropped whole and reported in the notice, never quoted into a ` +
+            `command line on another computer.`
+        );
+      }
+      if (kept.length !== 16) {
+        fail(
+          `the name filter kept ${String(kept.length)} of sixteen legal names ` +
+            `out of a list of ${String(hostile.length + 17)}. The cap is ` +
+            `sixteen, being the same number the settings door enforces, and ` +
+            `the seventeenth legal name is what proves it is a cap rather than ` +
+            `a coincidence.`
+        );
+      }
+    }
+    const composed = p270.composedHostile ?? {};
+    const text = composed.text ?? null;
+    if (composed.threw !== null && composed.threw !== undefined) {
+      fail(
+        `composing the far side's create with hostile names threw ` +
+          `${JSON.stringify(composed.threw)}. The composer deliberately does ` +
+          `not filter, so the gate can force a hostile shape past the first ` +
+          `layer and watch the other two hold. A throw here means the argument ` +
+          `rests on the filter alone.`
+      );
+    } else if (text === null) {
+      fail(say('composeEnvCreateCommand answered nothing'));
+    } else {
+      const script = (p270.texts ?? {}).create ?? {};
+      if (script.bytes !== undefined) {
+        // The script text is a CONSTANT. A composed command holds it verbatim,
+        // exactly once. A hostile name that could alter it by one byte is the
+        // whole attack, and it is the thing this asserts.
+        const pieces = text.split("case \"$k\" in \"\"|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac");
+        if (pieces.length !== 2) {
+          fail(
+            `the far side create command holds the name guard ` +
+              `${String(pieces.length - 1)} time(s). It holds it exactly once, ` +
+              `verbatim, and a composition that can move it is a composition a ` +
+              `name can rewrite.`
+          );
+        }
+      }
+      if (!text.startsWith('"$SHELL" -lc ')) {
+        fail(
+          `the far side create command begins ${JSON.stringify(text.slice(0, 20))}. ` +
+            `It begins with an UNQUOTED "$SHELL" -lc, because the far machine's ` +
+            `own login shell is what expands the values, on that machine.`
+        );
+      }
+      const shells = [...text.matchAll(/"\$SHELL"/g)].length;
+      if (shells !== 1) {
+        fail(
+          `the far side create command names "$SHELL" ${String(shells)} times. ` +
+            `It names it once.`
+        );
+      }
+    }
+  }
+
+  // --- 93. `eval` is bounded ------------------------------------------------
+  //
+  // `eval "v=${$k-}"` is the ONE place in this phase where a name is
+  // substituted into shell SOURCE, and the string the shell evaluates has only
+  // two possible readings: assign the value of that name to v, or assign the
+  // empty string. A name holding `}` could close the brace early and a name
+  // holding `$` could nest an expansion, and both are outside the alphabet —
+  // but the alphabet is asserted three times and this asserts the fourth thing,
+  // being that the far side's own guard stands BEFORE the eval in the text.
+  {
+    for (const [which, text] of Object.entries((p270.texts ?? {}))) {
+      if (text === null || text === undefined) {
+        fail(say(`the ${which} script text could not be read`));
+        continue;
+      }
+      if (text.evals !== 1) {
+        fail(
+          `the ${which} script holds ${String(text.evals)} eval(s). It holds ` +
+            `exactly one, and a second one is a second place a name becomes ` +
+            `shell source.`
+        );
+      }
+      if (!(text.guardAt >= 0 && text.evalAt > text.guardAt)) {
+        fail(
+          `the ${which} script evaluates a name at byte ${String(text.evalAt)} ` +
+            `and guards it at byte ${String(text.guardAt)}, so a token reaches ` +
+            `eval before anything has asked whether it is a variable name.`
+        );
+      }
+      if (text.carriesEvalForm !== true) {
+        fail(
+          `the ${which} script does not carry the exact bytes ` +
+            `eval "v=\\\${$k-}". The backslash is what stops THIS Mac's ` +
+            `TypeScript from expanding it, and its absence means the far side ` +
+            `reads a different program from the one this gate judged.`
+        );
+      }
+    }
+    const guard = p270.guard ?? null;
+    const wanted = 'case "$k" in ""|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac';
+    if (guard !== wanted) {
+      fail(
+        `REMOTE_ENV_NAME_GUARD reads ${JSON.stringify(guard)}. It is ` +
+          `${JSON.stringify(wanted)}, and bracket negation behaves identically ` +
+          `in sh, dash, bash, ksh and zsh, which is why the same literal can ` +
+          `stand in both texts.`
+      );
+    }
+  }
+
+  // --- 94. The cap agrees in three places -----------------------------------
+  //
+  // The probe's answer and the create's injection must never disagree about
+  // which names are usable, or a person would be told a name resolved and get a
+  // pane without it. The local cap is the same number for the same reason.
+  {
+    const caps = p270.caps ?? {};
+    if (caps.exported !== 4096) {
+      fail(
+        `REMOTE_ENV_MAX_VALUE_CHARS reads ${String(caps.exported)}. It is ` +
+          `4096, being ENV_CAPTURE_MAX_VALUE_BYTES on this Mac.`
+      );
+    }
+    if (caps.localFromSource !== 4096) {
+      fail(
+        `ENV_CAPTURE_MAX_VALUE_BYTES reads ${String(caps.localFromSource)} and ` +
+          `the remote cap reads ${String(caps.exported)}. A value the local ` +
+          `probe would keep and the remote probe would drop is a variable that ` +
+          `works on one machine and not on another for no reason a person can see.`
+      );
+    }
+    if (caps.namesMax !== 16) {
+      fail(
+        `REMOTE_ENV_NAMES_MAX reads ${String(caps.namesMax)}. It is 16, the ` +
+          `same cap the settings door already enforces.`
+      );
+    }
+    for (const [which, text] of Object.entries(p270.texts ?? {})) {
+      if (text === null || text === undefined) continue;
+      if (text.capLiterals !== 1) {
+        fail(
+          `the ${which} script names 4096 ${String(text.capLiterals)} time(s). ` +
+            `It names it once, and both texts must name the same number.`
+        );
+      }
+    }
+  }
+
+  // --- 95. The catalogue did not widen --------------------------------------
+  //
+  // `env-names` is a READ that takes two positionals. The seven rules every
+  // text in the catalogue obeys are asserted for it here rather than left to
+  // condition 35's general walk, because it is the first text a person's own
+  // chosen NAME is interpolated into.
+  {
+    const probeText = (p270.texts ?? {}).probe ?? null;
+    if (probeText === null) {
+      fail(
+        'the catalogue holds no script called env-names, so a session on ' +
+          'another machine has no way to ask which variables that machine has ' +
+          'and Phase 269 names go on being ignored in silence.'
+      );
+    } else {
+      if (probeText.mode !== 'read' || probeText.params !== 2) {
+        fail(
+          `env-names is a ${String(probeText.mode)} taking ` +
+            `${String(probeText.params)} positional(s). It is a read taking ` +
+            `two, being the nonce and the whole name list as ONE string. A ` +
+            `call per name would be a login shell per name.`
+        );
+      }
+      if (probeText.namesAWriter.length > 0) {
+        fail(
+          `env-names names ${probeText.namesAWriter.join(', ')}. It asks a ` +
+            `question and changes nothing at all on that machine.`
+        );
+      }
+      if (probeText.backticks !== 0) {
+        fail(
+          `env-names holds ${String(probeText.backticks)} backtick(s), which is ` +
+            `rule 1 of the catalogue and the one substitution a reader cannot see.`
+        );
+      }
+      if (!(probeText.startsSetE === true && probeText.umaskAt > probeText.setEAt)) {
+        fail(
+          'env-names does not begin `set -e` and then `umask 077`. `set -e` is ' +
+            'what makes a login shell that exits non-zero abort before the ' +
+            'closing marker is printed, which is how an unset name is told ' +
+            'apart from a probe that could not run.'
+        );
+      }
+      const stray = (probeText.redirects ?? []).filter(
+        (one) => !one.includes('2>/dev/null')
+      );
+      if (stray.length > 0) {
+        fail(
+          `env-names carries ${String(stray.length)} redirection(s) that are ` +
+            `not part of 2>/dev/null, being ${JSON.stringify(stray)}. It writes ` +
+            `nothing anywhere.`
+        );
+      }
+      if ((probeText.bareLoops ?? []).length > 0) {
+        fail(
+          `env-names walks a bare positional, being ` +
+            `${JSON.stringify(probeText.bareLoops)}. Every $1 and $2 is read ` +
+            `into a local name in quotes first, so rule 2 holds without ` +
+            `program-find's list exemption at all.`
+        );
+      }
+    }
+  }
+
+  // --- 96. No value spelling anywhere ---------------------------------------
+  //
+  // The closed set below is every expansion either text is allowed to hold. A
+  // spelling outside it is the only way a VALUE could be named in a pair of
+  // texts whose whole vocabulary is supposed to be shapes and names.
+  {
+    // IT IS A RULE RATHER THAN A LIST, so a builder may rename a local without
+    // this gate going red for nothing, and a value can still never be named.
+    // The four clauses, and the second is the one that matters:
+    //
+    //  - a POSITIONAL, being `$1` to `$9`, `$@` or `$#`;
+    //  - `$SHELL`, which is the ONE environment name either text may read, and
+    //    it names the far machine's own login shell rather than any value;
+    //  - one of Tortie's own locals, being a single lower case letter or a name
+    //    beginning `TORTIE_ENV_` (namespaced on purpose: the inner program runs
+    //    a person's rc files, which could otherwise clobber a bare `m` or `n`);
+    //  - one of the four BOUNDED forms over such a local, being the two list
+    //    splits, the length test and the one guarded indirection.
+    //
+    // Every other uppercase name is refused, which is every spelling a value
+    // could wear: `$HOME`, `$PATH`, `$USER`, and any provider name at all.
+    const ALLOWED_EXPANSION =
+      /^(?:\$[1-9@#]|\$SHELL|\$(?:[a-z]|TORTIE_ENV_[A-Z0-9_]+)|\$\{(?:[a-z]%% \*|[a-z]#\* |#[a-z]|\$[a-z]-)\})$/;
+    for (const [which, text] of Object.entries(p270.texts ?? {})) {
+      if (text === null || text === undefined) continue;
+      const outside = (text.expansions ?? []).filter(
+        (one) => !ALLOWED_EXPANSION.test(one)
+      );
+      if (outside.length > 0) {
+        fail(
+          `the ${which} script holds the expansion(s) ${JSON.stringify(outside)}, ` +
+            `which are outside the closed set this phase argues from. A text ` +
+            `may name a positional, $SHELL, one of Tortie's own locals (a ` +
+            `single lower case letter, or a TORTIE_ENV_ name), or one of the ` +
+            `four bounded forms over such a local. Every other name is a name ` +
+            `a VALUE could wear.`
+        );
+      }
+    }
+    const markers = p270.markers ?? null;
+    if (markers === null || markers.length !== 2) {
+      fail(say('the probe marker could not be generated twice'));
+    } else {
+      if (markers[0] === markers[1]) {
+        fail(
+          `two probes generated the same marker, being ${JSON.stringify(markers[0])}. ` +
+            `It is a fresh nonce per probe, because the rc files that run on ` +
+            `the far side are files an agent on that machine could have ` +
+            `written and a static marker would let their output forge a record.`
+        );
+      }
+      for (const [which, text] of Object.entries(p270.texts ?? {})) {
+        if (text === null || text === undefined) continue;
+        if ((text.expansions ?? []).some((one) => one.includes('TORTIE_ENVP'))) {
+          fail(`the ${which} script spells the nonce marker. It arrives as a positional.`);
+        }
+      }
+    }
+  }
+
+  // --- 97. The stamps still win ---------------------------------------------
+  {
+    const counts = p270.slotCounts ?? {};
+    if (!(counts.slotAt >= 0 && counts.firstStampAt > counts.slotAt)) {
+      fail(
+        `the slot stands at index ${String(counts.slotAt)} and the first ` +
+          `GMUX_ stamp at ${String(counts.firstStampAt)}. tmux applies -e pairs ` +
+          `left to right and the last one for a name wins, so the slot must ` +
+          `stand FIRST for the two identity stamps to go on overriding ` +
+          `anything the far side manufactures.`
+      );
+    }
+    if (!(counts.firstPairAt > counts.slotAt)) {
+      fail(
+        `the first -e pair stands at index ${String(counts.firstPairAt)}, at or ` +
+          `before the slot at ${String(counts.slotAt)}.`
+      );
+    }
+  }
+
+  // --- 98. The silence is ended -----------------------------------------------
+  //
+  // THE SILENCE IS THE BUG. A create that ignores a name and says nothing is
+  // what cost the operator an afternoon: the pane comes up, the agent fails
+  // minutes later with a message about its provider, and nothing on either
+  // machine ever says the shell was the reason. This reads the raise out of the
+  // shipped files rather than out of a module, so it stays true whichever way
+  // the probe is spelled and needs no Electron.
+  {
+    const rows = p270.raises ?? [];
+    const create = rows.find((one) => one.file === 'remote-sessions') ?? null;
+    const restore = rows.find((one) => one.file === 'remote-restore') ?? null;
+    if (create === null) {
+      fail(say('remote-sessions.ts could not be read'));
+    } else {
+      if (create.asksForNames < 1 || create.probes < 1) {
+        fail(
+          `a create on another machine asks for its agent's names ` +
+            `${String(create.asksForNames)} time(s) and asks the machine ` +
+            `${String(create.probes)} time(s). Phase 269's names reached this ` +
+            `path zero times, which is the defect this phase fixes.`
+        );
+      }
+      if (create.raisesNotice < 1 || create.namesTheMissing !== true) {
+        fail(
+          'a create on another machine does not raise env-unresolved naming ' +
+            'the variables that machine had no value for. A name that is unset ' +
+            'over there must surface the same sentence a name unset here does, ' +
+            'and a create must SUCCEED with a notice rather than fail.'
+        );
+      }
+      if (create.passesEnvNames < 1 || create.widensTheDeadline < 1) {
+        fail(
+          'a create on another machine does not hand the plane its names and ' +
+            'the wider deadline. A create that runs through a login shell needs ' +
+            "the login shell's own budget beside its own."
+        );
+      }
+    }
+    for (const row of rows) {
+      if (row.namesLocalCapture === true) {
+        fail(
+          `${row.file}.ts names captureLoginShellEnv, which is THIS Mac's own ` +
+            `login shell probe. A session on another machine reads that ` +
+            `machine's shell and never this one's, and a value of this Mac's ` +
+            `must never be read for it at all.`
+        );
+      }
+    }
+    // THE VERIFIER'S ROUND TURNED THIS FROM A PRINTED LIMIT INTO A FAILURE.
+    //
+    // The build that went into verification composed the slot on the restore
+    // path and handed the plane its names — so the variables WERE injected —
+    // and then asked the machine nothing and raised nothing. A person whose Mac
+    // Pro had lost a variable was told once, on the first create, and never
+    // again on any restore of that same session, while the LOCAL restore has
+    // said it since Phase 33 (`src/main/restore/restore.ts`). The standing rule
+    // is that remote feels identical to local, and this phase's own charter
+    // says the silence ends either way. It is asserted here rather than
+    // printed, so a later round cannot quietly take it back out.
+    if (restore === null) {
+      fail(say('remote-restore.ts could not be read'));
+    } else {
+      if (restore.asksForNames < 1 || restore.probes < 1) {
+        fail(
+          `a RESTORE on another machine asks for its agent's names ` +
+            `${String(restore.asksForNames)} time(s) and asks the machine ` +
+            `${String(restore.probes)} time(s). A restore injects the same ` +
+            `names a create does, so it owes the person the same answer about ` +
+            `which of them that machine actually has.`
+        );
+      }
+      if (restore.raisesNotice < 1 || restore.namesTheMissing !== true) {
+        fail(
+          'a RESTORE on another machine does not raise env-unresolved naming ' +
+            'the variables that machine had no value for. The local restore ' +
+            'does, and a person who restores a session on a machine that lost ' +
+            'a variable would otherwise never be told again.'
+        );
+      }
+    }
+  }
+
+  // --- 99. The far server is booted before a create that carries names --------
+  //
+  // THE ONE FINDING THAT BLOCKED THIS PHASE, and it is a containment defect
+  // rather than a cosmetic one.
+  //
+  // A create carrying names reaches the far side as
+  // `"$SHELL" -lc <script> … tmux … new-session`. On a machine with no server on
+  // Tortie's socket, that LOGIN SHELL is the process that execs tmux, and tmux
+  // seeds its GLOBAL environment from the process that starts the server. So
+  // the person's exported values land in the far server's globals and EVERY
+  // LATER PANE on that machine inherits them — including panes for agents that
+  // named nothing, which turns a per-agent opt-in into a machine-wide leak that
+  // lasts for the life of the server. A server by design outlives Tortie, so a
+  // rotated key would stay in there.
+  //
+  // MEASURED LIVE on the operator's Mac Pro, 2026-09-14, on a socket killed
+  // first so it was cold: `show-environment -g | grep -c '^<the name>'` read 1,
+  // and a second session created on that same server carrying NO names read the
+  // value back. On a warm server the same reading is 0, which is why every
+  // earlier run looked clean.
+  //
+  // `ensureRemoteServer` boots through `execOn`, which is the PLAIN ssh exec and
+  // not a login shell, so the server it starts holds no rc-exported value and
+  // the login shell is then only a tmux CLIENT. `restoreRemoteSession` has
+  // always made that call at its step 3; only `remoteCreate` lacked it.
+  {
+    const rows = p270.raises ?? [];
+    for (const row of rows) {
+      if (row.bootsTheServer < 1) {
+        fail(
+          `${row.file}.ts never calls ensureRemoteServer. A create or a restore ` +
+            `that carries names runs the far side's LOGIN SHELL, and on a cold ` +
+            `socket that shell is what starts the tmux server — which then ` +
+            `seeds its GLOBAL environment from it, putting the person's values ` +
+            `in front of every later pane on that machine.`
+        );
+      }
+      if (row.bootsBeforeTheCreate !== true) {
+        fail(
+          `${row.file}.ts asserts the far server at or after it composes the ` +
+            `create line. The order IS the property: a server booted afterwards ` +
+            `was already started by the login shell, and the globals are ` +
+            `already seeded.`
+        );
+      }
+    }
+  }
+
+  process.stdout.write(
+    `\na session on another machine reads THAT machine's shell. ` +
+      `REMOTE_ENV_ALLOWED is still exactly ` +
+      `${[...(p270.allowed ?? [])].join(' and ')}, a create carrying sixteen ` +
+      `legal passthrough names still composes those two pairs and no other, ` +
+      `and a create carrying none is byte identical to the parent over four ` +
+      `shapes. The names travel as one quoted positional; the values are ` +
+      `expanded by the far machine's own login shell at ${String(p270.slot)}, ` +
+      `which stands before the stamps so they still win. Each of the two ` +
+      `frozen texts holds one eval, after its own name guard, over a closed set ` +
+      `of expansions, with the 4096 cap named once. ` +
+      `${String((p270.hostile ?? []).length)} hostile name shapes were dropped ` +
+      `whole before composition and then forced past that filter into the ` +
+      `composer, which held the guard verbatim.\n`
   );
 }
 

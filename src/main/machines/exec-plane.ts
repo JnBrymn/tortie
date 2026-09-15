@@ -150,6 +150,19 @@ export interface ExecTmuxOptions {
   /** Milliseconds before the command is killed. Default 10s. */
   timeoutMs?: number;
   /**
+   * PHASE 270. The shell variable NAMES the far machine's own login shell is
+   * asked to expand into `-e` pairs for this one command.
+   *
+   * IT IS NAMES AND NEVER VALUES. Nothing on this Mac reads a value for a
+   * remote session, and `assertRemoteEnvAllowed` still guards the `-e` route a
+   * caller could put a value on, unchanged. Absent or empty composes exactly
+   * what this door has always composed, byte for byte.
+   *
+   * IGNORED FOR A LOCAL CONTEXT. A local pane's variables are resolved by
+   * `captureLoginShellEnv` on the create path and handed to tmux there.
+   */
+  envNames?: readonly string[];
+  /**
    * PHASE 118. What a person would call this piece of work, for the ledger that
    * owns the ssh child underneath it.
    *
@@ -599,7 +612,7 @@ async function spawnTmux(
   // PHASE 118. The composition is INSIDE the run, so a call refused because
   // Tortie is quitting never composes an argv at all.
   const run = async (hold: RemoteExecutionHold | null): Promise<string> => {
-    const plan = tmuxCommand(ctx, args);
+    const plan = tmuxCommand(ctx, args, options.envNames ?? []);
     try {
       const running = execFileP(plan.file, [...plan.argv], {
         timeout: options.timeoutMs ?? 10_000,

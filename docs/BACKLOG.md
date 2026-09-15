@@ -27305,12 +27305,45 @@ lands even for a machine whose probe cannot run at all.
 **The proof, run rather than read.** A live create against a real second machine (his Mac Pro, with
 his word before it runs): name a variable, set it to DIFFERENT values in this Mac's shell profile and
 the remote machine's, start the session there, and read INSIDE the pane that the value is the REMOTE
-one. Then the containment, measured on both sides: the value appears in no `ps` argv on this Mac and
-none on the far side, in no manifest row, in no log, and not in
-`tmux -L gmux show-environment -g` on either machine. The attack: try to make a value cross by the
+one. Then the containment, measured on both sides: the value appears in no `ps` argv ON THIS MAC, in
+no manifest row and in no log.
+
+**THE FAR SIDE IS NOT THE SAME CLAIM, and this sentence was wrong when it was queued.** The verifier
+measured it rather than reasoned about it, by replacing the far tmux with a program that prints its
+own argv and running the real composed command: the value IS one element of the argv of the program
+the frozen script execs, on that machine, for the life of the create. `build/p270/SPEC.md` §2.5
+records that correctly and argues for accepting it — the value is expanded by that account's own
+shell from a variable that account already had, which is what `managedPaneEnv`'s two stamps already
+do on every remote create today — and it is this entry that overstated it. The commit body carries
+the SPEC's wording. The attack: try to make a value cross by the
 `remoteCreateArgs.env` route and prove `assertRemoteEnvAllowed` still refuses it before anything is
 composed. `conformance:machines` gains the clauses, including condition 47's assertion that
 `REMOTE_ENV_MEASURED_AND_REFUSED` is still out of the set.
+
+**WHAT THE VERIFIER'S ROUND CHANGED, and it blocked the phase until it did.** Two findings, both
+confirmed live on the Mac Pro and both fixed before the commit.
+
+1. **The cold server.** `remoteCreate` had no `ensureRemoteServer`, and `pollRemoteMachine` reads
+   tmux's own "no server running" as a completed answer of zero sessions rather than as a reason to
+   boot. So on a machine whose server is not running, the far side's `"$SHELL" -lc …` is what execs
+   tmux — and tmux seeds its GLOBAL environment from the process that starts the server. Measured on
+   a socket killed first so it was cold: `show-environment -g | grep -c '^<the name>'` read 1, and a
+   SECOND session created on that same server carrying no names at all read the value back. That is
+   a cross-agent leak out of a per-agent opt-in, and it lasts for the life of a server that by design
+   outlives Tortie. On a warm server the same reading is 0, which is why every earlier run looked
+   clean. The fix is the one call `restoreRemoteSession` has always made at its step 3, on the branch
+   that has names, because a create with no names never goes through a login shell at all and must
+   not pay the round trips. `conformance:machines` condition 99 is the rule, and the probe anchors on
+   `remoteCreateArgs({` rather than the bare name because that file DECLARES the composer hundreds of
+   lines above it — the gate reported the order backwards on its first run and caught its own rule.
+2. **The restore said nothing.** `remote-restore.ts` composed the names and ran no probe and posted
+   no notice, so a person whose machine had lost a variable was told once, on the first create, and
+   never again on any restore of that session, while the local restore has raised it since Phase 33.
+   Against this phase's own "the silence ends either way" and against the standing rule that remote
+   feels identical to local. Condition 98's printed limit about this is now a failure, and the
+   conformance probe strips comments before counting, because both files carry paragraphs naming
+   `probeRemoteEnvNames` and `env-unresolved` and a comment must not be able to answer a question
+   about what the code does.
 
 **What is NOT in this phase.** `REMOTE_ENV_ALLOWED` does not grow, and no value is ever sent from
 this Mac to another machine — if a later round wants that, it reads research 51 §7 first and argues

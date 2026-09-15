@@ -150,8 +150,8 @@ function positionals(text: string): Positional[] {
 }
 
 describe('the catalogue', () => {
-  it('holds twenty eight scripts and this release holds no others', () => {
-    expect(REMOTE_SCRIPTS).toHaveLength(28);
+  it('holds twenty nine scripts and this release holds no others', () => {
+    expect(REMOTE_SCRIPTS).toHaveLength(29);
     expect(REMOTE_SCRIPTS.map((script) => script.id).sort()).toEqual([
       // PHASE 104 added `git-commit`, and it WRITES. It is the eighth writer,
       // so the write count below moved from seven to eight. It is the third
@@ -265,6 +265,14 @@ describe('the catalogue', () => {
       'dir-list',
       'dir-new',
       'entry-rename',
+      // PHASE 270 added `env-names`, which asks one machine's OWN login shell
+      // which of a list of variable names it has a usable value for, so a
+      // session over there can carry the names Phase 269 shipped and the
+      // person is told which ones that machine did not have. It answers with
+      // NAMES and prints no value at all, it is a read, it writes nothing, so
+      // the write count below stays at eight, and it names no git verb, so
+      // GIT_VERBS above did not move either.
+      'env-names',
       'file-put',
       'git-clone',
       'git-commit',

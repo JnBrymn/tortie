@@ -10,6 +10,7 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 - Tortie can now save a file for you a moment after you stop typing, or when you click away from it. It is off until you turn it on under File > Auto Save, and if something else wrote to the file while you were typing it steps aside rather than overwriting — it stops saving that file on its own, says so once, and leaves it to you to save.
 - You can now tell Tortie which variables from your shell an agent needs — an API key for a provider, say — beside that agent's launch flags in Settings, and it reads their current value from your login shell each time a session starts, so rotating a key takes effect on the next session you start with nothing to restart. Tortie keeps the names and never the values, a name applies to sessions you start after adding it rather than to ones already running, and a name only counts if you added it in Settings, because one written into the settings file by hand is ignored.
+- The shell variables you name for an agent now work when that agent runs on another machine, and the value comes from that machine's own login shell rather than from this one, so a key that lives over there is the one the session gets and nothing of yours is sent across. If that machine has no value for one of them, Tortie now names it instead of leaving you to find out from the agent minutes later.
 
 ## 0.105.0 (2026-09-14)
 

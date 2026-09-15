@@ -51,7 +51,7 @@
  * probe in `build/probe-machines.mjs`, and by nothing else in this phase.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -139,7 +139,11 @@ import {
   REMOTE_CREATE_FORMAT,
   REMOTE_LIST_FIELDS,
   REMOTE_LIST_FORMAT,
-  remoteCreateArgs
+  remoteCreateArgs,
+  // Phase 270, condition 90. The slot the create composes must never appear in
+  // an argv that is not a create, and the list is the argv every reconcile
+  // sends.
+  remoteListArgs
 } from '../src/main/machines/remote-sessions';
 import { SERVER_OPTIONS } from '../src/main/tmux/server-options';
 import {
@@ -1263,6 +1267,32 @@ const { machineKeyDir: keyDirFor, machineKeyPath: keyPathFor } = await import(
   '../src/main/machines/key-material'
 );
 
+// --- Phase 270, conditions 89 to 98 ----------------------------------------
+//
+// The two modules Phase 270 adds under `src/main/machines/` are loaded ONLY
+// IF THEY ARE THERE, so a tree where one half of the phase has landed and the
+// other has not fails with a sentence naming the missing file rather than with
+// a module resolution stack trace forty frames deep. A MISSING MODULE IS A
+// FAILURE in the checker and never a skip: a gate that quietly passes when its
+// subject is absent is not a gate.
+//
+// Both are pure. They compose strings and parse an answer. NOTHING IS SPAWNED,
+// no machine is contacted, no shell is started on either side and no file under
+// the person's home is read. `remoteEnvNamesFor` reads the settings door and
+// guards that read, so this gate contributes no names rather than throwing when
+// there is no Electron behind it.
+const p270File = (file: string): string =>
+  join(repoRoot, 'src', 'main', 'machines', `${file}.ts`);
+const p270Load = async (file: string): Promise<Record<string, unknown> | null> =>
+  existsSync(p270File(file))
+    ? ((await import(pathToFileURL(p270File(file)).href)) as Record<
+        string,
+        unknown
+      >)
+    : null;
+const p270Carriage = await p270Load('remote-env-carriage');
+const p270Probe = await p270Load('remote-env-probe');
+
 /**
  * PHASE 200, THE MIXED LOADER ARM. A SECOND COPY of `src/main/errors`, loaded
  * under a URL of its own so its `GmuxError` is a DIFFERENT CONSTRUCTOR from the
@@ -1310,6 +1340,31 @@ function gitCallsOf(
         gcm: before.includes('GCM_INTERACTIVE=never')
       });
     }
+  }
+  return out;
+}
+
+/**
+ * The spans of one script that hand a SECOND shell a program to run (Phase 270).
+ *
+ * `env-names` asks the far machine's own LOGIN shell which variables it has,
+ * because the shell ssh gives a command is not a login shell and never reads
+ * that person's rc files. The only way to write that is
+ * `"$SHELL" -lc '<program>'`, and the single quotes are what keep the program a
+ * constant rather than something the outer shell expands.
+ *
+ * Those quotes are load bearing, so condition 36 counts them: an inner program
+ * may hold no single quote of its own, therefore a text holds exactly two per
+ * inner program. A third is a quote that closes the program early, and what the
+ * far machine's login shell would then run is not what this gate read.
+ */
+function innerShellSpans(text: string): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  for (const hit of text.matchAll(/"\$SHELL" -li?c '/g)) {
+    const from = (hit.index ?? 0) + hit[0].length;
+    const to = text.indexOf("'", from);
+    if (to < 0) continue;
+    out.push({ from, to });
   }
   return out;
 }
@@ -1366,6 +1421,11 @@ const scriptRows = REMOTE_SCRIPTS.map((script) => {
     markers,
     carriesBacktick: script.text.includes('`'),
     positionals: positionalsOf(script.text),
+    // Phase 270, condition 36. An inner program is delimited by single quotes
+    // and may hold none of its own, so the quotes in the whole text are exactly
+    // two per inner program. That is what makes the span above sound.
+    innerSpans: innerShellSpans(script.text).length,
+    singleQuotes: [...script.text.matchAll(/'/g)].length,
     command,
     commandRecomposed: recomposed,
     scriptInCommandOnce: command.split(shellQuoteArgv([script.text])).length - 1,
@@ -1799,6 +1859,410 @@ process.stdout.write(
         };
       })()
     },
+
+    // --- Phase 270, conditions 89 to 98 ------------------------------------
+    //
+    // Phase 269 shipped per-agent shell variable NAMES and a create on another
+    // machine ignored every one of them IN SILENCE — issue 20's own failure
+    // reappearing on the surface built to end it. This phase asks the FAR
+    // MACHINE'S OWN LOGIN SHELL which of those names it has a usable value for,
+    // and injects them on that machine's own `new-session` line through a slot
+    // its own login shell expands. THE NAMES TRAVEL AND NO VALUE DOES, in
+    // either direction, which is the one sentence that bounds the phase. These
+    // conditions are the executable half of it.
+    //
+    // Everything below is composed, never sent. No ssh runs, no tmux server is
+    // started, no machine is contacted and no shell is spawned.
+    phase270: (() => {
+      /** A pinned id, so the argv below is comparable byte for byte. */
+      const ID270 = '0d1f6f2e-70a1-4a1c-9f2f-5c0b1a2d3e4f';
+      /**
+       * Names no alphabet allows. Every one is dropped on THIS Mac, before
+       * anything is composed and therefore before anything is sent.
+       */
+      const HOSTILE_NAMES = [
+        "A'B",
+        'A;id',
+        'A$(id)',
+        'A`id`',
+        'A B',
+        'A\nB',
+        'A|B',
+        'A>B',
+        'A}',
+        '${IFS}',
+        '1ABC',
+        '',
+        'A'.repeat(300)
+      ];
+      /** Sixteen legal names, being the cap the settings door already enforces. */
+      const SIXTEEN = Array.from(
+        { length: 16 },
+        (_unused, at) => `P270_NAME_${String(at)}`
+      );
+      const shape = (extra: Record<string, unknown>): Record<string, unknown> => ({
+        tmuxName: 'work',
+        cwd: '/srv/repo',
+        sessionId: ID270,
+        argv: ['claude', '--model', 'opus'],
+        ...extra
+      });
+      const composeArgs = (
+        extra: Record<string, unknown>
+      ): { argv: string[] | null; threw: string | null } => {
+        try {
+          return {
+            argv: [
+              ...(remoteCreateArgs as unknown as (
+                one: Record<string, unknown>
+              ) => string[])(shape(extra))
+            ],
+            threw: null
+          };
+        } catch (error) {
+          return { argv: null, threw: String((error as Error).message ?? error) };
+        }
+      };
+      /** Every `-e` pair's NAME, in order, out of a composed create argv. */
+      const pairNames = (argv: readonly string[]): string[] => {
+        const names: string[] = [];
+        for (let at = 0; at < argv.length; at += 1) {
+          if (argv[at] !== '-e') continue;
+          const pair = argv[at + 1] ?? '';
+          names.push(pair.slice(0, pair.indexOf('=')));
+        }
+        return names;
+      };
+      /**
+       * Every parameter expansion in one shell text. The checker compares this
+       * against a closed set, because a spelling outside it is the only way a
+       * VALUE could be named in a text that is supposed to name only shapes.
+       */
+      const expansionsOf = (text: string): string[] => [
+        ...new Set(
+          [
+            ...text.matchAll(
+              /\$(\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@#*?$!-])/g
+            )
+          ].map((hit) => hit[0])
+        )
+      ].sort();
+
+      const slot =
+        typeof p270Carriage?.['REMOTE_ENV_SLOT'] === 'string'
+          ? (p270Carriage['REMOTE_ENV_SLOT'] as string)
+          : null;
+      const guard =
+        typeof p270Carriage?.['REMOTE_ENV_NAME_GUARD'] === 'string'
+          ? (p270Carriage['REMOTE_ENV_NAME_GUARD'] as string)
+          : null;
+      const createScript =
+        typeof p270Carriage?.['REMOTE_ENV_CREATE_SCRIPT'] === 'string'
+          ? (p270Carriage['REMOTE_ENV_CREATE_SCRIPT'] as string)
+          : null;
+      // The union rule has ONE spelling, and the gate does not care which of
+      // the phase's two modules holds it — only that exactly one does. Two
+      // copies of it is how a local session and a remote session come to
+      // disagree about which names an agent has, so the checker fails on a
+      // count other than one.
+      const namesForSites = [
+        ['remote-env-carriage', p270Carriage?.['remoteEnvNamesFor']],
+        ['remote-env-probe', p270Probe?.['remoteEnvNamesFor']]
+      ].filter(([, fn]) => typeof fn === 'function');
+      const namesFor = namesForSites[0]?.[1];
+      const composeEnv = p270Carriage?.['composeEnvCreateCommand'];
+      const marker = p270Probe?.['remoteEnvProbeMarker'];
+
+      const envNamesRow =
+        REMOTE_SCRIPTS.find(
+          (row) =>
+            row.id ===
+            (typeof p270Probe?.['REMOTE_ENV_PROBE_SCRIPT_ID'] === 'string'
+              ? (p270Probe['REMOTE_ENV_PROBE_SCRIPT_ID'] as string)
+              : 'env-names')
+        ) ?? null;
+
+      /**
+       * The names the filter keeps, driven against the real function. It is
+       * wrapped because the union rule reads the settings door, and a gate that
+       * reads a file under the person's home is a gate that has stopped being
+       * cheap. A throw here is a FAILURE with a sentence, never a skip.
+       */
+      const filtered = ((): { kept: string[] | null; threw: string | null } => {
+        if (typeof namesFor !== 'function') return { kept: null, threw: null };
+        try {
+          const kept = (
+            namesFor as (one: unknown, two: unknown) => string[]
+          )({ launch: { envPassthrough: [...HOSTILE_NAMES, ...SIXTEEN, 'A_KEY'] } }, 'shell');
+          return { kept: [...kept], threw: null };
+        } catch (error) {
+          return { kept: null, threw: String((error as Error).message ?? error) };
+        }
+      })();
+
+      const composedHostile = ((): { text: string | null; threw: string | null } => {
+        if (typeof composeEnv !== 'function') return { text: null, threw: null };
+        try {
+          const text = (
+            composeEnv as (one: readonly string[], two: readonly string[]) => string
+          )(['new-session', '-d', '-s', 'work'], [...HOSTILE_NAMES, 'A_KEY']);
+          return { text: String(text), threw: null };
+        } catch (error) {
+          return { text: null, threw: String((error as Error).message ?? error) };
+        }
+      })();
+
+      const resolveSource = readFileSync(
+        join(repoRoot, 'src', 'main', 'tmux', 'resolve.ts'),
+        'utf8'
+      );
+
+      return {
+        // Which halves of the phase are present at all. The checker turns an
+        // absent module into a sentence naming the file.
+        present: {
+          carriage: p270Carriage !== null,
+          probe: p270Probe !== null,
+          slotExported: slot !== null,
+          guardExported: guard !== null,
+          createScriptExported: createScript !== null,
+          namesForExported: typeof namesFor === 'function',
+          namesForSites: namesForSites.map(([file]) => String(file)),
+          composeExported: typeof composeEnv === 'function',
+          markerExported: typeof marker === 'function',
+          filterExported:
+            typeof p270Carriage?.['filterRemoteEnvNames'] === 'function',
+          droppedExported:
+            typeof p270Carriage?.['droppedRemoteEnvNames'] === 'function'
+        },
+
+        // 89. The allowlist did not move, and no name outside it becomes a
+        //     pair even when sixteen legal names are asked for.
+        allowed: [...REMOTE_ENV_ALLOWED],
+        measuredAndRefused: REMOTE_ENV_MEASURED_AND_REFUSED,
+        pairsWithSixteen: (() => {
+          const composed = composeArgs({ envNames: SIXTEEN });
+          return {
+            threw: composed.threw,
+            names: composed.argv === null ? null : pairNames(composed.argv)
+          };
+        })(),
+        // The old route is not re-opened by the new one. Phase 73's refusal
+        // still fires for a third name on `env`, before anything is composed.
+        oldRouteStillRefuses: composeArgs({
+          env: { ANTHROPIC_API_KEY: 'planted' }
+        }).threw,
+
+        // 90. The slot: once when names are present, never otherwise, and never
+        //     in an argv that is not a create.
+        slot,
+        slotCounts: (() => {
+          const withNames = composeArgs({ envNames: ['A_KEY'] });
+          const without = composeArgs({});
+          const count = (argv: string[] | null): number | null =>
+            argv === null || slot === null
+              ? null
+              : argv.filter((one) => one === slot).length;
+          const firstPairAt = (argv: string[] | null): number | null =>
+            argv === null ? null : argv.indexOf('-e');
+          return {
+            withNames: count(withNames.argv),
+            without: count(without.argv),
+            slotAt:
+              withNames.argv === null || slot === null
+                ? null
+                : withNames.argv.indexOf(slot),
+            firstPairAt: firstPairAt(withNames.argv),
+            firstStampAt:
+              withNames.argv === null
+                ? null
+                : withNames.argv.findIndex((one) => one.startsWith('GMUX_')),
+            inList:
+              slot === null ? null : remoteListArgs().some((one) => one.includes(slot))
+          };
+        })(),
+
+        // 91. Byte identity at the parent. Four shapes, pinned in the checker.
+        pinnedShapes: [
+          composeArgs({}).argv,
+          composeArgs({ cwd: undefined, argv: ['claude'] }).argv,
+          composeArgs({ argv: [] }).argv,
+          composeArgs({
+            tmuxName: 'a b',
+            cwd: '',
+            argv: ['pi', '--session-id', 'u']
+          }).argv
+        ],
+
+        // 92. The hostile NAME battery.
+        hostile: HOSTILE_NAMES,
+        filtered,
+        composedHostile,
+
+        // 93 and 96. The two script texts, read as bytes.
+        texts: {
+          create:
+            createScript === null
+              ? null
+              : {
+                  bytes: createScript.length,
+                  evals: [...createScript.matchAll(/\beval\b/g)].length,
+                  evalAt: createScript.indexOf('eval'),
+                  guardAt: guard === null ? -1 : createScript.indexOf(guard),
+                  carriesEvalForm: createScript.includes('eval "v=\\${$k-}"'),
+                  expansions: expansionsOf(createScript),
+                  capLiterals: [...createScript.matchAll(/4096/g)].length,
+                  backticks: [...createScript.matchAll(/`/g)].length,
+                  startsSetE: createScript.trimStart().startsWith('set -e'),
+                  umaskAt: createScript.indexOf('umask 077'),
+                  setEAt: createScript.indexOf('set -e'),
+                  redirects: [...createScript.matchAll(/>/g)].map((hit) =>
+                    createScript.slice(
+                      Math.max(0, (hit.index ?? 0) - 2),
+                      (hit.index ?? 0) + 11
+                    )
+                  ),
+                  bareLoops: [...createScript.matchAll(/for\s+\w+\s+in\s+\$[1-9]/g)].map(
+                    (hit) => hit[0]
+                  )
+                },
+          probe:
+            envNamesRow === null
+              ? null
+              : {
+                  id: envNamesRow.id,
+                  mode: envNamesRow.mode,
+                  params: envNamesRow.params,
+                  reason: envNamesRow.reason,
+                  bytes: envNamesRow.text.length,
+                  evals: [...envNamesRow.text.matchAll(/\beval\b/g)].length,
+                  evalAt: envNamesRow.text.indexOf('eval'),
+                  guardAt: guard === null ? -1 : envNamesRow.text.indexOf(guard),
+                  carriesEvalForm: envNamesRow.text.includes('eval "v=\\${$k-}"'),
+                  expansions: expansionsOf(envNamesRow.text),
+                  capLiterals: [...envNamesRow.text.matchAll(/4096/g)].length,
+                  backticks: [...envNamesRow.text.matchAll(/`/g)].length,
+                  startsSetE: envNamesRow.text.trimStart().startsWith('set -e'),
+                  umaskAt: envNamesRow.text.indexOf('umask 077'),
+                  setEAt: envNamesRow.text.indexOf('set -e'),
+                  redirects: [...envNamesRow.text.matchAll(/>/g)].map((hit) =>
+                    envNamesRow.text.slice(
+                      Math.max(0, (hit.index ?? 0) - 2),
+                      (hit.index ?? 0) + 11
+                    )
+                  ),
+                  bareLoops: [
+                    ...envNamesRow.text.matchAll(/for\s+\w+\s+in\s+\$[1-9]/g)
+                  ].map((hit) => hit[0]),
+                  namesAWriter: [
+                    'rm',
+                    'mv',
+                    'cp',
+                    'mkdir',
+                    'touch',
+                    'chmod',
+                    'chown',
+                    'ln',
+                    'dd',
+                    'tee',
+                    'truncate',
+                    'git'
+                  ].filter((verb) =>
+                    new RegExp(`(^|[^A-Za-z0-9_-])${verb}([^A-Za-z0-9_-]|$)`).test(
+                      envNamesRow.text
+                    )
+                  )
+                }
+        },
+        guard,
+
+        // 94. The cap agrees in three places.
+        caps: {
+          exported:
+            typeof p270Carriage?.['REMOTE_ENV_MAX_VALUE_CHARS'] === 'number'
+              ? (p270Carriage['REMOTE_ENV_MAX_VALUE_CHARS'] as number)
+              : null,
+          namesMax:
+            typeof p270Carriage?.['REMOTE_ENV_NAMES_MAX'] === 'number'
+              ? (p270Carriage['REMOTE_ENV_NAMES_MAX'] as number)
+              : null,
+          // Read as SOURCE rather than imported, because importing
+          // `../src/main/tmux/resolve.ts` would pull a spawning module into a
+          // gate whose whole claim is that it spawns nothing.
+          localFromSource: (() => {
+            const hit = /export const ENV_CAPTURE_MAX_VALUE_BYTES = (\d+);/.exec(
+              resolveSource
+            );
+            return hit === null ? null : Number(hit[1]);
+          })()
+        },
+
+        // 95. The nonce is fresh per probe, so far-side rc output cannot forge
+        //     a record by guessing the marker.
+        markers:
+          typeof marker === 'function'
+            ? [
+                String((marker as () => string)()),
+                String((marker as () => string)())
+              ]
+            : null,
+
+        // 98. The silence is ended, read out of the two files that raise it.
+        //     This is a SOURCE read rather than a module load, so it stays true
+        //     whichever way the probe is spelled and needs no Electron.
+        raises: ['remote-sessions', 'remote-restore'].map((file) => {
+          const text = readFileSync(
+            join(repoRoot, 'src', 'main', 'machines', `${file}.ts`),
+            'utf8'
+          );
+          // THE VERIFIER'S ROUND TOOK THE PROSE OUT BEFORE COUNTING, and it is
+          // not a tidy-up. Both files carry paragraphs naming
+          // `probeRemoteEnvNames`, `env-unresolved` and `ensureRemoteServer`,
+          // because a reader needs to know why each is there. Counting the raw
+          // text would let a COMMENT answer a question about what the code
+          // does — which is exactly how the fix for condition 99 could be
+          // deleted and the gate stay green. `remote-restore.test.ts` strips
+          // the same two shapes for the same reason.
+          const code = text
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/^\s*\/\/.*$/gm, '');
+          return {
+            file,
+            asksForNames: [...code.matchAll(/remoteEnvNamesFor\(/g)].length,
+            probes: [...code.matchAll(/probeRemoteEnvNames\(/g)].length,
+            raisesNotice: [...code.matchAll(/'env-unresolved'/g)].length,
+            namesTheMissing: code.includes('names: envProbe.missing'),
+            passesEnvNames: [...code.matchAll(/envNames: passthrough/g)].length,
+            widensTheDeadline: [
+              ...code.matchAll(/REMOTE_CREATE_ENV_TIMEOUT_MS/g)
+            ].length,
+            // CONDITION 99, THE VERIFIER'S ROUND. A create that carries names
+            // reaches the far side through its LOGIN SHELL, and on a machine
+            // with no server on Tortie's socket that login shell is what execs
+            // tmux — so tmux seeds its GLOBAL environment from it and every
+            // later pane on that machine inherits the person's values. The
+            // server must therefore be asserted BEFORE the create line, which
+            // is the call the restore path has always made at its step 3.
+            bootsTheServer: [...code.matchAll(/ensureRemoteServer\(/g)].length,
+            //
+            // THE CALL, `remoteCreateArgs({`, AND NEVER THE BARE NAME.
+            // `remote-sessions.ts` DECLARES `remoteCreateArgs` as well as
+            // calling it, hundreds of lines above `remoteCreate`'s body, so a
+            // bare `indexOf` measures the declaration and reports the order
+            // backwards. The gate caught exactly that on its first run.
+            bootsBeforeTheCreate:
+              code.indexOf('ensureRemoteServer(') > -1 &&
+              code.indexOf('remoteCreateArgs({') > -1 &&
+              code.indexOf('ensureRemoteServer(') <
+                code.indexOf('remoteCreateArgs({'),
+            // A value is never read, composed or logged on this Mac for a
+            // session on another machine. `captureLoginShellEnv` is the local
+            // probe, and neither file may name it.
+            namesLocalCapture: code.includes('captureLoginShellEnv')
+          };
+        })
+      };
+    })(),
 
     // --- Phase 90.3, conditions 50 and 51 ----------------------------------
     // Both are pure. They read two compiled script texts and nothing else.

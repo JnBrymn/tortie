@@ -94,6 +94,19 @@ import { composeControlPath, sshOptions } from './ssh';
 // unquoted `;` becomes that shell's separator and an unquoted `#{...}` becomes its
 // comment. See the header of `tmuxCommand`.
 import { shellQuoteArgv } from '../restore/command';
+// PHASE 270. PURE, and it imports `../restore/command` and `@shared/agent-overlay`
+// and nothing else, which is what lets this module read it without pulling a
+// connection, a setting or a manifest row into the local tmux door's graph.
+//
+// THE INTEGRATOR'S ROUND HAD TO RESTORE THAT. BUILDER A left `remoteEnvNamesFor`
+// in the carriage and it reads the settings door, so an import walk over both
+// trees measured this module reaching 78 modules and no settings module at the
+// parent and 87 and one here, by `context.ts -> remote-env-carriage.ts ->
+// settings/store.ts`. The cycle gate was green the whole time, because a new
+// EDGE is not a cycle — which is why the claim above has to be checked by
+// reading rather than by waiting for a gate. The function now lives in
+// `./remote-env-probe.ts`, which this module does not import.
+import { composeEnvCreateCommand } from './remote-env-carriage';
 
 // ---------------------------------------------------------------------------
 // The two kinds
@@ -253,12 +266,32 @@ export function remoteTmuxArgv(
  */
 export function tmuxCommand(
   ctx: MachineContext,
-  args: readonly string[]
+  args: readonly string[],
+  envNames: readonly string[] = []
 ): SpawnPlan {
   if (ctx.kind === 'local') {
     return {
       file: ctx.bin,
       argv: ['-L', ctx.socket, '-f', ctx.confPath, ...args]
+    };
+  }
+  // PHASE 270. WITH NO NAMES THIS IS BYTE FOR BYTE THE LINE ABOVE IT, and that
+  // is the whole of the compatibility promise: every command Tortie has ever
+  // sent to a machine passes no names and composes exactly what it always did.
+  //
+  // With names, the far side's own LOGIN SHELL runs the tmux call instead of
+  // its non-login ssh shell, and it replaces the one slot element in the argv
+  // with the `-e NAME=value` pairs IT expands. The names travel; no value
+  // does. `./remote-env-carriage.ts` holds the script, the argument that a
+  // name cannot break out of it, and the exact composed string.
+  if (envNames.length > 0) {
+    return {
+      file: ctx.sshBin,
+      argv: [
+        ...sshOptions(ctx),
+        ctx.host,
+        composeEnvCreateCommand(remoteTmuxArgv(ctx, args), envNames)
+      ]
     };
   }
   return {

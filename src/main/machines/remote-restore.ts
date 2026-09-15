@@ -129,6 +129,15 @@ import {
 // that continues a conversation. Every remote row goes through it, and the
 // sentence it returns is the sentence the outcome carries.
 import { resumeArmingVerdict, type ArmingRefusal } from './resume-arming';
+// PHASE 270. The same union of agents.json and Settings the create path reads,
+// through the same function, so one spelling decides what a remote session
+// carries whether it is starting for the first time or coming back.
+import {
+  probeRemoteEnvNames,
+  remoteEnvNamesFor,
+  type RemoteEnvProbeResult
+} from './remote-env-probe';
+import { postDurabilityNotice } from '../notice';
 import { remoteManifest, remoteRecordOf } from './remote-record';
 import {
   REMOTE_STAMPS,
@@ -136,6 +145,7 @@ import {
   parseRemoteListLine,
   pollRemoteMachine,
   readyRemoteContext,
+  REMOTE_CREATE_ENV_TIMEOUT_MS,
   remoteCreateArgs,
   remoteListArgs,
   remoteRestoreVerdictFor,
@@ -444,6 +454,43 @@ export async function restoreRemoteSession(
   // uses, so both identity variables ride the line itself and a create whose
   // answer is lost is still identifiable by reading the pane environment back.
   const tmuxName = record.tmuxName.length > 0 ? record.tmuxName : record.name;
+  // PHASE 270, issue 20. The same names a create reads, read the same way, so a
+  // person's remote session does not hold its variables until the first restore
+  // and then quietly lose them — which is the silence this phase exists to end.
+  //
+  // THE NAMES COME FROM THE ENTRY AND THE SETTINGS, NEVER FROM THE MANIFEST
+  // ROW, and that is a deliberate difference from the local restore, which
+  // reads them off the row. The row still carries no name and no value for a
+  // session on another machine, so no schema and no seal move here. Phase 269's
+  // second recorded limit is that the manifest is not sealed, and this path
+  // never consults it.
+  const passthrough = remoteEnvNamesFor(
+    remoteLaunchEntry(record.agent as LaunchableAgentKind),
+    record.agent as LaunchableAgentKind
+  );
+  // PHASE 270, THE VERIFIER'S ROUND. THE SILENCE ENDS ON THIS PATH TOO.
+  //
+  // The build this round verified composed the names here and asked the machine
+  // nothing, so a person whose Mac Pro had lost a variable was told once, on the
+  // first create, and never again on any restore of that same session — while
+  // the LOCAL restore has said it since Phase 33 (`src/main/restore/restore.ts`
+  // posts `env-unresolved`, and `src/main/sessions/create-local.ts` does on the
+  // local create). The standing rule is that remote feels identical to local,
+  // and this phase's own charter says the silence ends either way.
+  //
+  // It NEVER REJECTS and it never fails a restore — that is
+  // `probeRemoteEnvNames`' own stated contract — and it runs only on the branch
+  // that has names, so a restore for an agent nobody configured asks nothing and
+  // waits for nothing. The create path's twin is step 6b of `remoteCreate` in
+  // `./remote-sessions.ts`.
+  //
+  // NO `ensureRemoteServer` IS ADDED HERE because step 3 above already made that
+  // call, for its own reason, several seconds before this line. That is the very
+  // call this round had to add to the create path, and this path already had it.
+  const envProbe: RemoteEnvProbeResult | null =
+    passthrough.length === 0
+      ? null
+      : await probeRemoteEnvNames(ctx, passthrough);
   const args = remoteCreateArgs({
     tmuxName,
     // The folder ON THAT MACHINE, as the row recorded it. No local check runs
@@ -457,9 +504,18 @@ export async function restoreRemoteSession(
     // and the two must not differ for a row that is not armed: such a restore is
     // the same session starting again.
     argv: createArgv,
-    ...(record.env !== undefined ? { env: record.env } : {})
+    ...(record.env !== undefined ? { env: record.env } : {}),
+    ...(passthrough.length > 0 ? { envNames: passthrough } : {})
   });
-  const printed = await execOn(ctx, args);
+  const printed = await execOn(
+    ctx,
+    args,
+    // PHASE 270. Both only on the branch that has names, exactly as the create
+    // path does, so a restore for an agent nobody configured is unchanged.
+    passthrough.length > 0
+      ? { envNames: passthrough, timeoutMs: REMOTE_CREATE_ENV_TIMEOUT_MS }
+      : {}
+  );
   const tmuxId = (printed.split('\n')[0] ?? '').trim();
   if (!tmuxId.startsWith('$')) {
     throw gmuxError(
@@ -537,6 +593,26 @@ export async function restoreRemoteSession(
     lastSeen: Date.now()
   });
   await startMachineFeed(machineId);
+
+  // PHASE 270, THE VERIFIER'S ROUND. The same sentence the create raises, at the
+  // same moment and for the same reason: the session exists and is bound, so the
+  // notice can name a session that exists. `missing` names the variables THAT
+  // MACHINE had no usable value for plus any name the alphabet refused, and
+  // `probeFailed` means Tortie could not ask, which is not the same as the
+  // variable being absent — the restore expands the values on the far side
+  // independently of this answer, exactly as the create does.
+  if (
+    envProbe !== null &&
+    (envProbe.missing.length > 0 || envProbe.probeFailed)
+  ) {
+    postDurabilityNotice({
+      kind: 'env-unresolved',
+      sessionId,
+      sessionName: oneLine(record.name),
+      names: envProbe.missing,
+      probeFailed: envProbe.probeFailed
+    });
+  }
 
   const savedAt = savedOutputAt(sessionId);
   const fresh = remoteRecordOf(sessionId) ?? record;

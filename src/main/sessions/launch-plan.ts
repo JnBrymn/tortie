@@ -283,29 +283,17 @@ export function spawnArgvFor(
 }
 
 /**
- * The names this launch will read from the login shell (Phase 269): the agent
- * row's own `launch.envPassthrough` (agents.json, Phase 33) UNIONED with the
- * names the person set in Settings then Launch defaults, row first, deduped.
+ * PHASE 270 MOVED THE BODY AND CHANGED NOTHING ELSE.
  *
- * TWO ROUTES, ONE ANSWER. agents.json stays the power-user route and Tortie
- * still never writes it; the Settings route is the one a person who has no
- * such file can reach, and it is sealed the way a danger flag is. Neither
- * shadows the other, because a person who has set both meant both.
- *
- * Returns undefined when both are empty, so the spec of an agent nobody has
- * configured is byte for byte what it was before this phase, no probe is
- * spawned, no record field is written and no launch pays for a feature it does
- * not use.
- *
- * Pure, and it mutates neither input.
+ * `envPassthroughFor` is re-exported from `@shared/launch-env`, where the
+ * remote create path can read the SAME rule. It could not read it here: the
+ * cycle gate measured `machines/context.ts -> machines/remote-env-carriage.ts
+ * -> sessions/launch-plan.ts -> manifest/index.ts -> … -> tmux/supervisor.ts ->
+ * machines/context.ts`, because this module imports the manifest. Every caller
+ * of this name goes on reading it from this module, and the function body is
+ * the one Phase 269 wrote, relocated rather than rewritten.
  */
-export function envPassthroughFor(
-  rowNames: readonly string[] | undefined,
-  settingsNames: readonly string[] | undefined
-): string[] | undefined {
-  const union = [...new Set([...(rowNames ?? []), ...(settingsNames ?? [])])];
-  return union.length === 0 ? undefined : union;
-}
+export { envPassthroughFor } from '@shared/launch-env';
 
 /**
  * The pane environment for tmux `-e`, in the one order that is safe (Phase 33).

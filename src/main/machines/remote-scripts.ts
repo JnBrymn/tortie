@@ -3398,18 +3398,116 @@ const ARCH_GIT = [
 ].join('\n');
 
 /**
- * The whole catalogue. Twenty seven scripts, and this release holds no others.
+ * Which of a person's named shell variables the far machine actually has
+ * (Phase 270, issue 20).
+ *
+ * ## What it answers, and what it deliberately does not
+ *
+ * It answers with NAMES. A name this machine has a usable value for comes back
+ * as `<nonce>NAME<nonce>`; a name it does not is simply absent. **No value is
+ * ever printed.** The create that follows expands the values on that machine,
+ * in the argv of that machine's own tmux, and nothing about a value ever
+ * crosses back to this Mac. `./remote-env.ts` is why that boundary is where it
+ * is and this script does not move it.
+ *
+ * ## Why `$SHELL -lc` and not this script's own shell
+ *
+ * A pane on another machine runs its argv directly, and the ssh command itself
+ * runs a NON-login shell, so the machine's own login files never run and a key
+ * exported in that person's `.zshrc` is invisible. Asking `$SHELL -lc` is the
+ * same question `./remote-path.ts` already asks that machine about its PATH,
+ * with the same choice of `-lc` over `-lic` and for the same reason: there is
+ * no terminal on this connection and an interactive shell reading from a pipe
+ * prints job control noise for nothing.
+ *
+ * A STATED DIVERGENCE FROM THE LOCAL PROBE. `captureLoginShellEnv` on this Mac
+ * uses `-lic`. So a variable exported only in an interactive-only branch of a
+ * person's rc is found locally and not remotely. Recorded, not fixed.
+ *
+ * ## The two marker layers, and both are load-bearing
+ *
+ * The OUTER pair is this catalogue's own `__TORTIE_RUN__`, which keeps the ssh
+ * session's login banner out of the answer. The INNER marker is a FRESH NONCE
+ * PER PROBE, handed in as `$1`, exactly `captureLoginShellEnv`'s recipe and for
+ * exactly its reason: the rc files that run inside the outer markers are files
+ * an agent on that machine could have written, and a static marker would let
+ * their output forge a record. **This text contains no marker of its own for
+ * the nonce.**
+ *
+ * ## The trailer record, which is how an unset name is told from a failed probe
+ *
+ * The inner shell's last act is to print `<nonce>.<nonce>`. A dot is not a legal
+ * character in a variable name, so that record can never collide with a name
+ * record. Trailer present means the login shell ran and answered, so every
+ * requested name with no record is unset, empty or over the cap ON THAT MACHINE.
+ * Trailer absent means the shell started and did not finish. `set -e` is what
+ * makes the second case reachable rather than theoretical: a `$SHELL` that exits
+ * non-zero aborts this script before the closing `__TORTIE_RUN__` is printed, so
+ * the outer pair never forms at all.
+ *
+ * ## Rule 2, kept without `program-find`'s exemption
+ *
+ * Both positionals are read into local names in quotes before anything walks
+ * them, and the list is split with POSIX parameter expansion rather than word
+ * splitting — because the shell doing the splitting here is `$SHELL`, and zsh
+ * does not word-split an unquoted parameter by default. `for k in $n` would hand
+ * zsh one word holding every name. `program-find` splits under `IFS=:` in
+ * `/bin/sh`, where the default is the other way round; the two scripts split
+ * lists differently on purpose and this is where that is written down.
+ *
+ * ## Why the two values reach the inner shell through its ENVIRONMENT
+ *
+ * They used to be its positional parameters, and a positional parameter written
+ * inside the single-quoted region belongs to the INNER shell while the scanner
+ * in `__tests__/remote-scripts.test.ts` reads it as a literal `$1` in the outer
+ * text and fails rule 2. `repo-find` met the same wall with an awk field
+ * reference and answered it the same way: this catalogue's texts carry no
+ * `$<digit>` inside single quotes, and a script is written to satisfy that
+ * rather than exempted from it.
+ *
+ * TWO NAMES AND A NONCE ARE WHAT TRAVEL THAT WAY, and no value ever does. The
+ * exposure is the one the argv route already had — a name list readable in that
+ * account's own process table on a machine that already holds the variables.
+ *
+ * THE LIMIT, stated rather than discovered later: `-lc` runs the rc files
+ * BEFORE the command, so an rc file on that machine that unset `TORTIE_ENV_M`
+ * or `TORTIE_ENV_N` would make this probe answer with no trailer, which the
+ * reader calls a failed probe. That is the safe direction — Tortie says it
+ * could not ask — and the create injects the values regardless, because it
+ * asks the far side independently of this answer.
+ *
+ * ## `eval`, and why a name cannot break out of it
+ *
+ * `eval "v=\${$k-}"` is the one place a name is substituted into shell SOURCE,
+ * and it sits on the line immediately after the guard that re-tests the token
+ * against the variable-name alphabet. The evaluated string is `v=${NAME-}`,
+ * whose only readings are "assign the value of NAME to v" and "assign the empty
+ * string to v". The whole argument is in `./remote-env-carriage.ts`, beside the
+ * composer.
+ */
+const ENV_NAMES = [
+  'set -e',
+  'umask 077',
+  'm="$1"',
+  'n="$2"',
+  'printf "__TORTIE_RUN__"',
+  'TORTIE_ENV_M="$m" TORTIE_ENV_N="$n" "$SHELL" -lc \'m="$TORTIE_ENV_M"; n="$TORTIE_ENV_N"; while [ -n "$n" ]; do k="${n%% *}"; case "$n" in *" "*) n="${n#* }" ;; *) n= ;; esac; case "$k" in ""|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac; eval "v=\\${$k-}"; if [ -n "$v" ] && [ "${#v}" -le 4096 ]; then printf "%s%s%s" "$m" "$k" "$m"; fi; done; printf "%s.%s" "$m" "$m"\' tortie-env-names',
+  'printf "__TORTIE_RUN__\\n"'
+].join('\n');
+
+/**
+ * The whole catalogue. Twenty nine scripts, and this release holds no others.
  *
  * A name that is not here is refused by `./remote-run.ts` before anything is
  * composed, which is the shape the verb ledger has as well: the refusal happens
  * before a string exists, rather than after one was built and then inspected.
  *
- * EIGHT of the twenty seven write, being `image-put`, `git-clone`, `file-put`,
+ * EIGHT of the twenty nine write, being `image-put`, `git-clone`, `file-put`,
  * `dir-new`, `entry-rename`, `git-stage`, `git-unstage` and `git-commit`, and
  * they are in that order in this array. {@link remoteWriteScripts} returns them
  * in it.
  * PHASE 98 ADDED A READ AND LEFT THAT NUMBER ALONE. SO DID PHASE 99, PHASE 105,
- * PHASE 106, PHASE 107, PHASE 108, PHASE 109 AND PHASE 234, WHICH ADDED TWO. PHASE 101 MOVED IT FROM TWO TO
+ * PHASE 106, PHASE 107, PHASE 108, PHASE 109, PHASE 234, WHICH ADDED TWO, AND PHASE 270. PHASE 101 MOVED IT FROM TWO TO
  * THREE, once and on purpose, because saving a file a person is editing is a
  * write and there is no honest way to write it as a read. PHASE 102 MOVED IT
  * FROM THREE TO FIVE, once and on purpose, because making a folder is a write
@@ -3692,6 +3790,16 @@ export const REMOTE_SCRIPTS: readonly RemoteScript[] = [
       'It runs one of five read only git calls in one folder, chosen by a ' +
       'word this text matches, and writes nothing. Running it twice asks ' +
       'git the same question twice.'
+  },
+  {
+    id: 'env-names',
+    mode: 'read',
+    params: 2,
+    text: ENV_NAMES,
+    reason:
+      'It asks that machine\'s own login shell which of a list of variable ' +
+      'names it has a usable value for, prints the NAMES it has and no value ' +
+      'at all, and writes nothing. Running it twice asks the same question.'
   }
 ];
 
