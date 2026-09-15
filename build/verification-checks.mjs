@@ -1204,6 +1204,16 @@ export const CHECKS = [
   // lines of that repository and the grader really grades them. `--self-test`
   // launches nothing.
   electron('probe:p259'),
+  // PHASE 269. The shell variables an agent needs. One Electron on a scratch
+  // profile with a scratch HOME and a scratch ZDOTDIR drives four arms — the
+  // value reaches a real pane, nothing is written down, a rotated value is
+  // picked up by the next session with no restart, and the env-unresolved
+  // notice fires — then a SECOND Electron, after the first has fully exited,
+  // runs the attack: a passthrough name written straight into settings.json is
+  // refused on read while the one Tortie wrote survives. It launches a
+  // stand-in executable rather than any agent, so no token is spent, and it
+  // touches `-L gmux` in one place only, a read only session count.
+  electron('probe:p269'),
   // PHASE 198. The File history section over a REAL repository, a copy of a
   // Tortie checkout named with --project, never the one the probe runs from.
   // One launch on a scratch profile right clicks the fixture's row in the

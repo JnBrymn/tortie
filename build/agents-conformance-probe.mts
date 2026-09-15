@@ -54,9 +54,23 @@ import {
   AGENT_REGISTRY,
   LAUNCHABLE_AGENT_IDS,
   SESSION_ID_SLOT,
+  // Phase 269: the env keys an agent's COMPILED row sets. Two agents have any.
+  compiledLaunchEnvKeys,
   registryResumeArgv,
   type AgentRegistryEntry
 } from '../src/main/agents/registry';
+// Phase 269: the ONE spelling of "will Tortie read this variable?", and the
+// three denylists its sentences are derived from.
+import {
+  ENV_PASSTHROUGH_REFUSED,
+  ENV_REFUSED_EXACT,
+  ENV_REFUSED_PREFIXES,
+  OVERLAY_LIMITS,
+  envPassthroughRefusal
+} from '../src/shared/agent-overlay';
+import { sanitizeEnvPassthrough } from '../src/shared/settings';
+// Phase 269: the union the launch path reads. Pure, like everything here.
+import { envPassthroughFor } from '../src/main/sessions/launch-plan';
 import {
   buildLaunchSpec,
   buildRecoveryContract,
@@ -848,10 +862,189 @@ function runP33(
 }
 
 // ---------------------------------------------------------------------------
+// Section 7 — Phase 269, the settings route to a shell variable name
+// ---------------------------------------------------------------------------
+//
+// Phase 33 (section 5 above) built the mechanism and left it unreachable: no
+// compiled row sets `launch.envPassthrough`, and the only route to it was an
+// `agents.json` file most people do not have. Phase 269 added the second
+// route, being Settings then Launch defaults, sealed the way a danger flag is.
+//
+// This section makes the SHAPE half of that route executable. Everything it
+// touches is pure: the refusal, the sanitizer, the union, the compiled table.
+// The SEAL itself needs `safeStorage` and therefore an Electron process, so it
+// belongs to the unit tests beside the store and to `probe:p269`, exactly as
+// the confirm gate belongs to the Tier 3 verifier rather than to this file.
+//
+// The denylist rows are DERIVED from the three exported arrays rather than
+// written out, so a name added to a denylist later is covered here with no
+// second edit and no second list to keep in step.
+
+/** Phase 269: where the catalog views are composed. Pure; starts nothing. */
+const SETTINGS_IPC_SEAM = '../src/main/settings/ipc';
+
+/** What Phase 269 needs from the settings IPC module. */
+interface P269CatalogApi {
+  getFlagCatalogViews(): Record<string, { envKeys?: unknown } | undefined>;
+}
+
+/** One refusal probe: the name, and the sentence (or null) it earned. */
+function p269Refusal(
+  name: string,
+  ctx?: Parameters<typeof envPassthroughRefusal>[1]
+): { name: string; sentence: string | null } {
+  return { name, sentence: envPassthroughRefusal(name, ctx) };
+}
+
+function p269Section(): Record<string, unknown> {
+  // 1. The three denylists, derived.
+  const denied = [
+    ...ENV_REFUSED_EXACT.map((name) => p269Refusal(name)),
+    // A prefix is probed as `<prefix>X`, which is a name the pattern matches
+    // and the shape rules accept, so a pass can only come from the denylist.
+    ...ENV_REFUSED_PREFIXES.map((prefix) => p269Refusal(`${prefix}X`)),
+    ...ENV_PASSTHROUGH_REFUSED.map((row) => p269Refusal(row.name))
+  ];
+
+  // 2. What a usable name looks like.
+  //
+  // A LOWER CASE NAME IS ACCEPTED, and that is deliberate rather than an
+  // oversight in this list. `OVERLAY_ENV_KEY_PATTERN` is the one pattern both
+  // routes read, it has always admitted a lower case name, and a shell
+  // variable is free to be one. The sentence a person gets says "letters,
+  // digits and underscores", which is true of `fireworks_api_key`. Narrowing
+  // the pattern here would make the two routes disagree about the same name.
+  const accepted = ['A_B9', 'FIREWORKS_API_KEY', 'fireworks_api_key'].map((n) =>
+    p269Refusal(n)
+  );
+  const malformed = [
+    '9LIVES',
+    'A'.repeat(65),
+    '',
+    'MY-KEY',
+    'HAS SPACE'
+  ].map((n) => p269Refusal(n));
+
+  // 3. The cap, driven exactly.
+  const sixteen = Array.from({ length: 16 }, (_v, i) => `P269_N${i}`);
+  const cap = {
+    limit: OVERLAY_LIMITS.maxEnvPassthroughNames,
+    sixteenth: p269Refusal('P269_N15', { existing: sixteen.slice(0, 15) }),
+    seventeenth: p269Refusal('P269_N16', { existing: sixteen })
+  };
+
+  // 4. A duplicate, and the agent's own compiled variable. The cursor row is
+  // asserted NON-EMPTY first, so this row cannot go vacuous if that row ever
+  // loses its `launch.env`.
+  const cursorEnvKeys = [...compiledLaunchEnvKeys('cursor')];
+  const own = {
+    cursorEnvKeys,
+    duplicate: p269Refusal('P269_A', { existing: ['P269_A'] }),
+    ownKey: p269Refusal(cursorEnvKeys[0] ?? 'P269_NOT_AN_AGENT_KEY', {
+      agentEnvKeys: cursorEnvKeys
+    }),
+    ownKeyOnAnotherAgent: p269Refusal(cursorEnvKeys[0] ?? 'P269_NOT_AN_AGENT_KEY', {
+      agentEnvKeys: [...compiledLaunchEnvKeys('claude')]
+    })
+  };
+
+  // 5. The sanitizer, which is what the settings store calls.
+  const launchable = (id: string): boolean =>
+    (LAUNCHABLE_AGENT_IDS as readonly string[]).includes(id);
+  const sanitize = (raw: unknown): unknown => {
+    try {
+      return sanitizeEnvPassthrough(raw, launchable, compiledLaunchEnvKeys);
+    } catch (err) {
+      return { threw: err instanceof Error ? err.message : String(err) };
+    }
+  };
+  const sanitized = {
+    unknownId: sanitize({ 'not-an-agent': ['P269_A'] }),
+    notAnArray: sanitize({ claude: 'P269_A' }),
+    notAnObject: sanitize('P269_A'),
+    nullish: sanitize(null),
+    nonStringEntry: sanitize({ claude: [7, 'P269_A', null] }),
+    refusedNames: sanitize({
+      claude: ['P269_A', 'PATH', 'P269_B', 'PI_CODING_AGENT_DIR', 'GMUX_SESSION_ID']
+    }),
+    overCap: sanitize({ claude: [...sixteen, 'P269_OVER'] }),
+    ownKey: sanitize({ cursor: cursorEnvKeys }),
+    order: sanitize({ claude: ['P269_Z', 'P269_A', 'P269_M'] })
+  };
+
+  // 6. The union the launch path reads.
+  const row = ['P269_ROW_A', 'P269_ROW_B'];
+  const set = ['P269_ROW_B', 'P269_SET_A'];
+  const rowCopy = [...row];
+  const setCopy = [...set];
+  const union = {
+    bothEmpty: envPassthroughFor(undefined, undefined) ?? null,
+    bothEmptyLists: envPassthroughFor([], []) ?? null,
+    rowOnly: envPassthroughFor(row, undefined) ?? null,
+    settingsOnly: envPassthroughFor(undefined, set) ?? null,
+    merged: envPassthroughFor(row, set) ?? null,
+    rowUnchanged: JSON.stringify(row) === JSON.stringify(rowCopy),
+    settingsUnchanged: JSON.stringify(set) === JSON.stringify(setCopy)
+  };
+
+  // 7. No compiled row names a variable. The Phase 33 promise, asserted over
+  // the whole table so it survives the arrival of a second route.
+  const compiledNamers = AGENT_REGISTRY.filter(
+    (e) => (e.launch?.envPassthrough ?? []).length > 0
+  ).map((e) => e.id);
+
+  return {
+    state: 'present',
+    denied,
+    accepted,
+    malformed,
+    cap,
+    own,
+    sanitized,
+    union,
+    compiledNamers
+  };
+}
+
+/** 8. Every catalog view carries `envKeys`, equal to the compiled row's. */
+async function p269CatalogSection(): Promise<Record<string, unknown>> {
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await import(SETTINGS_IPC_SEAM)) as Record<string, unknown>;
+  } catch (err) {
+    return {
+      state: 'absent',
+      missing: `${SETTINGS_IPC_SEAM} did not import: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    };
+  }
+  if (typeof mod['getFlagCatalogViews'] !== 'function') {
+    return { state: 'absent', missing: 'getFlagCatalogViews is not exported' };
+  }
+  try {
+    const views = (mod as unknown as P269CatalogApi).getFlagCatalogViews();
+    const rows = Object.entries(views).map(([id, view]) => ({
+      id,
+      envKeys: view?.envKeys ?? null,
+      expected: [...compiledLaunchEnvKeys(id)]
+    }));
+    return { state: 'present', rows };
+  } catch (err) {
+    return {
+      state: 'broken',
+      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 const agents = LAUNCHABLE_AGENT_IDS.map(compiledReport);
 const seam = await seamReport();
 const p33 = await p33Section();
+const p269 = p269Section();
+const p269Catalog = await p269CatalogSection();
 
 // ---------------------------------------------------------------------------
 // Phase 49 — the version probe is unreachable from the create path
@@ -880,6 +1073,8 @@ process.stdout.write(
     renderer: rendererReport(),
     seam,
     p33,
+    p269,
+    p269Catalog,
     probeBudget
   })
 );

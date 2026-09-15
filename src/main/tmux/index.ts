@@ -43,6 +43,10 @@ export {
 // login-shell PATH capture + argv[0] → absolute binary resolution.
 export {
   captureLoginShellEnv,
+  // Phase 269: the names the login shell exports, offered as suggestions in
+  // Settings. NAMES ONLY — the probe behind it never reads a value.
+  captureLoginShellEnvNames,
+  loginShellEnvNames,
   captureLoginShellPath,
   extraBinDirs,
   fallbackPath,
@@ -63,6 +67,7 @@ export {
   userPathSource,
   ENV_CAPTURE_MAX_VALUE_BYTES,
   PATH_CAPTURE_TIMEOUT_MS,
+  type CaptureEnvNamesResult,
   type CaptureEnvResult,
   type CapturePathOptions
 } from './resolve';

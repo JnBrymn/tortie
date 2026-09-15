@@ -193,6 +193,9 @@ const api: InstalledGmuxApi = {
   settingsSet: (patch) => invoke('settings:set', patch),
   openSettings: () => invoke('settings:openWindow'),
   agentFlagPresets: () => invoke('agents:flagPresets'),
+  // Phase 269: the login shell's exported variable NAMES, for the Settings
+  // window's shell-variable field. Names only — no value crosses this bridge.
+  envCandidateNames: (agentId) => invoke('settings:envCandidates', agentId),
   onSettingsChanged: (cb) => on(EVT_SETTINGS_CHANGED, cb),
   // Phase 19 item 11 optional extra: the machine woke up. The terminal clears
   // its WebGL glyph atlas on this, because a texture atlas does not survive

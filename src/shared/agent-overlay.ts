@@ -490,6 +490,77 @@ export const ENV_REFUSED_PREFIXES: readonly string[] = ENV_REFUSED_PATTERNS.map(
 );
 
 // ---------------------------------------------------------------------------
+// The one spelling of "will Tortie read this variable?" (Phase 269)
+// ---------------------------------------------------------------------------
+
+/** What a refusal needs to know beyond the name itself (Phase 269). */
+export interface EnvPassthroughContext {
+  /** Names this agent already has on its list. */
+  readonly existing?: readonly string[];
+  /** Names the agent's own compiled `launch.env` sets (two agents have any). */
+  readonly agentEnvKeys?: readonly string[];
+  /** How many names one agent may carry. Defaults to the overlay's 16. */
+  readonly cap?: number;
+}
+
+/**
+ * Why Tortie will not read this variable for this agent, or null when it will
+ * (Phase 269).
+ *
+ * ONE SPELLING OF THE RULE, read by the Settings window, which shows the
+ * sentence a person gets, and by the settings store, which only asks whether
+ * the answer is null. The sentences are DERIVED from the three arrays above,
+ * so a name added to a denylist later is refused on this route with no second
+ * edit and no second list to keep in step.
+ *
+ * The order of the checks IS the sentence a person gets, and it is the order
+ * `src/main/config/overlay.ts` already reads its own list in: what a name may
+ * look like, then what this list already holds, then how long it may be, then
+ * the three denylists, then the agent's own compiled variables.
+ *
+ * The last check is not decoration. A pane whose `FORCE_COLOR` comes from
+ * cursor's compiled `launch.env` would, with the same name on this list, raise
+ * an `env-unresolved` notice saying the session started WITHOUT a variable the
+ * pane actually has. That dishonest report is what the overlay's own last
+ * check exists to prevent, and this route needs the same answer.
+ */
+export function envPassthroughRefusal(
+  name: string,
+  ctx: EnvPassthroughContext = {}
+): string | null {
+  const pattern = new RegExp(OVERLAY_ENV_KEY_PATTERN);
+  if (
+    typeof name !== 'string' ||
+    name.length > OVERLAY_LIMITS.maxEnvKeyLength ||
+    !pattern.test(name)
+  ) {
+    return 'A variable name is letters, digits and underscores, and never starts with a digit.';
+  }
+  if ((ctx.existing ?? []).includes(name)) {
+    return 'That name is already on the list.';
+  }
+  const cap = ctx.cap ?? OVERLAY_LIMITS.maxEnvPassthroughNames;
+  if ((ctx.existing ?? []).length >= cap) {
+    return 'Sixteen names is the most Tortie will read for one agent.';
+  }
+  if (ENV_REFUSED_EXACT.includes(name)) {
+    return `${name} decides which program or which startup file runs.`;
+  }
+  const refused = ENV_REFUSED_PATTERNS.find((p) => p.pattern.test(name));
+  if (refused !== undefined) {
+    return `${name} may not be named, because ${refused.why}.`;
+  }
+  const moved = ENV_PASSTHROUGH_REFUSED.find((p) => p.name === name);
+  if (moved !== undefined) {
+    return moved.why;
+  }
+  if ((ctx.agentEnvKeys ?? []).includes(name)) {
+    return `This agent already sets ${name} itself. Pick one source for each name.`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Fields this version does not read, and why
 // ---------------------------------------------------------------------------
 

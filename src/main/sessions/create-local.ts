@@ -28,6 +28,7 @@ import { EVT_CAPTURE_NOTICE } from '@shared/ipc';
 import { LOGIN_SIGN_IN_ARGV, loginProviderForAgent } from '@shared/logins';
 import type {
   CreateSessionInput,
+  LaunchableAgentId,
   LaunchableAgentKind,
   Session
 } from '@shared/types';
@@ -94,6 +95,7 @@ import {
   bareNameFor,
   binaryCandidatesOf,
   createMachineIdFor,
+  envPassthroughFor,
   interpreterMissingMessage,
   loginPaneEnv,
   newSessionRecord,
@@ -101,6 +103,10 @@ import {
   remoteCreateFolders,
   spawnArgvFor
 } from './launch-plan';
+// PHASE 269. The seal-checked read of the person's own settings. It is
+// `getSettings` and never `loadFile` or the raw file: a name an agent wrote
+// into settings.json has already been dropped by the time this module sees it.
+import { getSettings } from '../settings/store';
 import { LOCAL_MACHINE } from './reconcile-plan';
 
 /**
@@ -460,6 +466,19 @@ export async function createLocalSession(
   // the vendor's own flow, in their own terminal, in their own browser, and
   // Tortie learns it happened only because a credential appears in the
   // directory afterwards.
+  // PHASE 269. The shell variable NAMES the person set in Settings then
+  // Launch defaults, beside the launch flags they are a sibling of, unioned
+  // with the ones an agents.json row names. Both routes are honoured and
+  // neither shadows the other. `getSettings()` is the SEAL-CHECKED read, so a
+  // name an agent appended to settings.json was already refused before this
+  // line; nothing under here changes, being one probe, the merge, the notice
+  // and the row, and the row goes on carrying NAMES ONLY.
+  const chosenPassthrough = envPassthroughFor(
+    spec.envPassthrough,
+    getSettings().envPassthrough[input.agent as LaunchableAgentId]
+  );
+  if (chosenPassthrough !== undefined) spec.envPassthrough = chosenPassthrough;
+
   const signIn = input.signIn === true && loginProvider !== null;
   if (signIn) {
     const argv0 = spec.argv[0] ?? binPath ?? input.agent;

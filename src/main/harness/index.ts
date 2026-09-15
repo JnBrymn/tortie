@@ -48,6 +48,16 @@
  *    the real socket. `npm run probe:p163` drives it cold and warm at zero
  *    and at twenty five (Phase 163).
  *
+ *  - GMUX_SMOKE=p269-env  a shell variable a person named in Settings reaches a
+ *    real pane and is written NOWHERE (Phase 269). Four arms in one launch: the
+ *    value arrives in the pane, the tmux server environment / the manifest /
+ *    every log / settings.json carry the NAME and no byte of the value, a
+ *    rotated value is picked up by the next session with no restart of Tortie
+ *    and no restart of the tmux server, and the `env-unresolved` notice fires
+ *    for a name nothing exports. Its fifth arm, the attack on the seal, is a
+ *    second launch driven by build/p269/probe-p269-env.mjs. Scratch profile,
+ *    scratch HOME and ZDOTDIR, scratch socket, refused without them.
+ *    `npm run probe:p269`.
  *  - GMUX_SMOKE=identity  sessions bind by @gmux-id, never by name: external
  *                       rename, a foreign session squatting the freed name,
  *                       kill, stale-row reconcile, pane markers, and an
@@ -310,6 +320,10 @@ import { runP156MenusSmoke } from './p156-menus';
 // through the real window. build/probe-p163-report.mjs drives it four times,
 // cold and warm at zero and at twenty five, and grades the files it writes.
 import { runP163CaptureSmoke } from './p163-capture';
+// Phase 269: a shell variable a person named in Settings reaches a real pane,
+// is written nowhere, rotates without a restart, and raises the notice that
+// was unreachable before. LEAF import, because it pulls in the session core.
+import { runP269EnvSmoke } from './p269-env';
 import { runSmokeProcId } from './procid';
 import { runSmokeQuit } from './quit';
 // Phase 119: declining capture on restore. LEAF-free like the capture smoke,
@@ -419,6 +433,12 @@ export async function dispatchHarness(deps: HarnessDeps): Promise<boolean> {
   // preload and the create sheet photographed with the row drawn off.
   if (smoke === 'capture-remote') {
     await runCaptureRemoteSmoke(deps);
+    return true;
+  }
+  // Phase 269: the shell variables an agent needs, driven against a real tmux
+  // server, a real manifest and a real login shell. See ./p269-env.
+  if (smoke === 'p269-env') {
+    await runP269EnvSmoke();
     return true;
   }
   if (smoke === 'identity') {

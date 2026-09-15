@@ -181,7 +181,8 @@ describe('the seal', () => {
       defaults: [],
       acks: [],
       fold: null,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.fold).toEqual({ agentId: null, model: null });
     expect(out.rejected).toEqual([`${AGENT} ${MODEL}`]);
@@ -196,7 +197,8 @@ describe('the seal', () => {
       defaults: [],
       acks: [],
       fold: `${AGENT} ${MODEL}`,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.fold).toEqual({ agentId: AGENT, model: MODEL });
     expect(out.rejected).toEqual([]);

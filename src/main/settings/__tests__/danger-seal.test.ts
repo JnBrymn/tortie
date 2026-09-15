@@ -136,7 +136,8 @@ describe('danger state', () => {
       defaults: [],
       acks: [],
       fold: null,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.launchDefaults.claude).toEqual([SAFE]);
     expect(out.rejected).toEqual([DANGER_KEY]);
@@ -155,7 +156,8 @@ describe('danger state', () => {
       defaults: [DANGER_KEY],
       acks: [DANGER_KEY],
       fold: null,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.launchDefaults.claude).toEqual([DANGER, SAFE]);
     expect(out.settings.dangerAcknowledged).toEqual([DANGER_KEY]);

@@ -269,7 +269,8 @@ describe('the seal', () => {
       defaults: [],
       acks: [],
       fold: null,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.arch).toEqual({
       enabled: false,
@@ -289,7 +290,8 @@ describe('the seal', () => {
       defaults: [],
       acks: [],
       fold: null,
-      arch: `${AGENT} ${MODEL}`
+      arch: `${AGENT} ${MODEL}`,
+      env: []
     });
     expect(out.settings.arch).toEqual({ enabled: false, agentId: AGENT, model: MODEL, wrapperPass: false });
     expect(out.rejected).toEqual([]);
@@ -354,7 +356,8 @@ describe('a fold agreement is not an arch agreement', () => {
       defaults: [],
       acks: [],
       fold: `${AGENT} ${MODEL}`,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.arch).toEqual({
       enabled: false,
@@ -374,7 +377,8 @@ describe('a fold agreement is not an arch agreement', () => {
       defaults: [],
       acks: [],
       fold: null,
-      arch: `${AGENT} fold-model`
+      arch: `${AGENT} fold-model`,
+      env: []
     });
     expect(out.settings.fold).toEqual({ agentId: null, model: null });
   });
@@ -448,7 +452,8 @@ describe('the visibility switch (Phase 175)', () => {
       defaults: [],
       acks: [],
       fold: null,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.arch).toEqual({
       enabled: true,
@@ -540,7 +545,8 @@ describe('the wrapper pass switch (Phase 257)', () => {
       defaults: [],
       acks: [],
       fold: null,
-      arch: null
+      arch: null,
+      env: []
     });
     expect(out.settings.arch).toEqual({
       enabled: true,

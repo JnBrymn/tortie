@@ -393,6 +393,7 @@ export type AnyMenuActionId = MenuActionId | LayoutMenuActionId;
 
 import type {
   AgentFlagCatalogs,
+  EnvVarCandidates,
   GmuxSettings,
   GmuxSettingsPatch
 } from '../settings';
@@ -416,6 +417,16 @@ export interface SettingsInvokeChannelMap {
   'settings:openWindow': { req: []; res: void };
   /** Launch-flag preset catalogs per launchable agent (static per build). */
   'agents:flagPresets': { req: []; res: AgentFlagCatalogs };
+  /**
+   * The names the person's login shell exports, as suggestions for the
+   * Settings window's shell-variable field (Phase 269). NAMES ONLY: the probe
+   * behind it asks `awk` for the KEYS of its environment, so there is no path
+   * by which a value could cross this channel.
+   */
+  'settings:envCandidates': {
+    req: [agentId: LaunchableAgentId];
+    res: EnvVarCandidates;
+  };
 }
 
 /**
@@ -433,6 +444,11 @@ export interface GmuxSettingsExtras {
   /** Open/focus the Settings window (activity-bar gear; menu uses main). */
   openSettings(): Promise<void>;
   agentFlagPresets(): Promise<AgentFlagCatalogs>;
+  /**
+   * The login shell's exported variable NAMES, filtered to the ones this
+   * agent would actually accept (Phase 269). Never a value.
+   */
+  envCandidateNames(agentId: LaunchableAgentId): Promise<EnvVarCandidates>;
   /** Fires in EVERY window whenever the persisted settings change. */
   onSettingsChanged(cb: (settings: GmuxSettings) => void): Unsubscribe;
 }

@@ -1132,6 +1132,125 @@
   color: var(--text-muted);
 }
 
+/* ------------------------------------- shell variables (Phase 269) */
+
+/* One more control in the card that already holds the launch flags, never a
+   new section. It sits under the preset rows behind the same 1px border they
+   use, so the card reads as one list of decisions about how this agent starts
+   rather than as two surfaces stacked.
+
+   THE RESTING HEIGHT IS THE SAME WITH NAMES AND WITHOUT THEM. `.set-env-detail`
+   reserves the slot, so the quiet line and the chips-plus-caption occupy the
+   same box and adding the first name does not make the card jump under the
+   person's cursor. That is the Phase 174.1 lesson two hundred lines above,
+   applied to a group instead of to a field, and a later round that drops the
+   min-height to "tidy" it brings the jump back with every gate green. */
+
+.set-env-group {
+  border-top: 1px solid var(--border);
+  padding: var(--space-4) var(--space-5);
+}
+
+.set-env-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 24px;
+}
+
+.set-env-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+/* The field and the button share the row's right-hand end, level with each
+   other: .set-select is 24px and so is this button. */
+.set-env-field {
+  flex: 0 1 200px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.set-env-add {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 var(--space-4);
+}
+
+/* The reserved line under the field. It is only in the tree while the field
+   is open, and while it is open it ALWAYS says one of its three things, so
+   the field's box never moves as a person types. Hidden state, if one is ever
+   wanted here, goes by visibility and never by display. */
+.set-env-note {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.set-env-note.error {
+  color: var(--error);
+}
+
+/* The reserved slot: the quiet line, or the chips and their caption. */
+.set-env-detail {
+  min-height: 32px;
+  margin-top: var(--space-3);
+}
+
+.set-env-empty,
+.set-env-caption {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.set-env-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+/* A name chip: the flag chip's family, one step taller because it carries a
+   control. --text-secondary and never --text-muted, because the chip's ground
+   is --bg-raised (§1.1). */
+.set-chip.envname {
+  height: 20px;
+  gap: var(--space-2);
+  padding-right: var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+.set-env-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.set-env-remove:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.set-env-remove:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* --------------------------------------------------- danger confirm */
 
 .set-confirm {

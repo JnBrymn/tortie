@@ -33,6 +33,15 @@
  * cannot produce the seal. The choice reaches a spawn only when the Settings
  * window wrote it, which is a person acting out of band.
  *
+ * THE SHELL VARIABLE NAMES ARE SEALED THE SAME WAY (Phase 269). A name on
+ * `envPassthrough` decides which of the person's own secrets Tortie reads out
+ * of their login shell and hands to a spawned process. An agent that appended
+ * one name to another agent's list would be handed a key it was never given,
+ * at every later launch, with nothing said anywhere. So a name that arrives
+ * without a seal is REFUSED on read rather than honoured, and the value it
+ * names is never in this file at all — only the name is, and the value is
+ * resolved fresh at each launch.
+ *
  * Ownership: src/main/settings/** (settings+hotkeys stream).
  */
 
@@ -53,6 +62,7 @@ import {
   clampScrollbackLines,
   dangerKey,
   defaultGmuxSettings,
+  envNameKey,
   foldKey,
   isAutoSaveMode,
   noArchChosen,
@@ -63,6 +73,7 @@ import {
   sanitizeChromeShade,
   sanitizeColorScheme,
   sanitizeContrastLevel,
+  sanitizeEnvPassthrough,
   sanitizeHighlightScheme,
   sanitizeUsageSettings,
   sanitizeWorkAreaFont,
@@ -75,7 +86,7 @@ import {
   recipeHasModel
 } from '../overview/fold/recipes';
 import type { LaunchableAgentId, LaunchableAgentKind } from '@shared/types';
-import { LAUNCHABLE_AGENT_IDS } from '../agents/registry';
+import { compiledLaunchEnvKeys, LAUNCHABLE_AGENT_IDS } from '../agents/registry';
 import { AGENT_FLAG_PRESETS } from '../agents/flags';
 
 import { getLog } from '../log';
@@ -201,6 +212,18 @@ export interface DangerState {
    * all, which opens as null and fails safe to None.
    */
   readonly arch: string | null;
+  /**
+   * "<agentId> <NAME>" for every environment variable name the person set in
+   * the Settings window (Phase 269).
+   *
+   * A NAME IS WHAT DECIDES which of the person's secrets a spawned process is
+   * handed, so it belongs in exactly the class the two above are in: an agent
+   * that appended a name to another agent's list could read a key it was
+   * never given, and it would be handed that key at every later launch with
+   * nothing said. An old seal has no `env` member at all, which opens as []
+   * and fails safe to no names.
+   */
+  readonly env: readonly string[];
 }
 
 /** The danger state of a settings object, sorted so it seals to one text. */
@@ -221,11 +244,19 @@ export function dangerStateOf(settings: GmuxSettings): DangerState {
     settings.arch.agentId !== null && settings.arch.model !== null
       ? archKey(settings.arch.agentId, settings.arch.model)
       : null;
+  // Phase 269. Every passthrough name, under its own agent id, sorted so the
+  // state seals to one text whatever order the map was written in.
+  const env: string[] = [];
+  for (const [id, names] of Object.entries(settings.envPassthrough)) {
+    if (!Array.isArray(names)) continue;
+    for (const name of names) env.push(envNameKey(id, name));
+  }
   return {
     defaults: defaults.sort(),
     acks: [...settings.dangerAcknowledged].sort(),
     fold,
-    arch
+    arch,
+    env: env.sort()
   };
 }
 
@@ -235,7 +266,8 @@ export function isDangerStateEmpty(state: DangerState): boolean {
     state.defaults.length === 0 &&
     state.acks.length === 0 &&
     state.fold === null &&
-    state.arch === null
+    state.arch === null &&
+    state.env.length === 0
   );
 }
 
@@ -253,6 +285,7 @@ export function withSealedDangerState(
 ): { settings: GmuxSettings; rejected: string[] } {
   const sealedDefaults = new Set(sealed.defaults);
   const sealedAcks = new Set(sealed.acks);
+  const sealedEnv = new Set(sealed.env);
   const rejected: string[] = [];
   // Phase 138. The fold choice is dropped back to None unless the seal covers
   // that exact pair, and it IS reported, so the Settings window can say one
@@ -286,6 +319,21 @@ export function withSealedDangerState(
     });
     if (kept.length > 0) launchDefaults[id as LaunchableAgentId] = kept;
   }
+  // Phase 269. Every passthrough name the seal does not cover is dropped, and
+  // it IS reported, so `warnRejected` names it in app.log: a person whose
+  // agent quietly stopped getting a variable has one line that says why. An
+  // agent left with no surviving name is absent from the map rather than
+  // present and empty, which is the shape `launchDefaults` above already has.
+  const envPassthrough: GmuxSettings['envPassthrough'] = {};
+  for (const [id, names] of Object.entries(settings.envPassthrough)) {
+    if (!Array.isArray(names)) continue;
+    const kept = names.filter((name) => {
+      if (sealedEnv.has(envNameKey(id, name))) return true;
+      rejected.push(envNameKey(id, name));
+      return false;
+    });
+    if (kept.length > 0) envPassthrough[id as LaunchableAgentId] = kept;
+  }
   const acks = settings.dangerAcknowledged.filter((k) => sealedAcks.has(k));
   if (rejected.length === 0 && acks.length === settings.dangerAcknowledged.length) {
     return { settings, rejected };
@@ -294,6 +342,7 @@ export function withSealedDangerState(
     settings: {
       ...settings,
       launchDefaults,
+      envPassthrough,
       dangerAcknowledged: acks,
       fold: foldRejected ? noFoldChosen() : settings.fold,
       // Phase 175. The seal drops the harness PAIR and only the pair. The
@@ -351,6 +400,9 @@ export function withSealedDangerState(
  *
  * COST WHEN UNUSED. A settings file with no danger value never reaches the
  * keystore at all, so the common case adds no keychain access and no prompt.
+ * A machine that names a shell variable (Phase 269) leaves that common case,
+ * exactly as a danger flag or a fold choice already does; a machine that names
+ * none is byte for byte unchanged.
  */
 const SEAL_PREFIX = 'gmux-danger-seal-v1:';
 
@@ -358,7 +410,8 @@ const EMPTY_DANGER_STATE: DangerState = {
   defaults: [],
   acks: [],
   fold: null,
-  arch: null
+  arch: null,
+  env: []
 };
 
 /** Is `safeStorage` usable right now? False before `app` is ready. */
@@ -414,7 +467,11 @@ function openDangerSeal(blob: unknown): DangerState | null {
       defaults: strings(asState.defaults),
       acks: strings(asState.acks),
       fold: typeof asState.fold === 'string' ? asState.fold : null,
-      arch: typeof asState.arch === 'string' ? asState.arch : null
+      arch: typeof asState.arch === 'string' ? asState.arch : null,
+      // Phase 269. `env` reads through the same `strings()` helper the two
+      // lists above use and defaults to [], so a seal written before this
+      // phase opens and covers no passthrough name at all.
+      env: strings(asState.env)
     };
   } catch {
     // Forged, truncated, or written by a different machine's key. It proves
@@ -464,6 +521,16 @@ export function sanitizeSettings(raw: unknown): GmuxSettings {
       if (clean.length > 0) out.launchDefaults[id as LaunchableAgentId] = clean;
     }
   }
+
+  // PHASE 269. The environment variable NAMES per agent. Membership FIRST,
+  // and the seal after, in getSettings — the same two step check the fold and
+  // arch choices take, and for the same reason: this bounds what a value may
+  // be and cannot tell who wrote the file.
+  out.envPassthrough = sanitizeEnvPassthrough(
+    obj['envPassthrough'],
+    (id) => LAUNCHABLE_SET.has(id),
+    compiledLaunchEnvKeys
+  );
 
   // Per-agent SpecStory capture defaults (Phase 15). Unknown ids dropped and
   // only `true` is stored: an explicit false is the absence of the key, which

@@ -13,11 +13,12 @@
 import { create } from 'zustand';
 import type {
   AgentFlagCatalogs,
+  EnvVarCandidates,
   GmuxSettings,
   GmuxSettingsPatch
 } from '@shared/settings';
 import { defaultGmuxSettings } from '@shared/settings';
-import type { AgentsScanResult } from '@shared/types';
+import type { AgentsScanResult, LaunchableAgentId } from '@shared/types';
 import type { ArchOptions, FoldOptions } from '@shared/fold';
 import type { ConfigRowsResult, InstalledGmuxApi } from '@shared/ipc';
 import { gmuxBridge } from '../bridge';
@@ -98,6 +99,26 @@ export interface SettingsStoreState {
   archOptionsLoaded: boolean;
 
   /**
+   * PHASE 269. The names this person's login shell exports, per agent, as
+   * SUGGESTIONS for the shell-variable field in Launch defaults.
+   *
+   * NAMES ONLY. Main's probe asks `awk` for the KEYS of its environment and
+   * never for a value, so "no value" is a property of the script rather than
+   * of a filter applied afterwards, and nothing on this side of the bridge has
+   * ever held one.
+   *
+   * It is PER OPENING and deliberately not a cache. An entry is cleared the
+   * moment the field opens and filled when the answer lands, so a person who
+   * has just added a variable to their shell profile and reopened the field
+   * gets the new name rather than the answer from before they edited it. An
+   * agent with no entry has not been asked this opening; `probeFailed` is the
+   * answer that the shell did not reply at all, and the field stays typable in
+   * both cases — nothing here ever blocks the person from naming a variable
+   * their shell does not export yet.
+   */
+  envCandidates: Partial<Record<LaunchableAgentId, EnvVarCandidates>>;
+
+  /**
    * PHASE 175. Read the settings once and subscribe to main's broadcast, and
    * NOTHING else. Idempotent, and `init()` calls it so the two cannot drift.
    *
@@ -152,6 +173,18 @@ export interface SettingsStoreState {
 
   /** Re-read which agents and models may fill in the contract. Reads only. */
   refreshArchOptions(): Promise<void>;
+
+  /**
+   * PHASE 269. Ask main which names this login shell exports, for one agent.
+   *
+   * Called when the shell-variable field OPENS and nowhere else, so nothing is
+   * probed at boot and a person who never opens the field never starts a
+   * shell. Feature-detected on the one method, exactly like `agentFlagPresets`
+   * above: an older preload leaves the field typable and the line under it
+   * saying the shell did not answer, which is the truth from where the person
+   * is standing.
+   */
+  loadEnvCandidates(agentId: LaunchableAgentId): void;
 }
 
 let initialized = false;
@@ -172,6 +205,7 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => ({
   foldOptionsLoaded: false,
   archOptions: null,
   archOptionsLoaded: false,
+  envCandidates: {},
 
   watchSettings() {
     if (watching) return;
@@ -354,6 +388,24 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => ({
       // Leave the last good list up rather than blanking the picker.
       set({ archOptionsLoaded: true });
     }
+  },
+
+  loadEnvCandidates(agentId) {
+    const b = bridge();
+    const put = (answer: EnvVarCandidates | undefined): void => {
+      set((s) => ({ envCandidates: { ...s.envCandidates, [agentId]: answer } }));
+    };
+    // Clear first: the list is per OPENING, so a stale answer is never what a
+    // person reopening the field is shown. See the field comment above.
+    put(undefined);
+    if (typeof b?.envCandidateNames !== 'function') {
+      put({ names: [], probeFailed: true });
+      return;
+    }
+    void b
+      .envCandidateNames(agentId)
+      .then(put)
+      .catch(() => put({ names: [], probeFailed: true }));
   }
 }));
 

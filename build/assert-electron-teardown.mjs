@@ -181,6 +181,13 @@ const HELPER = 'electron-run.mjs';
  * Adding a probe cannot turn this gate red, so a floor left where it was is a
  * floor that would let either of them be deleted again in silence.
  *
+ * PHASE 268 RAISED IT FROM 131 TO 132, for build/p268/probe-p268-autosave.mjs.
+ * PHASE 269 RAISED IT FROM 132 TO 133, for build/p269/probe-p269-env.mjs, the
+ * app run that proves a shell variable a person named in Settings reaches a
+ * real pane, is written nowhere, rotates with no restart, and that a name
+ * written straight into settings.json is refused. Both rounds were in flight at
+ * once and each raised 131 to 132; the rebase is what made it 133.
+ *
  * Lower it ONLY in the same commit
  * that deletes a probe on purpose, and say in the commit body which file went
  * and why. Do not lower it to make a red gate green: red here means either a
@@ -192,8 +199,7 @@ const HELPER = 'electron-run.mjs';
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-// PHASE 268 raised it by one: build/p268/probe-p268-autosave.mjs.
-const HELPER_USER_FLOOR = 132;
+const HELPER_USER_FLOOR = 133;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

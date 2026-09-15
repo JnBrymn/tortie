@@ -229,10 +229,13 @@ export interface UncleanExitNotice {
 }
 
 /**
- * An agent pane started without a variable its row promises. Phase 33.
+ * An agent pane started without a variable this launch promised. Phase 33.
  *
  * `launch.envPassthrough` names variables Tortie reads from the login shell
- * at each launch and each restore. A name that is unset or empty at probe
+ * at each launch and each restore. Phase 269 added the second route to that
+ * same field, being Settings then Launch defaults, and a name from either
+ * route raises this notice, because from where the person is standing the
+ * variable is simply missing. A name that is unset or empty at probe
  * time injects nothing, and the probe itself can fail or time out. Either
  * way the pane is running without something its row said it would have, and
  * nothing else would ever say so. The agent inside the pane fails much

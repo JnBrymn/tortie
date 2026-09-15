@@ -74,6 +74,7 @@
     "probe:p258": "npm run build && node build/harness-socket.mjs --fresh gmux-p258 'node build/p258/probe-p258-surface.mjs'",
     "measure:semantic": "npm run build && node build/harness-socket.mjs --fresh gmux-p259 'node build/p259/measure-semantic.mjs'",
     "probe:p259": "npm run build && node build/harness-socket.mjs --fresh gmux-p259 'node build/p259/probe-p259.mjs'",
+    "probe:p269": "npm run build && node build/harness-socket.mjs --fresh gmux-p269-env 'node build/p269/probe-p269-env.mjs'",
     "probe:p250": "npm run build && node build/harness-socket.mjs --fresh gmux-p250 'node build/p247/path-open.mjs'",
     "probe:p268": "npm run build && node build/harness-socket.mjs --fresh gmux-p268 'node build/p268/probe-p268-autosave.mjs'",
     "ablation:p268": "node build/p268/ablation.mjs",

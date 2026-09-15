@@ -11,6 +11,7 @@
  */
 
 import type { LaunchableAgentId, LaunchableAgentKind } from './types';
+import { envPassthroughRefusal } from './agent-overlay';
 
 // ---------------------------------------------------------------------------
 // Settings shape
@@ -38,6 +39,27 @@ export interface GmuxSettings {
    * sanitization — this map can never smuggle arbitrary argv.
    */
   launchDefaults: Partial<Record<LaunchableAgentId, string[]>>;
+  /**
+   * Per-agent environment variable NAMES Tortie reads from the login shell at
+   * each launch of that agent (Phase 269). A sibling of `launchDefaults`
+   * above, and set at the same place in the Settings window, because the two
+   * answer one question: what is every new session of this agent made of?
+   *
+   * VALUES ARE STORED NOWHERE. They are resolved fresh from the login shell
+   * at every launch and at every restore, handed to that one pane, and
+   * written neither here, nor into the manifest row, nor into the tmux server
+   * environment, nor into a log.
+   *
+   * THE NAMES ARE SEALED — see src/main/settings/store.ts, "The danger seal".
+   * A name is a decision about which of a person's secrets a spawned process
+   * is handed, so an agent that appended a name to another agent's list could
+   * read a key it was never given. A name that arrives without a seal is
+   * refused on read rather than honoured.
+   *
+   * `agents.json` remains the other route (Phase 33) and is unchanged; a
+   * launch reads the union of the two.
+   */
+  envPassthrough: Partial<Record<LaunchableAgentId, string[]>>;
   /**
    * "<agentId> <flag>" keys whose danger confirm has been accepted once —
    * first enable of a danger preset confirms, later re-enables don't (S13).
@@ -786,6 +808,7 @@ export function defaultGmuxSettings(): GmuxSettings {
     defaultAgent: 'claude',
     hotkeys: {},
     launchDefaults: {},
+    envPassthrough: {},
     dangerAcknowledged: [],
     captureDefaults: {},
     scrollbackLines: DEFAULT_SCROLLBACK_LINES,
@@ -825,6 +848,66 @@ export function dangerKey(agentId: string, flag: string): string {
   return `${agentId} ${flag}`;
 }
 
+/**
+ * The sealed key for one passthrough name (Phase 269), joined exactly the way
+ * `dangerKey` joins a flag.
+ *
+ * The agent id is part of the key rather than beside it, so a seal covering
+ * one agent's name never covers another agent's, and an agent that copies a
+ * sealed name into a second agent's list gets it dropped.
+ */
+export function envNameKey(agentId: string, name: string): string {
+  return `${agentId} ${name}`;
+}
+
+/**
+ * The names a person's login shell exports, offered as suggestions in the
+ * Settings window (Phase 269). NAMES ONLY — there is no field on this shape
+ * that could carry a value.
+ */
+export interface EnvVarCandidates {
+  /** Offerable names: refused names and the agent's own are already gone. */
+  names: string[];
+  /** True when the login shell did not answer at all. */
+  probeFailed: boolean;
+}
+
+/**
+ * Coerce a parsed `envPassthrough` value into a valid map (Phase 269).
+ *
+ * It drops an unknown id, a non array, a non string entry and every name
+ * `envPassthroughRefusal` refuses, keeps the rest in order, and never throws.
+ *
+ * IT IS SILENT, like every other sanitizer in this file. The shape layer
+ * bounds what a value may BE and cannot tell who wrote the file, which is what
+ * the seal in src/main/settings/store.ts is for; a person hears about a
+ * refusal at the door they typed the name into, with the sentence that door
+ * shows them.
+ */
+export function sanitizeEnvPassthrough(
+  raw: unknown,
+  isLaunchable: (id: string) => boolean,
+  agentEnvKeys: (id: string) => readonly string[]
+): Partial<Record<LaunchableAgentId, string[]>> {
+  const out: Partial<Record<LaunchableAgentId, string[]>> = {};
+  if (raw === null || typeof raw !== 'object') return out;
+  for (const [id, names] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isLaunchable(id) || !Array.isArray(names)) continue;
+    const kept: string[] = [];
+    for (const name of names) {
+      if (typeof name !== 'string') continue;
+      const refusal = envPassthroughRefusal(name, {
+        existing: kept,
+        agentEnvKeys: agentEnvKeys(id)
+      });
+      if (refusal !== null) continue;
+      kept.push(name);
+    }
+    if (kept.length > 0) out[id as LaunchableAgentId] = kept;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Flag-preset wire shapes (agents:flagPresets)
 // ---------------------------------------------------------------------------
@@ -853,6 +936,12 @@ export interface AgentFlagCatalogView {
   /** --help-inspected build version; null = not installed when cataloged. */
   helpVerifiedVersion: string | null;
   presets: AgentFlagPresetView[];
+  /**
+   * The env keys this agent's COMPILED row sets (Phase 269). Empty for all
+   * but two agents. It rides the catalog so the Settings window can say "this
+   * agent already sets FORCE_COLOR itself" without a second round trip.
+   */
+  envKeys: string[];
 }
 
 /** agents:flagPresets response: catalog per launchable registry agent. */

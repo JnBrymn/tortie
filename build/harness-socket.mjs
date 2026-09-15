@@ -203,6 +203,20 @@ await reapDeadRuns();
  * marker is removed unconditionally, because a run whose child never started a
  * server has no server to end and the marker must not outlive the run either
  * way.
+ *
+ * THE SOCKET FILE IS UNLINKED BY NAME WHETHER OR NOT A SERVER ANSWERS, and
+ * that second arm is the one that matters. `display-message` needs a LIVE
+ * server, so a probe whose own last session exited — or which ended the server
+ * itself — leaves this read returning nothing, and before this fix the `path
+ * !== ''` guard skipped the unlink and the marker was then removed anyway.
+ * With no marker, `reapDeadRuns` above never considers the name again, so the
+ * dead socket file stayed under the socket directory forever. Phase 269's
+ * probe leaves its server ended and its socket exactly that way, and one was
+ * measured left behind at /private/tmp/tmux-501/gmux-p269-env-wt-p269-12994
+ * with `no server running` on it.
+ *
+ * The unlink is bounded the way the reap is: one name, this run's own socket,
+ * under the socket directory, and never a pattern.
  */
 async function teardown(when) {
   const path = await execFileP('tmux', [
@@ -219,6 +233,10 @@ async function teardown(when) {
       () => undefined
     );
     if (path.endsWith(`/${socket}`)) rmSync(path, { force: true });
+  } else {
+    // No server answered, so there is nothing to kill — but a socket file it
+    // left behind is still ours to remove, by its exact name.
+    rmSync(join(socketDir(), socket), { force: true });
   }
   rmSync(markerFile, { force: true });
   if (path === '') return; // no server on this socket, nothing to end

@@ -233,11 +233,19 @@ export interface AgentLaunchInfo {
    *
    * NO COMPILED ROW SETS THIS, and that is the design rather than an omission.
    * Which variables an agent needs is a fact about one person's machine, not
-   * about the agent, so the route to this field is an agents.json row that
-   * restates `launch.argv` and passes the confirm gate. The NAMES are hashed
-   * by that gate. The VALUES are resolved fresh at every launch and are never
-   * written to agents.json, to the confirm record, to the manifest or to the
-   * tmux server environment.
+   * about the agent, so a compiled row never names one and never will.
+   *
+   * THERE ARE TWO ROUTES TO IT AND BOTH ARE A PERSON'S OWN DECISION. Phase 33
+   * built the first: an agents.json row that restates `launch.argv` and passes
+   * the confirm gate, which hashes the NAMES. Phase 269 added the second,
+   * being Settings then Launch defaults, where the names sit beside the launch
+   * flags they are a sibling of and are sealed the way a danger flag is. A
+   * launch reads the union of the two (`envPassthroughFor`,
+   * src/main/sessions/launch-plan.ts).
+   *
+   * The VALUES are resolved fresh at every launch and are never written to
+   * agents.json, to settings.json, to the confirm record, to the manifest or
+   * to the tmux server environment.
    */
   envPassthrough?: string[];
   /** Behavioral notes from the research (inherit-stdio, aliases, …). */
@@ -1741,6 +1749,22 @@ export function getLaunchableEntry(
 }
 
 /** Canonical binary name for an id (cursor → cursor-agent, antigravity → agy). */
+/**
+ * The env keys an agent's COMPILED row sets. Empty for all but two, being
+ * cursor's `FORCE_COLOR` and grok's `GROK_PRIVACY_NOTICE_ROLLOUT`.
+ *
+ * A read of the compiled table ONLY, never the overlay, so there is no import
+ * cycle and the answer does not depend on a configuration file. Phase 269's
+ * shape check asks it one question: does this agent already set the name a
+ * person is about to add, which would make every later report about that
+ * variable wrong in one direction or the other.
+ */
+export function compiledLaunchEnvKeys(agentId: string): readonly string[] {
+  const entry = BY_ID.get(agentId as AgentRegistryId);
+  if (entry === undefined || entry.launch === null) return [];
+  return Object.keys(entry.launch.env ?? {});
+}
+
 export function agentBinaryName(id: AgentRegistryId): string {
   const bin = getRegistryEntry(id).binaries[0];
   if (bin === undefined || bin.length === 0) {

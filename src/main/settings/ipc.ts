@@ -15,10 +15,20 @@ import { EVT_SETTINGS_CHANGED } from '@shared/ipc';
 import type {
   AgentFlagCatalogs,
   AgentFlagCatalogView,
+  EnvVarCandidates,
   GmuxSettings
 } from '@shared/settings';
 import type { LaunchableAgentId } from '@shared/types';
+// Phase 269: the ONE spelling of "will Tortie read this variable?", shared
+// with the Settings window so the file a name is refused in cannot disagree
+// with the file it is explained in.
+import { envPassthroughRefusal } from '@shared/agent-overlay';
 import { AGENT_FLAG_PRESETS } from '../agents/flags';
+import { compiledLaunchEnvKeys } from '../agents/registry';
+// Phase 269: the login shell's exported names, NAMES ONLY. One shared probe
+// per concurrent ask, and no cross-ask cache, so a person who has just edited
+// their profile gets a fresh answer.
+import { loginShellEnvNames } from '../tmux';
 import { disarmArchWatch } from '../arch/ipc';
 import { rebuildAppMenu } from '../menu';
 import { handle } from '../typed-ipc';
@@ -49,7 +59,11 @@ export function getFlagCatalogViews(): AgentFlagCatalogs {
         description: p.description,
         danger: p.danger,
         verified: p.provenance === 'VERIFIED'
-      }))
+      })),
+      // Phase 269. What this agent's COMPILED row already sets, so the
+      // Settings window can say "this agent already sets FORCE_COLOR itself"
+      // without a second round trip. Empty for all but two agents.
+      envKeys: [...compiledLaunchEnvKeys(agentId)]
     };
     views[agentId] = view;
   }
@@ -130,6 +144,32 @@ export function registerSettingsIpc(ipc: IpcMain): void {
   });
 
   handle(ipc, 'agents:flagPresets', () => getFlagCatalogViews());
+
+  // PHASE 269. The names the person's login shell exports, as suggestions for
+  // the shell-variable field in Launch defaults. NAMES ONLY: the probe asks
+  // `awk` for the KEYS of its environment and prints nothing else, so there is
+  // no path by which a value could reach this handler, let alone a renderer.
+  //
+  // The list is filtered by the SAME refusal the field shows a sentence for,
+  // against this agent's current sealed names and its compiled env keys, so
+  // the picker offers only names that would actually be accepted.
+  handle(ipc, 'settings:envCandidates', async (_e, agentId) => {
+    const probe = await loginShellEnvNames();
+    const existing = getSettings().envPassthrough[agentId] ?? [];
+    const agentEnvKeys = compiledLaunchEnvKeys(agentId);
+    const names = probe.names.filter(
+      (name) =>
+        envPassthroughRefusal(name, {
+          existing,
+          agentEnvKeys,
+          // The list is a suggestion, not the add itself: a full list still
+          // shows what the shell has, and the add is where the cap is said.
+          cap: Number.MAX_SAFE_INTEGER
+        }) === null
+    );
+    const answer: EnvVarCandidates = { names, probeFailed: probe.probeFailed };
+    return answer;
+  });
 
   // Phase 15: the SpecStory section's status pull + its two auth actions. It
   // registers here rather than from src/main/index.ts because the Settings

@@ -15,7 +15,7 @@
  * file under the user's home, no write anywhere. Safe on a machine with live
  * sessions on it.
  *
- * WHAT IT CHECKS, in five sections, and each one is a way a user-added agent
+ * WHAT IT CHECKS, in seven sections, and each one is a way a user-added agent
  * could go missing, a session could be lost, or a secret could be written down.
  *
  * SECTION 1 — the create path. For every launchable agent, the launch argv
@@ -652,6 +652,192 @@ if (p33.state === 'absent') {
 }
 
 // ---------------------------------------------------------------------------
+// Section 7 — the settings route to a shell variable name (Phase 269)
+// ---------------------------------------------------------------------------
+//
+// Phase 33, in section 5 above, built the mechanism and left it unreachable:
+// no compiled row sets `launch.envPassthrough` and the only route to it was an
+// `agents.json` file most people do not have. Phase 269 added the second
+// route, being Settings then Launch defaults. This section holds the SHAPE
+// half of it, which is everything a node process can reach: the refusal, the
+// sanitizer the settings store calls, the union the launch path reads, and the
+// promise that no compiled row has quietly started naming a variable.
+//
+// The seal itself needs `safeStorage` and therefore an Electron process, so it
+// belongs to `src/main/settings/__tests__/p269-env-seal.test.ts` and to
+// `probe:p269`, exactly as the confirm gate belongs to the Tier 3 verifier.
+//
+// Every denylist row is DERIVED from the exported arrays, so a name added to a
+// denylist later is covered here with no edit to this file.
+
+const p269 = data.p269 ?? {
+  state: 'absent',
+  missing: 'the probe printed no p269 section'
+};
+const p269Rows = [];
+
+const p269Assert = (name, ok, note, why) => {
+  p269Rows.push({ name, ok, note: note ?? '' });
+  if (!ok) fail(`the settings route, ${name}: ${why}`);
+};
+
+const sameList = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+if (p269.state !== 'present') {
+  skipped.push(
+    'the settings route to a shell variable name (Phase 269) has not landed, so the ' +
+      'refusal, the sanitizer, the union and the "no compiled row names one" promise ' +
+      `were NOT checked. ${p269.missing ?? ''}`
+  );
+} else {
+  // 1. Every denied name earns a sentence, derived from the three arrays.
+  const unsentenced = p269.denied.filter(
+    (row) => typeof row.sentence !== 'string' || row.sentence.length === 0
+  );
+  p269Assert(
+    'every denylisted name is refused with a sentence',
+    unsentenced.length === 0,
+    `${p269.denied.length} names probed`,
+    `${unsentenced.map((r) => r.name).join(', ')} passed the refusal, so a name on a ` +
+      'denylist could be added through Settings. The rows are derived from ' +
+      'ENV_REFUSED_EXACT, ENV_REFUSED_PATTERNS and ENV_PASSTHROUGH_REFUSED, so a new ' +
+      'entry is covered here without an edit.'
+  );
+
+  // 2. A usable name is accepted and a malformed one is not.
+  const wronglyRefused = p269.accepted.filter((r) => r.sentence !== null);
+  const wronglyAccepted = p269.malformed.filter((r) => r.sentence === null);
+  p269Assert(
+    'a usable name passes and a malformed one does not',
+    wronglyRefused.length === 0 && wronglyAccepted.length === 0,
+    `${p269.accepted.length} accepted, ${p269.malformed.length} refused`,
+    wronglyRefused.length > 0
+      ? `${wronglyRefused.map((r) => r.name).join(', ')} was refused, and a person whose ` +
+          'own shell exports it would have no way to name it. A lower case name is a ' +
+          'usable one: the pattern both routes read has always admitted it.'
+      : `${wronglyAccepted.map((r) => JSON.stringify(r.name)).join(', ')} was accepted, ` +
+          'and a name that is not a name reaches a shell script interpolation.'
+  );
+
+  // 3. The cap, driven exactly at its edge.
+  p269Assert(
+    'the sixteenth name is accepted and the seventeenth is not',
+    p269.cap.limit === 16 &&
+      p269.cap.sixteenth.sentence === null &&
+      typeof p269.cap.seventeenth.sentence === 'string',
+    `cap ${p269.cap.limit}`,
+    p269.cap.limit !== 16
+      ? `the cap moved to ${p269.cap.limit}, and the sentence a person reads still says ` +
+          'sixteen.'
+      : p269.cap.sixteenth.sentence !== null
+        ? 'the sixteenth name was refused, so the cap bites one name early.'
+        : 'the seventeenth name was accepted, so the cap does not bite at all.'
+  );
+
+  // 4. A duplicate, and the agent's OWN compiled variable. The cursor row is
+  // asserted non-empty first, so this cannot go vacuous if that row ever loses
+  // its `launch.env`.
+  p269Assert(
+    "a duplicate and the agent's own compiled variable are refused",
+    p269.own.cursorEnvKeys.length > 0 &&
+      typeof p269.own.duplicate.sentence === 'string' &&
+      typeof p269.own.ownKey.sentence === 'string' &&
+      p269.own.ownKeyOnAnotherAgent.sentence === null,
+    `cursor sets ${p269.own.cursorEnvKeys.join(', ') || 'nothing'}`,
+    p269.own.cursorEnvKeys.length === 0
+      ? 'the cursor row sets no launch.env, so this assertion would have passed without ' +
+          'checking anything. Point it at a row that does.'
+      : p269.own.duplicate.sentence === null
+        ? 'a name already on the list was accepted a second time.'
+        : p269.own.ownKey.sentence === null
+          ? 'a name the agent already sets itself was accepted, so an env-unresolved ' +
+              'notice could say a pane started WITHOUT a variable the pane has.'
+          : "the same name was refused for an agent that does NOT set it, so the check is " +
+              'reading a global list rather than this agent.'
+  );
+
+  // 5. The sanitizer the settings store calls.
+  const sz = p269.sanitized;
+  const sanitizerOk =
+    sameList(sz.unknownId, {}) &&
+    sameList(sz.notAnArray, {}) &&
+    sameList(sz.notAnObject, {}) &&
+    sameList(sz.nullish, {}) &&
+    sameList(sz.nonStringEntry, { claude: ['P269_A'] }) &&
+    sameList(sz.refusedNames, { claude: ['P269_A', 'P269_B'] }) &&
+    sameList(sz.ownKey, {}) &&
+    sameList(sz.order, { claude: ['P269_Z', 'P269_A', 'P269_M'] }) &&
+    Array.isArray(sz.overCap.claude) &&
+    sz.overCap.claude.length === 16;
+  p269Assert(
+    'the sanitizer drops the bad and keeps the good, in order',
+    sanitizerOk,
+    `over-cap list kept ${Array.isArray(sz.overCap.claude) ? sz.overCap.claude.length : '?'}`,
+    'sanitizeEnvPassthrough is what stands between a hand-edited settings.json and the ' +
+      'shape the seal is then asked about. It must drop an unknown id, a non array, a ' +
+      'non string entry and every refused name, keep the rest IN ORDER, stop at sixteen, ' +
+      `and never throw. It answered ${JSON.stringify(sz)}.`
+  );
+
+  // 6. The union the launch path reads.
+  const u = p269.union;
+  const unionOk =
+    u.bothEmpty === null &&
+    u.bothEmptyLists === null &&
+    sameList(u.rowOnly, ['P269_ROW_A', 'P269_ROW_B']) &&
+    sameList(u.settingsOnly, ['P269_ROW_B', 'P269_SET_A']) &&
+    sameList(u.merged, ['P269_ROW_A', 'P269_ROW_B', 'P269_SET_A']) &&
+    u.rowUnchanged &&
+    u.settingsUnchanged;
+  p269Assert(
+    'the two routes union, row first, deduped, undefined for neither',
+    unionOk,
+    u.merged === null ? 'no union' : u.merged.join(' '),
+    u.bothEmpty !== null || u.bothEmptyLists !== null
+      ? 'two empty routes answered a list rather than undefined, so an agent nobody has ' +
+          'configured would spawn a probe and write a record field it did not before.'
+      : !u.rowUnchanged || !u.settingsUnchanged
+        ? 'the union edited one of its inputs, which are the stored settings and the ' +
+            'merged agent row.'
+        : `the union came back ${JSON.stringify(u.merged)}. It must be the row's names ` +
+            "first, then the person's, with a name both name appearing once."
+  );
+
+  // 7. No compiled row names a variable. The Phase 33 promise, held over the
+  // whole table so it survives the arrival of a second route.
+  p269Assert(
+    'no compiled registry row sets launch.envPassthrough',
+    p269.compiledNamers.length === 0,
+    `${data.compiledRows} rows scanned`,
+    `${p269.compiledNamers.join(', ')} names a variable in the COMPILED table. Which ` +
+      "variables an agent needs is a fact about one person's machine, so it is named by " +
+      'that person, in Settings or in agents.json, and never shipped on by default.'
+  );
+}
+
+// 8. Every catalog view carries `envKeys`, equal to that agent's compiled row.
+const p269cat = data.p269Catalog ?? { state: 'absent', missing: 'no section printed' };
+if (p269cat.state === 'absent') {
+  skipped.push(
+    'the flag catalog views were NOT checked for envKeys (Phase 269): ' +
+      `${p269cat.missing}.`
+  );
+} else if (p269cat.state === 'broken') {
+  fail(`composing the flag catalog views threw: ${p269cat.error}.`);
+} else {
+  const wrong = p269cat.rows.filter((r) => !sameList(r.envKeys, r.expected));
+  p269Assert(
+    'every flag catalog view carries its compiled env keys',
+    wrong.length === 0,
+    `${p269cat.rows.length} catalogs`,
+    `${wrong
+      .map((r) => `${r.id} carries ${JSON.stringify(r.envKeys)} rather than ${JSON.stringify(r.expected)}`)
+      .join('; ')}. The Settings window says "this agent already sets FORCE_COLOR itself" ` +
+      'from this field, so a wrong one is a sentence a person cannot act on.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Section 6 — the version probe is unreachable from the create path (Phase 49)
 // ---------------------------------------------------------------------------
 //
@@ -731,6 +917,21 @@ if (p33Rows.length === 0) {
     `\nthe configured names are ${p33.names.join(' and ')}. The sentinel value is ` +
       `${p33.sentinel.length} bytes, it was found in the pane environment, and it was found in ` +
       'no byte of the manifest record.\n'
+  );
+}
+
+process.stdout.write('\nthe settings route to a shell variable name (Phase 269)\n');
+process.stdout.write('-'.repeat(107) + '\n');
+if (p269Rows.length === 0) {
+  process.stdout.write(`  not checked: the section reported ${p269.state}.\n`);
+} else {
+  for (const row of p269Rows) {
+    process.stdout.write(`${pad(row.name, 60)} ${pad(tick(row.ok), 4)} ${row.note}\n`);
+  }
+  process.stdout.write(
+    `\n${p269.denied.length} denylisted names were derived from the three exported arrays ` +
+      'and every one of them was refused with a sentence. No value was read, resolved or ' +
+      'printed at any point: this section spawns nothing.\n'
   );
 }
 

@@ -46,6 +46,9 @@ import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { killProcessGroup, trackGuardedChild } from '../proc/guarded';
 import { gmuxError, type GmuxError } from '../errors';
+// Phase 269: the one cap on how long an environment variable name may be,
+// shared with the overlay loader so both routes read the same number.
+import { OVERLAY_LIMITS } from '@shared/agent-overlay';
 
 import { getLog } from '../log';
 // Phase 127. The harness-launch predicate, which used to be typed out here
@@ -552,6 +555,171 @@ export function captureLoginShellEnv(
       finish(true);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Login-shell env capture, NAMES ONLY (Phase 269)
+// ---------------------------------------------------------------------------
+
+/** The most names one probe will offer. A shell with more is unusual. */
+const ENV_NAMES_MAX = 512;
+
+/** What one login-shell name capture answered. NEVER a value. */
+export interface CaptureEnvNamesResult {
+  /** Names the login shell exports, sorted, de-duplicated. Never a value. */
+  names: string[];
+  /** True when the shell failed to spawn, timed out, or printed no markers. */
+  probeFailed: boolean;
+}
+
+/**
+ * Ask the user's login shell which variables it EXPORTS, by name (Phase 269).
+ *
+ * WHY THIS EXISTS. Settings then Launch defaults lets a person name the shell
+ * variables one agent needs, and making them read their own dotfiles to
+ * remember the spelling of a provider key is the kind of hunt a settings
+ * window exists to remove. This offers the names their own shell already has.
+ *
+ * THE VALUE NEVER ENTERS A TORTIE PROCESS ON THIS PATH, and that is the one
+ * thing that separates it from {@link captureLoginShellEnv} beside it. The
+ * script asks `awk` for the KEYS of its `ENVIRON` array and prints nothing
+ * else, so "names only" is a property of what the child writes down its pipe
+ * rather than of a filter this process applies afterwards. `env` and
+ * `printenv` are refused for this job precisely because both print
+ * `NAME=VALUE`, and a buffer holding a person's keys is a buffer that can be
+ * logged, thrown in an error, or read out of a crash dump.
+ *
+ * IT IS OTHERWISE THE SAME PROBE SHAPE, line for line, because that shape is
+ * what Phase 13.5.1 paid for: `spawn` with `detached: true` so the probe owns
+ * its process group, settle on the markers rather than on stdio close, an
+ * independent deadline that resolves whatever the child does, a group kill on
+ * that deadline, and the deadline cleared on `close` and never on `exit`. The
+ * marker carries a fresh 8 byte nonce per probe for the reason
+ * `captureLoginShellEnv` uses one: the framing has to survive rc output an
+ * agent could have written, and a static marker would let that output forge a
+ * record.
+ *
+ * A shell that answers with no names at all is `{ names: [], probeFailed:
+ * false }`. Only a spawn error, the deadline, or an absent marker pair is a
+ * failed probe.
+ *
+ * NEVER REJECTS, and never hangs.
+ */
+export function captureLoginShellEnvNames(
+  options: CapturePathOptions = {}
+): Promise<CaptureEnvNamesResult> {
+  const env = options.env ?? process.env;
+  const shell = options.shell ?? env['SHELL'] ?? '/bin/zsh';
+  const timeoutMs = options.timeoutMs ?? PATH_CAPTURE_TIMEOUT_MS;
+  const marker = `__GMUX_ENVN_${randomBytes(4).toString('hex')}__`;
+  const captureRe = new RegExp(`${marker}(.*?)${marker}`, 's');
+  // Every offerable name at its cap, plus room for rc noise ahead of them.
+  const maxOutput = ENV_NAMES_MAX * (OVERLAY_LIMITS.maxEnvKeyLength + 1) + 64 * 1024;
+
+  return new Promise<CaptureEnvNamesResult>((resolve) => {
+    let settled = false;
+    let out = '';
+
+    const namesIn = (text: string): string[] =>
+      [
+        ...new Set(
+          text
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(
+              (name) =>
+                ENV_NAME_RE.test(name) &&
+                name.length <= OVERLAY_LIMITS.maxEnvKeyLength
+            )
+        )
+      ]
+        .sort()
+        .slice(0, ENV_NAMES_MAX);
+
+    const finish = (probeFailed: boolean): void => {
+      if (settled) return;
+      settled = true;
+      const framed = captureRe.exec(out);
+      if (framed === null || framed[1] === undefined) {
+        resolve({ names: [], probeFailed: true });
+        return;
+      }
+      resolve({ names: namesIn(framed[1]), probeFailed });
+    };
+
+    try {
+      const script =
+        `printf '%s' '${marker}'; ` +
+        `awk 'BEGIN{for (k in ENVIRON) print k}' </dev/null; ` +
+        `printf '%s' '${marker}'`;
+      const child = spawn(shell, ['-lic', script], {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      const untrack = trackGuardedChild(child);
+
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', (chunk: string) => {
+        out += chunk;
+        // Keep the TAIL. The printfs run last, so rc noise can push itself out
+        // of the buffer but never the answer.
+        if (out.length > maxOutput) out = out.slice(out.length - maxOutput);
+        if (captureRe.test(out)) finish(false);
+      });
+      child.stdout?.on('error', () => undefined);
+      child.stderr?.on('data', () => undefined);
+      child.stderr?.on('error', () => undefined);
+
+      const deadline = setTimeout(() => {
+        tmuxLog.warn(
+          `login-shell name probe still running after ${timeoutMs} ms ` +
+            `(${shell}). Killing its process group.`
+        );
+        killProcessGroup(child);
+        finish(true);
+      }, timeoutMs);
+      child.once('close', () => {
+        clearTimeout(deadline);
+        untrack();
+        finish(false);
+      });
+      child.once('error', (err) => {
+        clearTimeout(deadline);
+        untrack();
+        tmuxLog.warn(
+          `login-shell name capture failed (${shell}): ${err.message}. ` +
+            `The field offers no suggestions.`
+        );
+        finish(true);
+      });
+    } catch (err) {
+      tmuxLog.warn(
+        `login-shell name capture threw (${shell}): ` +
+          `${(err as Error).message}. The field offers no suggestions.`
+      );
+      finish(true);
+    }
+  });
+}
+
+/**
+ * The one probe concurrent askers share, and it is NOT a cross-ask cache.
+ *
+ * Two openings of the picker at once cost one probe. A person who has just
+ * edited their shell profile and reopens the picker gets a FRESH answer,
+ * which is the whole reason there is no cache: the value of this list is that
+ * it says what the shell exports right now.
+ */
+let envNamesInFlight: Promise<CaptureEnvNamesResult> | null = null;
+
+/** Names the login shell exports, one shared probe per concurrent ask. */
+export function loginShellEnvNames(): Promise<CaptureEnvNamesResult> {
+  if (envNamesInFlight !== null) return envNamesInFlight;
+  const probe = captureLoginShellEnvNames().finally(() => {
+    if (envNamesInFlight === probe) envNamesInFlight = null;
+  });
+  envNamesInFlight = probe;
+  return probe;
 }
 
 let userPathPromise: Promise<string> | null = null;
