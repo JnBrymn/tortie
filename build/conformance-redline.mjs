@@ -1701,11 +1701,32 @@ export async function again(ctx) { const b = gmuxBridge(); const w = b.fs.writeG
       to: "if (false) return 'baselineMoved';"
     },
     {
+      // PHASE 273. The arm reads the SPLIT rather than one mapping: the one
+      // cause `outsideRoot`'s sentence describes keeps it, and the four the
+      // phase separated out take `io`, which asserts nothing. The ablation puts
+      // the shipped-before mapping back on the clause that owns the split.
       name: 'the path outside every root (E.5), surfaced by the view',
       key: 'outsideRoot',
-      expect: (a) => a.key === 'outsideRoot' && a.wroteKey === null,
-      from: "    case 'outside':\n      return 'outsideRoot';",
-      to: "    case 'outside':\n      return 'io';"
+      expect: (a) =>
+        a.key === 'outsideRoot' &&
+        a.containment === 'io' &&
+        a.protectedKey === 'io' &&
+        a.unreadableKey === 'io' &&
+        a.unknownKey === 'io' &&
+        a.wroteKey === null,
+      from: "    case 'projectClosed':\n      return 'outsideRoot';",
+      to: "    case 'projectClosed':\n      return 'io';"
+    },
+    {
+      // The other half of the same split, and it needs its own ablation
+      // because the two clauses fail in opposite directions: this one puts the
+      // sentence "is not in an open project" back on four causes that never
+      // measured it, which is the lie Phase 273 exists to remove.
+      name: 'the four split causes take io, which asserts nothing about the project',
+      key: 'outsideRoot',
+      expect: (a) => a.containment === 'io' && a.key === 'outsideRoot',
+      from: "    case 'outside':\n    case 'protected':\n    case 'unreadable':\n    case 'projectsUnknown':\n      return 'io';",
+      to: "    case 'outside':\n    case 'protected':\n    case 'unreadable':\n    case 'projectsUnknown':\n      return 'outsideRoot';"
     },
     {
       name: "the person's own insertion (A8a): rewinds AND undoes byte for byte",

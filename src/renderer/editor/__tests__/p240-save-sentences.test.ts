@@ -36,8 +36,24 @@ const PINNED: Record<SaveRefusalWord, string> = {
   // PHASE 240 FIX ROUND. `outside` reaches a person in one shape only, being a
   // tab whose project was closed under it, so the sentence names that cause and
   // the remedy rather than a containment rule nobody can act on.
-  outside:
+  //
+  // PHASE 273 REFUTED "IN ONE SHAPE ONLY" AND MOVED THE SENTENCE. At least six
+  // causes reached `outside` and this sentence was said to all of them. Issue
+  // 25 is the person who met it: his project was open, reached through a
+  // symlink, so containment refused the PATH and he read that his project was
+  // closed, on every file he ever tried to save. The sentence keeps its bytes
+  // under `projectClosed`, which is the one cause it describes, and the four
+  // words below it are the causes it used to speak for.
+  projectClosed:
     'Tortie did not save notes.md, because its project is not open — open it again and save. Nothing was written.',
+  outside:
+    'Tortie did not save notes.md, because it is not inside the project it was opened from. Nothing was written.',
+  unreadable:
+    'Tortie did not save notes.md, because a folder on the way to it could not be read — check that the folder is still there. Nothing was written.',
+  protected:
+    'Tortie did not save notes.md, because it is inside a .git folder and Tortie never writes there. Nothing was written.',
+  projectsUnknown:
+    'Tortie could not check which projects are open, so it did not save notes.md — restart Tortie and try again. Nothing was written.',
   missing:
     'Tortie did not save notes.md, because it is no longer on disk. Nothing was written.',
   readOnly:

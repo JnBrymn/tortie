@@ -199,7 +199,7 @@ const HELPER = 'electron-run.mjs';
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-const HELPER_USER_FLOOR = 133;
+const HELPER_USER_FLOOR = 134;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

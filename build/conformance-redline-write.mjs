@@ -125,9 +125,20 @@ const METHOD = 'writeGuarded';
 
 /** Each reading the probe prints, and what the shipping channel must say. */
 const MATRIX = [
-  ['outsideRoot', 'refused/outside untouched', 'refusal 1: a root Tortie does not have open'],
+  // PHASE 273. These three rows READ THE SAME WORD until this phase and that
+  // is the whole of issue 25: a root that is not open, a path that escapes and
+  // a `.git` segment are three different facts, and the channel answered
+  // `outside` to all of them, which the renderer says as "its project is not
+  // open". Two of those three sentences were false. The words come apart here,
+  // and this matrix is the executable proof that they did — a build where
+  // these three rows read alike again has put the lie back.
+  [
+    'outsideRoot',
+    'refused/projectClosed untouched',
+    'refusal 1: a root Tortie does not have open'
+  ],
   ['outsidePath', 'refused/outside untouched', 'refusal 1: a path that escapes the open root'],
-  ['dotGit', 'refused/outside untouched', 'refusal 1: .git at any depth'],
+  ['dotGit', 'refused/protected untouched', 'refusal 1: .git at any depth'],
   ['overCap', 'refused/tooLarge untouched', 'refusal 2: a file one byte over the cap, read by main itself'],
   ['atCap', 'wrote new', 'refusal 2: a file exactly at the cap is not refused'],
   ['payloadOverCap', 'refused/tooLarge untouched', 'refusal 2: new contents over the cap'],

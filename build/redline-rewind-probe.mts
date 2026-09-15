@@ -112,10 +112,24 @@ const movedBaseline = {
   )
 };
 
-// ARM 4: the path outside every root (E.5). The channel answers refused/outside
-// and the view surfaces it through rewindRefusalKey.
+// ARM 4: the path outside every root (E.5), surfaced by the view.
+//
+// PHASE 273 SPLIT THE CHANNEL'S CONTAINMENT WORD INTO FIVE and this arm moved
+// with it. `outsideRoot`'s sentence is "{name} is not in an open project, so it
+// cannot be rewound.", and the one channel answer that measures that is
+// `projectClosed` — the root resolved and matched no open project. `outside`
+// now means the path is not inside a root that IS open, which that sentence
+// would misdescribe, so it takes `io`, "could not be rewound", along with
+// `protected`, `unreadable` and `projectsUnknown`.
+//
+// Both halves are read, because a mapping that answered `io` for everything
+// would satisfy half of this arm and say nothing.
 const outsideRoot = {
-  key: rewindRefusalKey({ outcome: 'refused', why: 'outside', reason: 'x' }),
+  key: rewindRefusalKey({ outcome: 'refused', why: 'projectClosed', reason: 'x' }),
+  containment: rewindRefusalKey({ outcome: 'refused', why: 'outside', reason: 'x' }),
+  protectedKey: rewindRefusalKey({ outcome: 'refused', why: 'protected', reason: 'x' }),
+  unreadableKey: rewindRefusalKey({ outcome: 'refused', why: 'unreadable', reason: 'x' }),
+  unknownKey: rewindRefusalKey({ outcome: 'refused', why: 'projectsUnknown', reason: 'x' }),
   // and a wrote answer maps to null, so the mapping is not a constant.
   wroteKey: rewindRefusalKey({ outcome: 'wrote', sha256: 'a', bytes: 1 })
 };

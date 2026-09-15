@@ -4,6 +4,14 @@ Each commit appears once under Added, Changed or Fixed. Every bullet stays on on
 
 The operator set the style on 2026-08-23 by rewriting every entry, and it binds every entry after. An item is one or two sentences. It says what a person can now do or what no longer goes wrong, in plain words, and then stops. A limit that a person will hit goes in the same item in one clause, e.g. "Saves have no undo", and a limit nobody will hit stays in the commit body. No measured numbers unless the number is the point. No build story, no file names, no gate names. The lead paragraph says what the release is about in two or three sentences and lists nothing.
 
+## Unreleased
+
+### Fixed
+
+- A project you opened through a symbolic link now saves. Every file in one used to refuse every save with a message saying the project was not open, when it was; creating or renaming a file in such a project still does not open or follow its editor tab.
+- A save that is refused now says what actually happened — the project was closed, a folder on the way to the file could not be read, the file is inside a .git folder — instead of saying your project is not open whatever the cause, and the cause is written to Tortie's own log so a report of one can be answered.
+- A file at the top of a project whose name begins with two dots now saves. It used to be refused with that same wrong message.
+
 ## 0.106.0 (2026-09-14)
 
 This release is about two things you tell Tortie to do for you. It can save a file a moment after you stop typing, stepping aside rather than overwriting when something else has changed that file underneath you. And you can name the shell variables an agent needs — an API key for a provider, say — beside that agent's launch flags, including for an agent running on another machine, where the value comes from that machine's own shell rather than from this one.

@@ -410,13 +410,28 @@ describe('the fix round', () => {
     expect(toasts()).toEqual([]);
   });
 
+  // PHASE 273 MOVED THE WORD THIS TEST DRIVES. At this phase's parent the
+  // channel answered `outside` for a closed project AND for five other causes,
+  // and this test passed while belucid, whose project was open, read this same
+  // sentence on every save (issue 25). The cause is `projectClosed` now, the
+  // sentence is unchanged, and the pair below is the point: two different
+  // causes, two different sentences, neither claiming the other's fact.
   it('a tab whose PROJECT WAS CLOSED says so and names the remedy', async () => {
+    writeGuarded.mockResolvedValue({ outcome: 'refused', why: 'projectClosed', reason: 'x' });
+    expect(await ioOver(tabOf()).save(PATH)).toBe(false);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(patches).toEqual([]);
+    expect(toasts()).toEqual([saveRefusalSentence('projectClosed', 'notes.md')]);
+    expect(toasts()[0]).toContain('open it again and save');
+  });
+
+  it('a path the gate refused does NOT tell the person their project is closed', async () => {
     writeGuarded.mockResolvedValue({ outcome: 'refused', why: 'outside', reason: 'x' });
     expect(await ioOver(tabOf()).save(PATH)).toBe(false);
     expect(writeFile).not.toHaveBeenCalled();
     expect(patches).toEqual([]);
     expect(toasts()).toEqual([saveRefusalSentence('outside', 'notes.md')]);
-    expect(toasts()[0]).toContain('open it again and save');
+    expect(toasts()[0]).not.toContain('project is not open');
   });
 });
 

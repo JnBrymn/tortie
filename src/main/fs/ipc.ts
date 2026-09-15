@@ -11,8 +11,12 @@
  *                  files (NUL byte in the head) are refused with a
  *                  friendly FS_FAILED                            [editor]
  *   - fs:writeFile ⌘S save from the editor                       [editor]
- *   - fs:writeGuarded compare-and-swap write for the redline's rewind
- *                  (Phase 226; guarded-write.ts owns the rules)  [redline]
+ *   - fs:writeGuarded compare-and-swap write for the redline's rewind and for
+ *                  every ⌘S inside a project (Phase 226; guarded-write.ts owns
+ *                  the rules). It is the ONE handler here that writes a log
+ *                  line: Phase 273 logs the refusal word, the guard's own
+ *                  reason, the root and the path for a write that was refused,
+ *                  and never a byte of the file.               [redline/editor]
  *   - fs:openExternalPath  hand ONE path to macOS (Phase 247). It is the only
  *                  thing here that lets a path an AGENT wrote reach
  *                  LaunchServices, and main re-asks the whole door sequence
@@ -38,6 +42,13 @@ import type { FsDirEntry, ReadFileResult } from '@shared/types';
 // asks the same number this file truncates at, and there is still one number.
 import { READ_CAP_BYTES } from '@shared/fs-ops';
 import { gmuxError } from '../errors';
+// PHASE 273. The ONE log call in this domain, and it is here rather than in
+// guarded-write.ts for a mechanical reason: build/redline-write-probe.mts
+// loads the SHIPPING guarded-write.ts under plain node, and src/main/log
+// imports electron, so a log call in that module would make
+// `conformance:redline-write` unable to load the channel at all. The module's
+// own header already refuses it in its own words.
+import { logEvent } from '../log';
 import { handle } from '../typed-ipc';
 import type { FileOpsDeps } from './file-ops';
 import { createFileOps } from './file-ops';
@@ -272,9 +283,46 @@ export function registerFsIpc(
   // decode check and the no-follow swap all live in guarded-write.ts, which
   // the conformance gate runs under node. It answers a word and never throws
   // for a refusal. Nothing in the renderer calls it until Phase 227.
-  handle(ipc, 'fs:writeGuarded', (_e, input) =>
-    writeGuarded({ listProjectRoots: () => fsDeps.listProjectRoots() }, input)
-  );
+  //
+  // PHASE 273 ADDED THE ONE LINE THE CHANNEL ALREADY KNEW AND NEVER SAID.
+  // `refused()` has carried a `reason` — the guard's own sentence — across IPC
+  // since Phase 226, and nothing read it: not save-write.ts, not
+  // save-sentences.ts, not tab-io.ts, and not this handler. So a person could
+  // report "Tortie did not save README.md, because its project is not open"
+  // and there was nothing on the machine that said which of six causes it was.
+  // Issue 25 took six messages for that reason. This makes the next one
+  // answerable in one.
+  //
+  // FOUR FIELDS, AND A FIFTH IS A DEFECT. Never `input.contents`, never
+  // `input.expect` (a sha256 of a short document is a fingerprint of it, and a
+  // digest tells a reader nothing they can act on), never a byte length, never
+  // an excerpt of either side. The path may be written because write-time
+  // redaction turns the home prefix into `~` before it reaches the file, and
+  // this call site arranges nothing for that.
+  //
+  // Only `refused` is logged. `stale` is the compare-and-swap working and
+  // already opens a dialog, and `wrote` would put a line in the file per auto
+  // save tick. `warn` rather than `error`, because `readOnly` and `tooLarge`
+  // are ordinary answers to ordinary files.
+  //
+  // The `typeof` guards are load-bearing rather than defensive: `refused/input`
+  // is answered precisely when `root` or `path` is not a string, so those are
+  // the refusals where reading them as strings would be the guess.
+  handle(ipc, 'fs:writeGuarded', async (_e, input) => {
+    const result = await writeGuarded(
+      { listProjectRoots: () => fsDeps.listProjectRoots() },
+      input
+    );
+    if (result.outcome === 'refused') {
+      logEvent('fs', 'warn', 'fs.save.refused', 'a guarded write was refused', {
+        why: result.why,
+        reason: result.reason,
+        root: typeof input?.root === 'string' ? input.root : null,
+        path: typeof input?.path === 'string' ? input.path : null
+      });
+    }
+    return result;
+  });
 
   // ----- Phase 247 the one door that leaves Tortie ------------------------
   // Thin on purpose, and thinner than every block above it. Nothing is decided

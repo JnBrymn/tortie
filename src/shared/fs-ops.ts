@@ -326,19 +326,46 @@ export interface FsGuardedWriteInput {
  * Why a guarded write did not happen. Each is a word so the caller can say
  * the right sentence, and `reason` beside it is that sentence already written.
  *
- *  - `input`     a field was missing or malformed
- *  - `outside`   the root is not open, the path escapes it, or it names `.git`
- *  - `missing`   there is no file at that path
- *  - `link`      the file is a symbolic link; Tortie will not turn it into a file
- *  - `readOnly`  the file's owner write bit is clear; a person marked it read-only
- *  - `tooLarge`  the file, or the new contents, is over READ_CAP_BYTES
- *  - `notUtf8`   decoding the file produced a U+FFFD the bytes do not contain
- *  - `raced`     something replaced the file between the read and the swap
- *  - `io`        the operating system refused a step; `reason` carries which
+ * PHASE 273 SPLIT THE CONTAINMENT WORD INTO FIVE, AND THAT IS THE WHOLE OF
+ * THIS BLOCK'S HISTORY. `outside` used to carry every throw from the two path
+ * guards, and the sentence a person read for all of them asserted ONE of
+ * them: that their project was not open. Issue 25 is a person whose project
+ * WAS open, reached through a symlink, reading that sentence on every save he
+ * ever tried. So the causes are words now, one per remedy, and the word a
+ * guard stamped is the word the channel answers:
+ *
+ *  - `input`           a field was missing or malformed, by the caller or by a
+ *                      path it composed (a NUL byte, an empty segment)
+ *  - `outside`         containment: the path is not inside the real root. The
+ *                      renderer composed it, so there is no remedy a person
+ *                      can act on and the sentence names none
+ *  - `projectClosed`   the root resolved and matches no OPEN project. This is
+ *                      the one cause `outside`'s old sentence described, and
+ *                      that sentence moved here byte for byte
+ *  - `unreadable`      a realpath on the way to the file threw: a folder gone,
+ *                      a disk ejected, a permission, a stalled mount. The
+ *                      errno is in the log and never in the word
+ *  - `protected`       the path names `.git` at any depth, and Tortie never
+ *                      writes there. It does NOT merge into `outside`: a file
+ *                      under `.git` IS inside the project, and saying it is
+ *                      not would be the lie this split exists to stop
+ *  - `projectsUnknown` Tortie could not read its own list of open projects, so
+ *                      it never got as far as asking whether this one is open
+ *  - `missing`         there is no file at that path
+ *  - `link`            the file is a symbolic link; Tortie will not turn it into a file
+ *  - `readOnly`        the file's owner write bit is clear; a person marked it read-only
+ *  - `tooLarge`        the file, or the new contents, is over READ_CAP_BYTES
+ *  - `notUtf8`         decoding the file produced a U+FFFD the bytes do not contain
+ *  - `raced`           something replaced the file between the read and the swap
+ *  - `io`              the operating system refused a step; `reason` carries which
  */
 export type FsGuardedWriteRefusal =
   | 'input'
   | 'outside'
+  | 'projectClosed'
+  | 'unreadable'
+  | 'protected'
+  | 'projectsUnknown'
   | 'missing'
   | 'link'
   | 'readOnly'

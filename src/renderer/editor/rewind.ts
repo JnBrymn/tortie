@@ -327,13 +327,34 @@ export function planRewind(input: RewindInput): RewindPlan {
  * word so ./redline-copy can hand a person the right sentence; a reason with
  * no dedicated word falls to `io`, which is the sentence for "the system
  * refused a step" (research 83 E.5).
+ *
+ * PHASE 273 SPLIT THE CHANNEL'S CONTAINMENT WORD INTO FIVE, AND THE FOUR NEW
+ * ONES ARE WRITTEN AS EXPLICIT CASES ON PURPOSE. `outsideRoot`'s sentence is
+ * "{name} is not in an open project, so it cannot be rewound." — the redline's
+ * own spelling of the claim the save family just stopped making. Letting the
+ * new words fall into `default:` would have been quieter and would have put
+ * this phase's own lie back on the redline's surface, so:
+ *
+ *  - `projectClosed` is the one cause `outsideRoot` describes, so it keeps it;
+ *  - `outside`, `protected`, `unreadable` and `projectsUnknown` take `io`,
+ *    "{name} could not be rewound.", which asserts nothing and is true of all
+ *    four.
+ *
+ * No new redline sentence is written. A rewind is a gesture a person repeats
+ * rather than a save they are mid-way through, so "could not be rewound" is
+ * enough; the cause is in the `fs.save.refused` log line either way.
  */
 export function rewindRefusalKey(result: FsGuardedWriteResult): RewindRefusal | null {
   if (result.outcome === 'wrote') return null;
   if (result.outcome === 'stale') return 'stale';
   switch (result.why) {
-    case 'outside':
+    case 'projectClosed':
       return 'outsideRoot';
+    case 'outside':
+    case 'protected':
+    case 'unreadable':
+    case 'projectsUnknown':
+      return 'io';
     case 'notUtf8':
       return 'decodeLoss';
     case 'tooLarge':

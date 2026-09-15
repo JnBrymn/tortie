@@ -93,6 +93,28 @@
  *      takes the other branch and sees a dirty tab, and a SINGLE character
  *      never saved at all. It is one line, in one direction, and it is exactly
  *      the kind of thing a later round moves back.
+ *  15. THE SENTENCE THAT WAS RIGHT KEEPS ITS BYTES, UNDER THE WORD THAT IS
+ *      TRUE OF IT (Phase 273). "because its project is not open" was written
+ *      for a project that was closed and was said to six different causes,
+ *      which is issue 25. It moves to `projectClosed` byte for byte, is said
+ *      under no other word, and `outside` stops claiming a project is closed.
+ *  16. THE WORD COMES FROM THE GUARD THAT THREW. The containment catch in
+ *      src/main/fs/guarded-write.ts reads the stamp src/main/fs/paths.ts
+ *      writes, and anything unstamped is `projectsUnknown`, which blames
+ *      Tortie rather than the person's project. The fallback is a DEFAULT and
+ *      not a list, because a list rots the first time a cause grows a sixth
+ *      failure.
+ *  17. THE REFUSAL LOG LINE IS FOUR FIELDS AND NAMES NO BYTE OF THE FILE. The
+ *      `reason` the channel has computed since Phase 226 crossed IPC unread,
+ *      which is why issue 25 took six messages. It reaches a local log now
+ *      with `why`, `reason`, `root` and `path` and nothing else — never the
+ *      contents, and never `expect`, because a sha256 of a short document is a
+ *      fingerprint of it.
+ *
+ * THIS GATE READS TWO MAIN-SIDE FILES SINCE PHASE 273, and that is deliberate:
+ * the word a person meets is decided in src/main/fs/guarded-write.ts and
+ * logged in src/main/fs/ipc.ts, and a sentence map that is honest above a
+ * catch that is not has separated nothing.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -111,6 +133,12 @@ const SAVE_WRITE = 'src/renderer/editor/save-write.ts';
 const SENTENCES = 'src/renderer/editor/save-sentences.ts';
 const AUTO_SAVE = 'src/renderer/editor/auto-save.ts';
 const EDITOR_STORE = 'src/renderer/editor/store.ts';
+// PHASE 273. The two MAIN-side files rules 16 and 17 read. This gate has only
+// ever read the renderer, and it reads them now because the word a person
+// meets is decided in one and logged in the other, and a sentence map that is
+// honest above a catch that is not has separated nothing.
+const GUARDED_WRITE = 'src/main/fs/guarded-write.ts';
+const FS_IPC = 'src/main/fs/ipc.ts';
 
 const source = (rel) => stripComments(readFileSync(join(repoRoot, rel), 'utf8'));
 
@@ -1109,6 +1137,160 @@ const WRITE_CHANNELS = ['fs:writeFile', 'fs:writeGuarded'];
     fail('14. markDirty arms the auto save before it patches the tab, so the skip list is asked about a tab that is still clean');
   } else {
     say('14. markDirty patches the tab before it arms the timer, so the skip list is asked about the tab the store holds');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 15. The sentence that was right keeps its bytes, under the word that is
+// true of it.
+//
+// PHASE 273. `outside` carried six causes and its sentence asserted one of
+// them: "because its project is not open". For a project that IS open and a
+// path the gate refused, which is issue 25, that sentence was false twice — the
+// project was open and the refusal was about the path. The repair is not new
+// prose. The sentence was written for a closed project and is right for one, so
+// it MOVES to `projectClosed` byte for byte, and `outside` gets a sentence that
+// names no cause it did not measure. This rule holds both halves: the bytes did
+// not drift in the move, and the old string is not left sitting under any other
+// key.
+// ---------------------------------------------------------------------------
+
+const PROJECT_CLOSED_SENTENCE =
+  'Tortie did not save {name}, because its project is not open — open it again and save. Nothing was written.';
+
+{
+  const sentences = source(SENTENCES);
+  const map = /const SENTENCES: Record<SaveRefusalWord, string> = \{([\s\S]*?)\n\};/.exec(sentences);
+  if (map === null) {
+    fail('15. could not read the sentence map');
+  } else {
+    // Each `word: 'sentence'` pair, however the formatter broke the line.
+    const pairs = new Map(
+      [...map[1].matchAll(/^\s{2}([A-Za-z0-9]+):\s*\n?\s*'((?:[^'\\]|\\.)*)'/gm)].map((m) => [
+        m[1],
+        m[2]
+      ])
+    );
+    const got = pairs.get('projectClosed');
+    if (got === undefined) {
+      fail('15. the sentence map has no projectClosed entry, so the cause the old sentence described has no word');
+    } else if (got !== PROJECT_CLOSED_SENTENCE) {
+      fail(
+        '15. projectClosed does not say what shipped as outside, byte for byte — the phase rewrote the one sentence it already got right'
+      );
+    } else {
+      const elsewhere = [...pairs.entries()]
+        .filter(([word, text]) => word !== 'projectClosed' && text === PROJECT_CLOSED_SENTENCE)
+        .map(([word]) => word);
+      if (elsewhere.length > 0) {
+        fail(
+          `15. the closed-project sentence is also said under ${elsewhere.join(', ')}, so a cause that is not a closed project still claims to be one`
+        );
+      } else if (pairs.get('outside') === undefined || /project is not open/.test(pairs.get('outside'))) {
+        fail('15. outside still tells a person their project is not open, which is the claim this phase stopped making');
+      } else {
+        say(
+          '15. the closed-project sentence moved to projectClosed byte for byte, is said under no other word, and outside no longer claims a project is closed'
+        );
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 16. The word comes from the guard that threw, and the fallback is the
+// one that blames Tortie rather than the person.
+//
+// PHASE 273. The catch reads the stamp `src/main/fs/paths.ts` writes, through
+// `fsPathRefusalOf`, and anything UNSTAMPED is `projectsUnknown` — the only
+// thing in that try which is not a path guard is `deps.listProjectRoots()`, and
+// a failure to read Tortie's own project list is not a fact about the person's
+// file. The fallback is a DEFAULT and not an enumerated list on purpose, and
+// this rule asks for that too: a literal list of causes in the catch is a list
+// that rots the first time one of them grows a sixth failure.
+// ---------------------------------------------------------------------------
+
+{
+  const code = source(GUARDED_WRITE);
+  const body = functionBodyOf(code, 'writeGuarded');
+  if (body === null) {
+    fail(`16. ${GUARDED_WRITE} declares no writeGuarded, so this rule read nothing`);
+  } else {
+    const at = body.indexOf('resolveInsideRoot');
+    const catchAt = at === -1 ? -1 : body.indexOf('catch (err) {', at);
+    const open = catchAt === -1 ? -1 : body.indexOf('{', catchAt);
+    const arm = open === -1 ? null : blockAt(body, open);
+    if (arm === null) {
+      fail('16. could not find the containment catch in writeGuarded');
+    } else if (!/fsPathRefusalOf\(/.test(arm)) {
+      fail(
+        "16. the containment catch does not ask fsPathRefusalOf, so it is answering one word for every cause again — that is issue 25"
+      );
+    } else if (!/'projectsUnknown'/.test(arm)) {
+      fail("16. the containment catch's fallback word is not projectsUnknown");
+    } else if (/\?\?\s*'outside'/.test(arm) || /\?\?\s*'projectClosed'/.test(arm)) {
+      fail(
+        '16. the containment catch falls back to a word about the PERSON\'s project for a throw it cannot attribute'
+      );
+    } else if (/'projectClosed'|'protected'|'unreadable'/.test(arm)) {
+      fail(
+        '16. the containment catch enumerates the causes instead of reading the stamp, so a cause added later would be answered by the fallback'
+      );
+    } else {
+      say(
+        '16. the containment catch reads the guard\'s stamp and defaults to projectsUnknown, with no literal list of causes in it'
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 17. The log line is four fields and names no byte of the file.
+//
+// PHASE 273. The `reason` the channel computes has crossed IPC unread since
+// Phase 226, which is why issue 25 took six messages. It reaches a local log
+// now, and the thing that makes that safe is what it does NOT carry: not the
+// contents, and not `expect`, because a sha256 of a short document is a
+// fingerprint of it and a digest tells a reader nothing they can act on.
+// ---------------------------------------------------------------------------
+
+{
+  const code = source(FS_IPC);
+  const at = code.indexOf("'fs:writeGuarded'");
+  const arrow = at === -1 ? -1 : code.indexOf('=>', at);
+  const open = arrow === -1 ? -1 : code.indexOf('{', arrow);
+  const handler = open === -1 ? null : blockAt(code, open);
+  if (handler === null) {
+    fail(`17. ${FS_IPC} registers no fs:writeGuarded handler this rule can read`);
+  } else if (!/logEvent\(/.test(handler)) {
+    fail('17. the fs:writeGuarded handler logs nothing, so a refusal is still unanswerable from the machine it happened on');
+  } else {
+    // The fields are the last argument, so the first `{` after the call's own
+    // opening paren is the object this rule reads. The four arguments before
+    // it are string literals, which stripComments leaves alone and which
+    // therefore cannot carry a brace into this search.
+    const callAt = handler.indexOf('logEvent(');
+    const fieldsOpen = handler.indexOf('{', callAt + 'logEvent('.length);
+    const fields = fieldsOpen === -1 ? null : blockAt(handler, fieldsOpen);
+    if (fields === null) {
+      fail('17. could not read the log line\'s fields');
+    } else {
+      const names = [...fields.matchAll(/^\s*([A-Za-z0-9_]+):/gm)].map((m) => m[1]).sort();
+      const want = ['path', 'reason', 'root', 'why'];
+      if (names.join(',') !== want.join(',')) {
+        fail(
+          `17. the log line carries ${names.join(', ') || 'nothing'} rather than exactly ${want.join(', ')}`
+        );
+      } else if (/\bcontents\b/.test(handler) || /\bexpect\b/.test(handler)) {
+        fail(
+          '17. the fs:writeGuarded handler names contents or expect, so a log line can carry the bytes or a fingerprint of them'
+        );
+      } else if (!/'refused'/.test(handler)) {
+        fail('17. the handler does not restrict the line to a refusal, so a wrote or a stale would write one too');
+      } else {
+        say('17. the refusal log line carries exactly why, reason, root and path, and the handler names neither contents nor expect');
+      }
+    }
   }
 }
 

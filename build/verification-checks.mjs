@@ -282,6 +282,13 @@ export const CHECKS = [
   // never called by anything it runs, because electron is not in the probe's
   // module graph at all.
   pure('conformance:pathdoors'),
+  // Phase 273. The containment gate every fs mutation asks:
+  // build/conformance-containment.mjs drives the SHIPPING src/main/fs/paths.ts
+  // under node over a fixture the probe builds and removes in a finally — the
+  // phase's escape checklist, row by row — then over ten ablated copies of the
+  // guard, one clause each, each naming the rows it owns. It launches no
+  // Electron and reads nothing under the person's home.
+  pure('conformance:containment'),
   pure('conformance:filehistory'),
   pure('conformance:historysearch'),
   // Phase 202. The logins domain: it runs build/conformance-logins.mjs, which
@@ -1017,6 +1024,28 @@ export const CHECKS = [
   // and proves each reddens the rule that owns it — then restores the tree in
   // a finally block. It launches no Electron and starts no process but node.
   pure('ablation:p268'),
+  // PHASE 273's attack on the other half. It breaks conformance:save five
+  // ways, one clause each — the moved sentence reworded, that sentence put
+  // back on `outside` as well, the parent's one-word containment catch, the
+  // causes enumerated in that catch instead of read off the stamp, and the
+  // file's bytes in the refusal log line — and proves each reddens the rule
+  // that owns it, then restores all three source files in a finally block. It
+  // launches no Electron and starts no process but node.
+  pure('ablation:p273'),
+  // PHASE 273's app run, and the reading the phase exists for. ONE Electron on
+  // a scratch profile and a scratch HOME, over a project the probe builds and
+  // then opens THROUGH A REAL SYMLINK — belucid's shape, issue 25. Seven arms:
+  // the tab really carries the alias spelling, ⌘S writes and the bytes are read
+  // back off disk at the REAL path, a second save runs the compare-and-swap
+  // through the alias too, the Explorer's New Folder / New File / Rename /
+  // Trash all land, an escaping path and a .git path are still refused and now
+  // say `outside` and `protected` where the parent said one word for both, the
+  // refusal log line carries exactly four fields with the home redacted, and
+  // the operator's own tmux server is counted before and after. P273_PARENT_BUILD
+  // points it at a build of the parent commit for the before-and-after; the
+  // expectations never flip, so the findings ARE the parent reading. It spawns
+  // no agent and spends no token.
+  electron('probe:p273'),
   // PHASE 261 item 1. The harness socket refusal, DRIVEN. ONE Electron at a
   // time, never two, on a scratch profile with a scratch HOME under its own
   // GMUX_HARNESS_DIR and the socket gmux-p261-<pid>. Five arms: the real app

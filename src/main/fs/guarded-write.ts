@@ -22,7 +22,14 @@
  *  1. The input is checked for shape.                          `refused/input`
  *  2. The root must be a project Tortie has open, through the SAME gate
  *     `fs:createFile`, `fs:rename`, `fs:move` and `fs:trash` ask, and the path
- *     must resolve inside it with `.git` refused at any depth.  `refused/outside`
+ *     must resolve inside it with `.git` refused at any depth. Phase 273 made
+ *     this step answer the word the GUARD stamped rather than one word for
+ *     everything it can refuse: `refused/projectClosed` for a root that is no
+ *     open project, `refused/outside` for a path that is not inside it,
+ *     `refused/protected` for `.git`, `refused/unreadable` for a realpath that
+ *     threw, `refused/input` for a malformed path, and
+ *     `refused/projectsUnknown` when Tortie could not read its own project
+ *     list at all.
  *  3. The file is opened for reading with `O_NOFOLLOW`, so a link at the
  *     path is a file that is not there, and with `O_NONBLOCK`, because the
  *     open runs on main's thread and `open(2)` of a NAMED PIPE with no writer
@@ -159,7 +166,7 @@ import type {
 import { READ_CAP_BYTES } from '@shared/fs-ops';
 import { sha256Of } from '../durable/write';
 import { gmuxErrorPayloadOf } from '../errors';
-import { resolveInsideRoot, resolveOpenProjectRoot } from './paths';
+import { fsPathRefusalOf, resolveInsideRoot, resolveOpenProjectRoot } from './paths';
 
 /** The suffix of the staged copy. Tortie's own; grep the product for it. */
 export const GUARDED_SWAP_SUFFIX = '.tortie-swap';
@@ -362,12 +369,37 @@ export async function writeGuarded(
   }
 
   // 2. Containment, through the gate every other mutation asks.
+  //
+  // PHASE 273. This catch used to answer `outside` for everything that came
+  // out of the two guards, and the sentence the renderer says for `outside`
+  // asserts that the person's project is not open. At least six causes land
+  // here and exactly one of them is that. Issue 25 is the bill: a project
+  // opened through a symlink failed CONTAINMENT and the person was told his
+  // project was closed, on every file, forever.
+  //
+  // So the word comes from the guard that threw rather than from where the
+  // throw was caught. `fsPathRefusalOf` reads the stamp `paths.ts` writes on
+  // its own refusals and answers null for anything else, and `reason` is
+  // unchanged — it is the sentence the guard already wrote, and step V9 in
+  // src/main/fs/ipc.ts is what finally puts it in a log.
   let abs: string;
   try {
     const realRoot = await resolveOpenProjectRoot(input.root, () => deps.listProjectRoots());
     abs = (await resolveInsideRoot(realRoot, input.path)).abs;
   } catch (err) {
-    return refused('outside', sentenceOf(err));
+    // THE DEFAULT IS TOTAL, AND THAT IS WHY IT IS A DEFAULT AND NOT A LIST.
+    // Every throw inside src/main/fs/paths.ts goes through one stamping
+    // factory, so a stamped error is one of that module's five words and an
+    // UNSTAMPED one cannot have come from it. The only other thing this try
+    // can call is `deps.listProjectRoots()`, which is a lazy dynamic import
+    // (src/main/fs/ipc.ts) plus `getGmuxCore()` plus two SQLite reads
+    // (src/main/manifest/projects-repository.ts). All of those are Tortie
+    // failing to read its OWN list, which is not a fact about the person's
+    // file and must never be reported as one. Enumerating them here would
+    // rot the first time one of them grew a sixth failure; asking the stamp
+    // cannot.
+    const stamped = fsPathRefusalOf(err);
+    return refused(stamped ?? 'projectsUnknown', sentenceOf(err));
   }
 
   const name = basename(abs);

@@ -83,17 +83,60 @@ const SENTENCES: Record<SaveRefusalWord, string> = {
   // asks the open list. So the sentence names that cause and the remedy, in
   // the same two sentences the family uses.
   //
-  // THE CHANNEL HAS A SECOND ROUTE TO THIS WORD AND NOTHING CAN REACH IT.
-  // `resolveInsideRoot` also refuses a path holding the segment `.git` at any
-  // depth, and `guarded-write.ts` turns every throw from that block into
-  // `outside`, so a tab on a file under `.git` would read this sentence and it
-  // would be false. No gesture in this product opens one: the Explorer refuses
-  // the segment in `tree-paths.ts`, and search and quick open walk with
-  // ripgrep, which skips `.git` on its own. If a later round ever opens one,
-  // this sentence is what has to move, and the renderer already knows the open
-  // projects, so telling the two apart is a lookup rather than a new channel.
-  outside:
+  // PHASE 273 MOVED IT FROM `outside` TO `projectClosed`, BYTE FOR BYTE, AND
+  // THE MOVE IS THE FIX. The paragraph above was right about its cause and
+  // wrong about which word carried it. `guarded-write.ts` answered `outside`
+  // for every throw the two path guards make — a root that is no open project,
+  // a path that escapes, a `.git` segment, a realpath that threw, a malformed
+  // path, and Tortie failing to read its own project list — and this sentence
+  // asserted the first of them to all six. Issue 25 is the bill: belucid's
+  // project was OPEN, reached through a symlink, so the containment check
+  // refused the path and he read this sentence on every file he ever tried to
+  // save. The sentence is not reworded, because for the cause it names it was
+  // already right; it just stopped being said about the other five.
+  //
+  // THE SECOND ROUTE THE PARAGRAPH BELOW WORRIED ABOUT IS NOW ITS OWN WORD.
+  // `.git` is `protected` and says so, so the argument about whether any
+  // gesture can open one no longer has to hold this sentence up.
+  projectClosed:
     'Tortie did not save {name}, because its project is not open — open it again and save. Nothing was written.',
+  // PHASE 273. What is left on `outside` is containment alone: the path is not
+  // inside the real root of the project it was opened from. THE SENTENCE NAMES
+  // NO REMEDY BECAUSE THERE IS NONE — the renderer composed this path from a
+  // root it also chose, so a person did nothing to cause it and can do nothing
+  // to clear it. After the containment repair a person should never meet this
+  // word at all; if one does, it is a bug report, and the `fs.save.refused`
+  // log line in src/main/fs/ipc.ts carries the root, the path and the reason
+  // that answers it. A sentence that cannot name a remedy is better than one
+  // that guesses a cause, and this is the sentence that rule is written for.
+  outside:
+    'Tortie did not save {name}, because it is not inside the project it was opened from. Nothing was written.',
+  // PHASE 273. One word for two throw sites, and they are one cause to a
+  // person: something between Tortie and the file could not be read. It covers
+  // a folder that is gone, a disk ejected, a permission changed, a TCC denial
+  // and a mount that has stalled, and it asserts none of them — the errno is
+  // in the log, where somebody can act on it, and not in the sentence, where
+  // guessing wrong is the defect this phase exists to remove.
+  unreadable:
+    'Tortie did not save {name}, because a folder on the way to it could not be read — check that the folder is still there. Nothing was written.',
+  // PHASE 273. It does NOT merge into `outside`, even though the remedy is the
+  // same — none — because the merged sentence would be FALSE. A file under
+  // `.git` IS inside its project, and telling a person it is not is exactly the
+  // lie this split exists to stop. Same remedy merges, unless the merged
+  // sentence would assert something that was not measured.
+  protected:
+    'Tortie did not save {name}, because it is inside a .git folder and Tortie never writes there. Nothing was written.',
+  // PHASE 273, and it is the only sentence in this map that does not begin
+  // "Tortie did not save {name}". That is the design. This word is answered
+  // when Tortie could not read its OWN list of open projects — a lazy import
+  // that failed, a core that never booted, a SQLite read that threw — so it
+  // never got as far as asking whether this project is open. Saying it is not
+  // open would be a lie about the person's world to cover a fault in Tortie's.
+  // The meetable one is concrete: on a machine where tmux cannot be found the
+  // core re-runs boot on every call and every save read "its project is not
+  // open".
+  projectsUnknown:
+    'Tortie could not check which projects are open, so it did not save {name} — restart Tortie and try again. Nothing was written.',
   missing:
     'Tortie did not save {name}, because it is no longer on disk. Nothing was written.',
   readOnly:
