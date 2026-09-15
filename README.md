@@ -119,12 +119,13 @@ The conversation stays word for word. An optional model can write only the one-l
 
 ## Supported agents
 
-Tortie includes **12 built-in CLI agent profiles** you can run in durable sessions.
+Tortie includes **13 built-in CLI agent profiles** you can run in durable sessions.
 
 <p>
   <a href="https://code.claude.com/docs/en/setup"><kbd><img src="src/renderer/assets/agents/claude.svg" alt="Claude Code logo" width="16" valign="middle" /> Claude Code</kbd></a> &nbsp;
   <a href="https://learn.chatgpt.com/docs/codex/cli"><kbd><img src="src/renderer/assets/agents/codex.svg" alt="Codex logo" width="16" valign="middle" /> Codex</kbd></a> &nbsp;
   <a href="https://cursor.com/docs/cli/installation"><kbd><img src="src/renderer/assets/agents/cursor.svg" alt="Cursor CLI logo" width="16" valign="middle" /> Cursor CLI</kbd></a> &nbsp;
+  <a href="https://opencode.ai/docs/"><kbd><img src="src/renderer/assets/agents/opencode.svg" alt="opencode logo" width="16" valign="middle" /> opencode</kbd></a> &nbsp;
   <a href="https://geminicli.com/docs/get-started/installation"><kbd><img src="src/renderer/assets/agents/gemini.svg" alt="Gemini CLI logo" width="16" valign="middle" /> Gemini CLI</kbd></a> &nbsp;
   <a href="https://github.com/QwenLM/qwen-code"><kbd><img src="src/renderer/assets/agents/qwen.svg" alt="Qwen Code logo" width="16" valign="middle" /> Qwen Code</kbd></a> &nbsp;
   <a href="https://tortie.sh/docs/supported-agents/#launchable-agents"><kbd><img src="src/renderer/assets/agents/muse.svg" alt="Muse Code logo" width="16" valign="middle" /> Muse Code</kbd></a> &nbsp;
@@ -149,6 +150,7 @@ Need another CLI? [Add it with one JSON file](https://github.com/gregce/tortie/b
 - **A decorated file tree.** See Git status colors and familiar file icons, then drag files in from Finder or out to another app.
 - **Search everything at once.** ripgrep across every open project, fast on large trees.
 - **Rich previews.** Markdown and HTML render in place. Untrusted pages open in a sandboxed frame with no scripts and no network.
+- **Read an agent's prose edits as a redline.** Open a Markdown or text file in the Redline tab and every change since the last commit is marked up in place, the way you would mark up a document. For a file git does not know, it marks everything since you opened it. It redraws itself when an agent writes to the file. Point at one change, press a key, and that phrase alone goes back while every other edit stands — or accept them all. You can type in the redline too.
 - **Context for every agent.** See each agent's skills, MCP servers, hooks, plugins and instruction files, and install skills through Skills.sh.
 
 ### Remote machines (early)
@@ -185,6 +187,8 @@ scratch. The code it owns is the durability layer and the glue.
 - [xterm.js](https://github.com/xtermjs/xterm.js) draws the terminals.
 - [Monaco](https://github.com/microsoft/monaco-editor) is the editor, the same one inside VS Code.
 - [Pierre](https://pierre.co/)'s [@pierre/trees](https://www.npmjs.com/package/@pierre/trees) and [@pierre/diffs](https://www.npmjs.com/package/@pierre/diffs) render the file tree and the diffs.
+- [markdown-it](https://github.com/markdown-it/markdown-it) renders the Markdown previews, and [Shiki](https://github.com/shikijs/shiki) highlights the code inside them.
+- [jsdiff](https://github.com/kpdecker/jsdiff) finds the changed words, which is what the redline draws.
 - [ripgrep](https://github.com/BurntSushi/ripgrep) runs the search.
 - [VS Code](https://github.com/microsoft/vscode) is the source of the vendored git parsers, fuzzy scorer, commit graph layout and [codicons](https://github.com/microsoft/vscode-codicons), all with attribution.
 - [material-icon-theme](https://github.com/material-extensions/vscode-material-icon-theme) supplies the file icons.

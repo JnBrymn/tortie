@@ -129,8 +129,13 @@ MIT Licence
   fuzzysort                           Stephen Kamenar
   react-markdown, remark-gfm,
   rehype-raw, rehype-sanitize         Titus Wormer
+  markdown-it                         Vitaly Puzrin and Alex Kocharin
   @shikijs/rehype                     Pine Wu and Anthony Fu
   @parcel/watcher                     Devon Govett
+
+ISC Licence
+
+  markdown-it-task-lists              Revin Guillen
 
 Three clause BSD Licence
 
