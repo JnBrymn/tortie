@@ -27355,6 +27355,131 @@ recorded limit and stays its own follow-up. Nothing here makes a machine connect
 probe runs on a create the person asked for.
 
 
+## Phase 271 — what every agent can actually do, measured against what we say it can (operator, 2026-09-14)
+
+**Subject.** `research(agents): the capability matrix, as built against as documented`
+
+**First body line.** `Phase 271: the agent capability matrix`
+
+**Semver.** None. This phase writes `docs/research/123-agent-capability-matrix.md` and changes no
+shipping byte. A repair phase reads it afterwards and that phase carries the version.
+
+**Tier 3, and the reason is the tier rule's own second clause.** "Does it claim to work across every
+agent, machine or provider? Tier 3, and the evidence is a per row matrix over real data." This phase
+IS that matrix. It is also the phase most able to produce a confident fiction, because every fact it
+reports is available by reading a file, and the governing rule exists precisely because reading code
+and reasoning about it has caught nothing, all day, ever, in this repository's recorded history.
+
+**Charter.** The operator asked for this on 2026-09-14, in his words: a matrix of support for each
+agent in terms of WHAT actually exists in the code, compared with what the docs say. He pasted the
+thirteen lines tortie.sh currently publishes and said what he wants to be true of all of them —
+"ideally for EVERY agent the full suite of capabilities re: launch, activity, resume, attachments,
+catch me up, etc is all working and identical". The published lines are the claim side of the
+comparison and they are reproduced verbatim in the research document so a later reader can see what
+was being checked rather than take it on trust:
+
+| Agent | What tortie.sh said on 2026-09-14 |
+| --- | --- |
+| Claude Code | Launch, activity, resume, attachments, and Catch Me Up integration. |
+| Cursor CLI | Launchable terminal agent. Some attachment behavior is inferred. |
+| Codex CLI | Launch, activity, resume, attachments, and Catch Me Up integration. |
+| Gemini CLI | Launch and resume machinery exist; full resume round-trip remains unproven. |
+| Factory Droid CLI | Early. Launch exists; resume capture remains unverified. |
+| CodeWhale | Launchable terminal agent. |
+| Antigravity CLI | Development status; support depth is still being measured. |
+| Muse Code | Launchable terminal agent. |
+| Qwen Code | Launchable; safe resume depends on the original project directory. |
+| Pi | Launchable; safe resume depends on the original project directory. |
+| Oh My Pi | Launchable; the pi successor. Resumes from any directory, and joins Catch Me Up. |
+| Grok | Launch and Catch Me Up integration; no SpecStory capture provider. |
+| opencode | Launch, resume, and restore. No SpecStory capture provider yet, and safe resume depends on the project directory. |
+
+**The thing this phase must not become.** A tidy grid of ticks derived from the registry's own
+`verified:` strings. `src/main/agents/registry.ts` already carries a self-assessment on nearly every
+capability of every row — `verified: 'verified'`, `confidence: 'high'`, `unverified: false` — and
+transcribing those into a table would produce a document that agrees with itself completely and
+proves nothing. **The registry's self-assessment is one of the two claim sides, not the evidence
+side.** There are three sides to compare and the phase's whole value is in keeping them apart:
+
+1. **What tortie.sh publishes** — the thirteen lines above.
+2. **What the registry declares** — the `verified`, `confidence`, `status` and `unverified` fields,
+   plus every dated `MEASURED`/`VERIFIED` note in the row's prose, each with the date it carries.
+3. **What the code can actually do** — whether a code path exists that delivers the capability for
+   that agent id, reached from a real call site, with nothing in between that drops it.
+
+**Mechanism.** One research document, `docs/research/123-agent-capability-matrix.md`, built in three
+passes, in this order, and the order matters because pass 3 must not be able to see pass 2's answer
+before it forms its own.
+
+*Pass 1, the claim sides.* Read the thirteen published lines out of
+`/Users/gdc/tortiedotsh/src/data/docs.ts` (READ ONLY — that repository is not this phase's to write)
+and the fifteen rows of `src/main/agents/registry.ts`, whose ids are `claude`, `cursor`, `codex`,
+`gemini`, `droid`, `deepseek`, `antigravity`, `muse`, `qwen`, `pi`, `omp`, `grok`, `opencode`,
+`cursoride` and `copilotide`. **Two of the fifteen are not CLI agents and the document says so
+rather than scoring them**: `cursoride` and `copilotide` are IDE kinds. **The published table has
+thirteen rows and the registry has thirteen CLI rows, so a row present in one and absent from the
+other is itself a finding** — check the mapping rather than assume it, and name `deepseek` against
+"CodeWhale" explicitly if that is what it turns out to be.
+
+*Pass 2, the code side, per capability, per agent.* For each capability name the ONE module that
+decides it and report what that module does for that agent id, with a file and line:
+
+- **launch** — `launch.argv`, the absolute-path rule in `src/main/manifest/`, and
+  `src/main/sessions/launch-plan.ts`. A row with no `launch` block cannot launch, whatever it says.
+- **resume** — `resume.strategy` and `resume.template` against
+  `src/main/sessions/resume-argv.ts`'s reader. The distinction the operator's own table draws —
+  resume that needs the original project directory versus resume that works from anywhere — is a
+  real property (`claude` is recorded as the only one with no cwd constraint) and the matrix
+  reports it as its own column rather than folding it into a tick.
+- **id capture** — `resume.idCapture.mode`. `pre-assign` and harvest are different promises with
+  different failure modes and the matrix keeps them apart.
+- **activity** — `activity.tier` and `activity.native` against the oracles under
+  `src/main/manifest/harvest/` and `src/main/status/`. A row declaring a `native` oracle whose named
+  implementation does not exist is the highest-value finding this phase can produce.
+- **attachments** — `imageDrop.strategy` against `src/main/drop/prepare.ts` and the renderer's drop
+  path. "Some attachment behavior is inferred" is a published sentence about `cursor` and this phase
+  says whether inferred means measured-by-analogy or guessed.
+- **Catch Me Up** — the overview/fold path, `src/main/overview/`, and its per-provider slot matrix.
+  `conformance:overview` already asserts a per-provider matrix, so the gate's own table is evidence
+  here and the document cites it rather than re-deriving it by eye.
+- **SpecStory capture** — `specstory.provider` against what the BUNDLED binary actually offers.
+  `build/vendor/specstory/bin/specstory` is on disk and can be asked, so this row is measured rather
+  than read. Two published lines already admit no provider (`grok`, `opencode`) and the phase
+  confirms or refutes both.
+- **restore** — `reconstructionTarget` against `src/main/restore/`.
+
+*Pass 3, the disagreements.* Every cell where the three sides do not agree gets a row of its own in
+a Disagreements section, saying which side is wrong and how the phase knows. **A disagreement is the
+product of this phase.** A document that finds none has almost certainly transcribed the registry.
+
+**The proof, run rather than read.** Tier 3 takes two independent methods and one of them must be an
+attack.
+
+- **Method 1, re-derive independently.** The matrix is generated a second time by a script that
+  reads the registry as DATA — parsing the module, not importing it — and emits one row per agent per
+  capability, then the two are diffed. A cell where the hand-built matrix and the parsed one disagree
+  is a defect in the hand-built one and is fixed before the document lands. This is the Phase 123
+  method, which is the highest-yield entry in the whole verification table.
+- **Method 2, the attack, and it is the one that matters.** For the four capabilities whose claim is
+  checkable without spending a token or a turn, ABLATE the registry field and prove the claimed code
+  path goes dark. If deleting `activity.native` for an agent changes no observable behaviour, that
+  agent's activity tier is decorative and the matrix says so. Run this against at least
+  `activity`, `specstory.provider`, `imageDrop` and `resume.idCapture`, on a scratch copy, never on
+  the shipped tree.
+- **Real data where it is free.** `conformance:resume:capture` (~16 s, no turns, no tokens) already
+  executes every registry resume claim and its output is evidence for the resume column. Run it and
+  quote its per-row result rather than paraphrasing.
+
+**What is NOT in this phase.** No registry row changes, no doc changes, no tortie.sh change — this
+phase measures and writes one research document, and the repairs are a later phase that reads it.
+No agent is installed, upgraded or run for a turn; nothing here spends a token. `conformance:resume`
+proper (~3 min, real turns) is NOT run, because its cheap sibling covers the claims and the operator
+is not paying turns for a survey. No new capability is designed or added — "make them all identical"
+is the operator's goal and it needs the measurement first; a phase that starts building parity before
+this document exists is guessing which gaps are real. No judgement about which agents deserve
+investment: the document reports, and he decides.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -28036,3 +28161,9 @@ cycle rather than only the evening it was written.
 - 2026-09-14, **PHASE 270 LANDED, a remote session reads the remote machine's shell (issue 20's second half), `e0afb04f`, version 0.105.0 unmoved, no tag, pushed.** Phase 269's names worked locally and `remote-sessions.ts` held zero occurrences of `envPassthrough`, so a session on another machine ignored every name IN SILENCE. **The operator decided the direction and it is also the only answer that does not dismantle a measured boundary: the value is read from the REMOTE MACHINE'S own login shell.** `REMOTE_ENV_ALLOWED` DID NOT MOVE — still exactly `GMUX_MANAGED` and `GMUX_SESSION_ID`, `remote-env.ts` byte-unchanged at `333a22a8` through the verifier's round — because research 51 section 7 measured that a value sent as an `-e` pair stands in TWO PROCESS TABLES AT ONCE, one element of the ssh argv here while the whole far-side command is one element of that same argv. The existing `REMOTE_PATH_MARKER` probe was extended to report the NAMED variables in ONE round trip, and the far side's own `new-session` takes them as `-e` pairs at a slot standing BEFORE `managedPaneEnv`'s stamps so the stamps still win; the names travel and no value does. **THE LIVE READING ON HIS MAC PRO: the pane read the MAC PRO's value for the name, and the Mac Pro's TMPDIR; this Mac's value for the same name and this Mac's TMPDIR were both absent, and a CONTROL create on the same socket in the same minute carrying no names read the name UNSET** — so the value arrives because of this phase and nothing else. **THE ATTACK: 18 hostile name shapes dropped whole by the alphabet, then FORCED PAST it into the composer and RUN FOR REAL on that machine — the far side reached its exec and created 0 of 7 planted sentinels; hostile VALUES planted in the far side's own environment came back literally with 0 sentinels; a forged `GMUX_SESSION_ID` lost to Tortie's own stamp; a 5000-character value was dropped rather than truncated.** **THE COMMITTER'S ROUND FIXED TWO THINGS AND THE FIRST ONE HAD BLOCKED THE PHASE.** (1) THE COLD SERVER: `remoteCreate` had no `ensureRemoteServer`, so on a machine whose server is not running the far side's `"$SHELL" -lc …` is what EXECS tmux and tmux seeds its GLOBAL environment from it — measured on a socket killed first, `show-environment -g` grepped 1 for the name and a SECOND session on that server carrying NO names read the value back, a cross-agent leak out of a per-agent opt-in lasting for the life of a server that by design outlives Tortie; the fix is the one call `restoreRemoteSession` has always made at its step 3, on the branch that has names only, since a create with no names never goes through a login shell at all. On a warm server the reading is 0, which is why every earlier run looked clean. (2) THE REMOTE RESTORE SAID NOTHING: it injected the names and raised no notice while the local restore has raised `env-unresolved` since Phase 33, so a person whose machine lost a variable was told once on the first create and never again; it now runs the same probe and raises the same notice after the row is bound. `conformance:machines` gains condition 99 and condition 98's printed limit about the restore is now a FAILURE; the probe STRIPS COMMENTS before counting, proved by an ablation that goes red with all the prose still in place, and condition 99 anchors on `remoteCreateArgs({` rather than the bare name because that file DECLARES the composer above it — **the gate reported the order backwards on its first run and caught its own rule.** **The queued entry's containment sentence was CORRECTED rather than left standing**: the value IS one element of the argv of the program the frozen script execs ON THE FAR SIDE for the life of the create, measured by replacing the far tmux with a program that prints its own argv; `build/p270/SPEC.md` section 2.5 records it correctly and argues for accepting it, and the commit body carries that wording. Full battery on the committed bytes, all foreground: typecheck 0, build 0 (`gate:electron` 133/133, contract inventory byte for byte), test 0 at 14,187 passed 2 skipped over 903 files, conformance:machines 0, conformance:agents 0, conformance:remoteclose 0, smoke:t1 0 at 6/6, smoke:t3 0 at 3/3; nothing to rebase, typecheck and build re-run green before the push. CHANGELOG Unreleased "Added" item in his style. **His LOCAL `-L gmux` read 40 sessions before and 40 after, sorted NAME SETS identical by `diff`; his MAC PRO's `-L gmux` read 1 session (`gmux-control`) either side, list only, nothing attached or killed on either machine, and no `gmux-p270-*` socket remains on either** (stale `gmux-p259-*`, `gmux-p267-*` and `gmux-smoke-pkg2-*` socket files from earlier rounds are on this Mac and were deliberately left alone). The one thing he most needs to know: a key that lives only on the Mac Pro is now the key the agent gets over there, nothing of this Mac's shell is sent across, and the cold-server leak that would have put his values in front of every later pane on that machine was found and closed before this landed.
 
 - 2026-09-14, **v0.106.0 RELEASED from `a3e5e6bc`, and tortie.sh updated to match.** Gates and durability were both green on that exact sha before the tag was pushed; the signed build notarized first time, and the app INSIDE the DMG reads `accepted` / `source=Notarized Developer ID` / `origin=Developer ID Application: Gregory Ceccarelli (4GRQMF5T5U)` at `CFBundleShortVersionString` 0.106.0, with `codesign --verify --deep --strict` valid and `xcrun stapler validate` worked; the DMG file itself reading "no usable signature" is the normal electron-builder shape and is not a defect. The stable `releases/latest/download/Tortie-arm64.dmg` answers 200. The release carries the three phases that landed since 0.105.0: **268 auto save**, **269 the shell variables an agent needs** and **270 a remote session reads the remote machine's shell** — the second and third are the two halves of issue 20. tortie.sh is at `dbb9e3b`, `docs(site): 0.106.0, auto save and shell variables`: the changelog synced through 0.106.0, the Files page gained auto save (where it lives, that it is off until turned on, and that it keeps your edits and stops rather than writing over somebody else), and the Settings page gained shell variables under Launch defaults (the value read from the login shell at every launch, a name written into settings.json by hand ignored because agents can write that file, and the value coming from the FAR machine's shell when the agent runs over there). **THE QUEUE IS EMPTY.** The seven entries still open — 25 downloads and usage, 50 notifications, 65 the refresh loop, 66 canvas, 82 cross-machine reconstruction, 88 remote needs-input, 113 `npm run shot` attaching to his own server — are each waiting on his decision rather than on work. **TWO THINGS LEFT ON THE RECORD RATHER THAN FIXED.** The release lane's `npm test` is brittle to timeout flakes: one flaky timeout fails a whole signed build and needs a manual re-run, and bumping the per-test budget on `harvest-claim-race` and the git-integration and db-integrity tests, or giving the release lane a retry, is a small phase somebody should queue. And the cold-server leak Phase 270's committer measured did NOT reproduce when it was re-measured on the Mac Pro afterwards — `show-environment -g` read 0, the session environment read 0 and a later pane read the name ABSENT — so the entry above states it as measured and this line states that a second measurement disagreed; the fix is one `ensureRemoteServer` call that is correct either way, and the discrepancy is unresolved rather than explained.
+
+- 2026-09-14, **the test budget was raised to survive a loaded runner, `1a05a5f4`, version 0.106.0 unmoved, no tag, pushed, gates green on it.** The suite's per-test budget was vitest's own 5,000 ms default and that number had cost two whole runs: the signed build for 0.105.0 lost `harvest-claim-race` at 5,014 ms and had to be re-run by hand, and Phase 80.1 lost `src/main/symbols/__tests__/store.test.ts` at 5,011 ms. **Neither test is slow, and that was measured before anything was changed**: a full run with the JSON reporter on a quiet machine ranked all 14,189 tests and the slowest reading in the suite is 5,370 ms INCLUDING its hooks, with every test body far below the old ceiling — so both failures are evidence about the RUNNER rather than about either test. `testTimeout` and `hookTimeout` are now 15,000 ms. **Raising the global rather than the two tests is the argued choice**: the two live in unrelated domains, nothing predicts which test a loaded runner starves next, and a per-test budget would have to be guessed onto all 14,189 of them. The cost is bounded and it is the only cost — a test that genuinely hangs now fails in 15 s instead of 5 s — because a timeout is a ceiling and never a wait, and a file wanting its own budget still wins in either direction through `vi.setConfig` or the third argument to `it`, so the 30 s in `graph.integration.test.ts` and the 20 s, 60 s and 120 s elsewhere all stand unchanged. **PROVED BY ABLATION RATHER THAN BY READING**: a throwaway probe sleeping 7,000 ms, longer than the old default and shorter than the new one, PASSED under this config and FAILED with `Test timed out in 5000ms` when the same file was run with `--testTimeout=5000`; the probe was then deleted so no test file was added and `gate:checks` has nothing new to classify. Checked first that nothing depended on the old value — every `timed out` string in the suite is an ssh error fed in as a fixture, and no check reads `testTimeout` as a constant. Gates on the committed bytes, all foreground: typecheck 0, build 0 with the contract inventory byte for byte, test 0 at 14,165 passed with 24 skipped over 903 files, smoke:t1 0 at 6/6, gate:checks 0, and CI gates green on the pushed sha. **A correction to what this log said one line above.** The 0.106.0 entry passed on a claim that the release lane is brittle to "timeout flakes" in the plural and recent. It is not recent: every failed CI run still on the server — nine of them, from 2026-09-12 to 2026-09-14 — was checked for a vitest failure marker and NONE of them was a test failure at all; those were the `yaml` 2.9.1 against the 2.9.0 pin, and other causes. The evidence for this change is exactly two starvations, one of them from Phase 80.1, and that is what the commit body says.
+
+- 2026-09-14, **issue 24 CLOSED and issue 20 answered but deliberately LEFT OPEN.** Both are JnBrymn's. **24, auto save**, is closed completed against 0.106.0: the comment tells him the File menu row and the three Settings modes with their 1, 2, 5 and 10 second delays, and leads on the part that matters for his case — he edits prose in a folder an agent is working in, so the risk was never forgetting ⌘S but a TIMER writing over what the agent just wrote, and the timer takes the same check ⌘S takes, keeps his edits, stops saving that one file and says so once. **20 is NOT closed, on purpose.** Its comment says what shipped in 0.106.0, states plainly that the title's premise was false (a pane's parent is the tmux server whose parent is launchd, and Tortie is nowhere in the ancestry, so spawning differently would have fixed nothing), and names the real cause without softening it — the setting existed before he filed, had never worked for anybody because no shipped agent row switched it on and no UI drew it, and he spent his time working around a feature that was inert. It declines PR #21 with the measurements rather than a verdict: `withLoginShellFlag` is reached only on the plain-shell branch so `-il` never touches pi, an interactive shell measured 1,714 ms against a login shell's 68 ms on every session start, and four tests went red including a restored session coming back on a different command; the `~` in captured PATH entries is accepted as a real bug and is on the list with his name on it. **It ends with three numbered things to try and asks him to report back, and step 3 is the whole issue** — rotate a key in his shell config and open a new session WITHOUT quitting Tortie. It stays open until he has run that, because the phase proved the mechanism and only he can prove the fix.
+
+- 2026-09-14, **PHASE 271 QUEUED, what every agent can actually do measured against what we say it can, research only, no semver.** The operator asked for a matrix of what exists in the CODE for each agent against what the docs claim, and said what he wants to be true: launch, activity, resume, attachments and Catch Me Up working and identical for every one. The thirteen lines tortie.sh publishes today are reproduced verbatim in the entry so a later reader can see what was being checked. **The entry's central refusal is the reason it is Tier 3**: `src/main/agents/registry.ts` already carries a self-assessment on nearly every capability of every row, so a matrix transcribed from its own `verified:` strings would agree with itself completely and prove nothing — the registry's self-assessment is one of the two CLAIM sides, not the evidence side, and the three sides (what tortie.sh publishes, what the registry declares, what a real code path can actually deliver) are kept apart by construction. The proof is an independent re-derivation that parses the registry as DATA rather than importing it and diffs the two matrices, plus an ATTACK that ablates `activity.native`, `specstory.provider`, `imageDrop` and `resume.idCapture` on a scratch copy and proves the claimed path goes dark — a field whose deletion changes nothing is decorative and the matrix says so. `conformance:resume:capture` supplies the resume column at 16 seconds with no turns and no tokens; `conformance:resume` proper is explicitly NOT run because the operator is not paying real turns for a survey. Two of the fifteen registry rows are IDE kinds and are named rather than scored, and a row present in the published table but absent from the registry, or the reverse, is itself a finding. **Nothing ships in this phase**: no registry row, no doc, no tortie.sh line, and no parity work, because a phase that starts building parity before the document exists is guessing which gaps are real.
