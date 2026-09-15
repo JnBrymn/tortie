@@ -27247,6 +27247,81 @@ manifest, both logs and `settings.json` stay clean of it.
   it is not new here.
 
 
+## Phase 270 — a remote session reads the remote machine's shell (issue 20's second half, 2026-09-14)
+
+**Subject.** `feat(machines): a remote agent reads its own machine's shell`
+
+**First body line.** `Phase 270: a remote session reads the remote machine's shell`
+
+**Semver.** Minor. A named variable starts working on a machine where it was silently ignored.
+
+**Tier 3.** It resolves a person's provider keys on another computer and puts them on a process
+there, over a link Tortie does not own. Two independent methods, one an attack: a live create on a
+real machine proving the value comes from THAT machine's shell and appears in no argv on either side;
+and an attack proving no value crosses the wire and `REMOTE_ENV_ALLOWED` still refuses everything
+outside its two names.
+
+**Charter.** [Issue 20](https://github.com/gregce/tortie/issues/20),
+[research 123](research/123-issue-20-session-environment.md), and Phase 269's own recorded gap. The
+operator decided the direction on 2026-09-14, asked which machine's shell should supply the value:
+**the remote machine's**.
+
+**The gap, which Phase 269 built and then had to write down.** Phase 269 put shell-variable names in
+the per-agent card, and they work locally. `src/main/machines/remote-sessions.ts` contains no
+occurrence of `envPassthrough` or `captureLoginShellEnv`, and `src/main/sessions/create-local.ts`
+returns on its remote branch before `envPassthroughFor` is reached. The card is per AGENT, not per
+machine, so a person who names a variable for claude and starts claude on a remote machine gets the
+agent's own model error and **silence from Tortie** — issue 20's experience, on the surface built to
+end it, and against the standing rule that remote feels identical to local.
+
+**Why the remote machine's shell is the ONLY answer, and it is not a preference.**
+`src/main/machines/remote-env.ts` holds `REMOTE_ENV_ALLOWED`, an allowlist of exactly two names
+(`GMUX_MANAGED`, `GMUX_SESSION_ID`), and `assertRemoteEnvAllowed` throws for anything else — *"called
+BEFORE anything is composed and therefore before anything is sent, so a refusal here means no process
+was started and no byte left this Mac."* Sending the local value would mean adding provider names to
+that list, and the module's own header says why that is not a small edit: research 51 §7 and
+`build/probe-remote-env.mjs` measured the byte path, and a value passed that way is one element of
+the ssh argv on this Mac while the whole far-side command is one element of that same argv, so **the
+bytes stand in two process tables at once for as long as the create takes**. Resolving on the far
+side means the value never enters an argv on either machine. **`REMOTE_ENV_ALLOWED` does not move in
+this phase.** It is still two names, because nothing new crosses.
+
+**The mechanism, and most of it already exists.** Tortie already runs a login-shell probe on a remote
+machine: `REMOTE_PATH_MARKER` in `src/main/machines/carriage.ts:141` is, by its own comment, *"the
+recipe `PATH_MARKER` in `../tmux/resolve.ts` already uses"*. So the far side already answers a
+marker-delimited question asked through the login shell. This phase extends that one probe to also
+report the NAMED variables — the exact parallel of how the local `captureLoginShellPath` grew into
+`captureLoginShellEnv` in Phase 33 — and injects the answers into the remote pane with `-e` on the
+far side's own `new-session`, where `managedPaneEnv`'s stamps still go last and win. The names travel
+(they are not secret); **no value travels.** The probe keeps the local one's discipline: a fresh
+nonce per probe so far-side rc output cannot forge a record, a deadline that resolves whatever the
+child does, and a name that is unset injecting nothing.
+
+**The silence ends either way.** A named variable that is unset on the remote machine surfaces the
+existing `env-unresolved` notice naming it, so even the failing case tells the person which variable
+that machine does not have. That is the half of this phase that repays issue 20 directly, and it
+lands even for a machine whose probe cannot run at all.
+
+**The proof, run rather than read.** A live create against a real second machine (his Mac Pro, with
+his word before it runs): name a variable, set it to DIFFERENT values in this Mac's shell profile and
+the remote machine's, start the session there, and read INSIDE the pane that the value is the REMOTE
+one. Then the containment, measured on both sides: the value appears in no `ps` argv on this Mac and
+none on the far side, in no manifest row, in no log, and not in
+`tmux -L gmux show-environment -g` on either machine. The attack: try to make a value cross by the
+`remoteCreateArgs.env` route and prove `assertRemoteEnvAllowed` still refuses it before anything is
+composed. `conformance:machines` gains the clauses, including condition 47's assertion that
+`REMOTE_ENV_MEASURED_AND_REFUSED` is still out of the set.
+
+**What is NOT in this phase.** `REMOTE_ENV_ALLOWED` does not grow, and no value is ever sent from
+this Mac to another machine — if a later round wants that, it reads research 51 §7 first and argues
+with the two-process-tables measurement. No change to the local path Phase 269 shipped. No per-machine
+UI: the card stays per agent, because the names are a property of the agent and the values are a
+property of whatever machine it runs on, which is the whole point of this phase. No change to the
+manifest's names-only rule, and no seal change — restore's unsealed manifest read is Phase 269's
+recorded limit and stays its own follow-up. Nothing here makes a machine connect on its own; the
+probe runs on a create the person asked for.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
