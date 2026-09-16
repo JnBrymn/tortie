@@ -65,10 +65,20 @@ import {
   ENV_PASSTHROUGH_REFUSED,
   ENV_REFUSED_EXACT,
   ENV_REFUSED_PREFIXES,
+  OVERLAY_ENV_KEY_PATTERN,
   OVERLAY_LIMITS,
   envPassthroughRefusal
 } from '../src/shared/agent-overlay';
-import { sanitizeEnvPassthrough } from '../src/shared/settings';
+import {
+  defaultGmuxSettings,
+  envNameKey,
+  // Phase 275: the display spelling of a shared key and the shared list's own
+  // sanitizer. Both are pure and neither touches a value.
+  envSharedKey,
+  sanitizeEnvPassthrough,
+  sanitizeEnvPassthroughShared,
+  type GmuxSettings
+} from '../src/shared/settings';
 // Phase 269: the union the launch path reads. Pure, like everything here.
 import { envPassthroughFor } from '../src/main/sessions/launch-plan';
 import {
@@ -977,12 +987,16 @@ function p269Section(): Record<string, unknown> {
   const set = ['P269_ROW_B', 'P269_SET_A'];
   const rowCopy = [...row];
   const setCopy = [...set];
+  // PHASE 275 passes the third source EXPLICITLY here, undefined, because that
+  // is the shape of a person who has no shared list. These six readings are the
+  // Phase 269 ones and they must not move by one byte: the shared source joined
+  // the union ON THE END for exactly that reason.
   const union = {
-    bothEmpty: envPassthroughFor(undefined, undefined) ?? null,
-    bothEmptyLists: envPassthroughFor([], []) ?? null,
-    rowOnly: envPassthroughFor(row, undefined) ?? null,
-    settingsOnly: envPassthroughFor(undefined, set) ?? null,
-    merged: envPassthroughFor(row, set) ?? null,
+    bothEmpty: envPassthroughFor(undefined, undefined, undefined) ?? null,
+    bothEmptyLists: envPassthroughFor([], [], undefined) ?? null,
+    rowOnly: envPassthroughFor(row, undefined, undefined) ?? null,
+    settingsOnly: envPassthroughFor(undefined, set, undefined) ?? null,
+    merged: envPassthroughFor(row, set, undefined) ?? null,
     rowUnchanged: JSON.stringify(row) === JSON.stringify(rowCopy),
     settingsUnchanged: JSON.stringify(set) === JSON.stringify(setCopy)
   };
@@ -1039,12 +1053,429 @@ async function p269CatalogSection(): Promise<Record<string, unknown>> {
 }
 
 // ---------------------------------------------------------------------------
+// Section 9 — Phase 275, the SHARED list every agent reads
+// ---------------------------------------------------------------------------
+//
+// Phase 269 (section 7 above) gave a person a route to a shell variable name
+// and keyed it by AGENT, so one provider key had to be set once per agent
+// through a control that added one name at a time. Phase 275 put a SHARED list
+// beside the per-agent map: one list, every launchable agent, including agents
+// installed after the name was confirmed.
+//
+// THAT IS A WIDENING OF WHAT ONE CONFIRMATION COVERS, and it is the only part
+// of the phase this file exists for. The seal that stands between a hand-edited
+// settings.json and a spawned process has two layers, and exactly one of them
+// moves:
+//
+//   LAYER ONE DOES NOT MOVE. A name no human confirmed is dropped. That is
+//   refusal 8 in CLAUDE.md and nothing here touches it.
+//
+//   LAYER TWO MOVES BY DESIGN. At the parent, a name confirmed for `claude`
+//   could not reach `codex`, because `envNameKey` puts the agent id IN the seal
+//   key. A shared set means one confirmation covers every agent, so the shared
+//   list gets its OWN sealed field, `DangerState.envShared`, holding BARE
+//   names.
+//
+// The two refusals that follow from that are the most important assertions in
+// this file, and they are driven rather than reasoned about:
+//
+//   R-A  a SHARED name sealed PER-AGENT is dropped and reported.
+//   R-B  a PER-AGENT name sealed as SHARED is dropped and reported.
+//
+// Both run against the SHIPPING `withSealedDangerState`, which is pure and
+// takes the opened seal as an argument, so no `safeStorage` and no Electron is
+// needed for either. What this section still cannot reach is the CIPHERTEXT:
+// `sealDangerState` and `openDangerSeal` are not exported and need a keystore.
+// The text they seal is `JSON.stringify(dangerStateOf(settings))`, and that
+// string IS reachable here, so "the seal moves when a shared name is added" is
+// asserted over the exact bytes the keystore would be handed. The ciphertext
+// half belongs to `src/main/settings/__tests__/p275-env-shared-seal.test.ts`
+// and to the Tier 3 verifier driving the real app.
+//
+// NO VALUE, ANYWHERE. Every name below is invented in this file, in the shape a
+// provider key has and matching none. Nothing here reads an environment
+// variable, opens a settings file, or touches anything under a home directory.
+
+/** Where the seal lives. Pure exports only; `getSettings` is never called. */
+const SETTINGS_STORE_SEAM = '../src/main/settings/store';
+
+/** The shape of the opened seal, restated so this file needs no type import. */
+interface P275DangerState {
+  readonly defaults: readonly string[];
+  readonly acks: readonly string[];
+  readonly fold: string | null;
+  readonly arch: string | null;
+  readonly env: readonly string[];
+  readonly envShared: readonly string[];
+}
+
+/** The pure half of the settings store this section drives. */
+interface P275StoreApi {
+  dangerStateOf(settings: GmuxSettings): P275DangerState;
+  isDangerStateEmpty(state: P275DangerState): boolean;
+  withSealedDangerState(
+    settings: GmuxSettings,
+    sealed: P275DangerState
+  ): {
+    settings: GmuxSettings;
+    rejected: string[];
+    envRejected: { shared: string[]; perAgent: Record<string, string[] | undefined> };
+  };
+  sanitizeSettings(raw: unknown): GmuxSettings;
+  sharedRefusedEnvKeys(): readonly string[];
+}
+
+/**
+ * Invented names, in the shape a provider key has and matching none. The two
+ * that stand for a real key are deliberately spelled with the phase number in
+ * them so a grep for one of these strings can never hit a person's own shell.
+ */
+const P275_SHARED = 'P275_PROVIDER_KEY';
+const P275_SECOND = 'P275_SECOND_KEY';
+
+/** A settings object carrying nothing but the fields one assertion needs. */
+function p275Settings(over: Partial<GmuxSettings>): GmuxSettings {
+  return { ...defaultGmuxSettings(), ...over };
+}
+
+/** A seal covering exactly what it is handed and nothing else. */
+function p275Seal(over: Partial<P275DangerState>): P275DangerState {
+  return {
+    defaults: [],
+    acks: [],
+    fold: null,
+    arch: null,
+    env: [],
+    envShared: [],
+    ...over
+  };
+}
+
+/**
+ * Rule 35c's fixture. The per-agent key space and the shared one have to be
+ * disjoint over EVERY launchable id rather than over a convenient one, because
+ * the claim is about a closed compiled set.
+ */
+const P275_KEY_NAMES = [P275_SHARED, 'FORCE_COLOR', 'A', '_9'];
+
+/** The pure half: nothing here needs the settings store. */
+function p275PureSection(): Record<string, unknown> {
+  // --- rule 33 and rule 35c. The two key spaces, over every launchable id.
+  const ids = [...LAUNCHABLE_AGENT_IDS] as string[];
+  const collisions: string[] = [];
+  const wrongSpaceCount: string[] = [];
+  const starting: string[] = [];
+  for (const id of ids) {
+    for (const name of P275_KEY_NAMES) {
+      const key = envNameKey(id, name);
+      // The bare name is what the SHARED seal field holds, so a per-agent key
+      // equal to one would be admitted as shared. That is R-A with the belts
+      // removed, and it is the collision this loop exists to refuse.
+      if (key === name || key === envSharedKey(name)) collisions.push(key);
+      if ((key.match(/ /g) ?? []).length !== 1) wrongSpaceCount.push(key);
+      if (key.startsWith('*')) starting.push(key);
+    }
+  }
+  const keys = {
+    ids,
+    idCount: ids.length,
+    collisions,
+    wrongSpaceCount,
+    startingWithStar: starting,
+    // Belt two, textual: the alphabet forbids a space, so a bare name holds
+    // none and a per-agent key holds exactly one.
+    patternAdmitsSpace: new RegExp(OVERLAY_ENV_KEY_PATTERN).test('A B'),
+    idsNotLowercase: ids.filter((id) => !/^[a-z]/.test(id)),
+    sharedKey: envSharedKey(P275_SHARED),
+    sharedKeySpaces: (envSharedKey(P275_SHARED).match(/ /g) ?? []).length,
+    sampleAgentKey: envNameKey('claude', P275_SHARED)
+  };
+
+  // --- rule 18. The two cap sentences, READ FROM the function rather than
+  // written out here, so a reworded sentence is caught by the difference and
+  // never by a stale copy of the words.
+  const sixteen = Array.from({ length: 16 }, (_v, i) => `P275_N${String(i)}`);
+  const cap = {
+    limit: OVERLAY_LIMITS.maxEnvPassthroughNames,
+    agent: envPassthroughRefusal('P275_N16', { existing: sixteen }),
+    shared: envPassthroughRefusal('P275_N16', { existing: sixteen, scope: 'shared' }),
+    // The default is `'agent'`, so every call site written before Phase 275
+    // says the sentence it always said.
+    defaulted: envPassthroughRefusal('P275_N16', { existing: sixteen, scope: undefined }),
+    // The last check's subject also moves, because the shared list reaches
+    // every agent and naming one of them would name an agent the person is not
+    // looking at.
+    ownAgent: envPassthroughRefusal('FORCE_COLOR', { agentEnvKeys: ['FORCE_COLOR'] }),
+    ownShared: envPassthroughRefusal('FORCE_COLOR', {
+      agentEnvKeys: ['FORCE_COLOR'],
+      scope: 'shared'
+    })
+  };
+
+  // --- rules 14, 15, 16. The shared sanitizer's shape table.
+  const sanitize = (
+    raw: unknown,
+    refusedKeys: readonly string[] = []
+  ): unknown => {
+    try {
+      return sanitizeEnvPassthroughShared(raw, refusedKeys);
+    } catch (err) {
+      return { threw: err instanceof Error ? err.message : String(err) };
+    }
+  };
+  const shapeTable = {
+    nullish: sanitize(null),
+    undef: sanitize(undefined),
+    anObject: sanitize({ 0: P275_SHARED }),
+    aString: sanitize(P275_SHARED),
+    aNumber: sanitize(7),
+    // One bad entry never denies the rest: a denial an agent with write access
+    // could author in one line would take away every key a person set.
+    mixed: sanitize([7, 'P275_A', null, 'P275_B']),
+    // A refused name that is SAFE TO DRAW is echoed by name.
+    refusedEchoed: sanitize(['PATH', 'P275_A']),
+    // A refused name that is NOT safe to draw is counted and never echoed.
+    tooLong: sanitize(['A'.repeat(65)]),
+    // A THIRD COPY OF THE WRONG CLAIM, corrected by the fix round. This comment
+    // used to say `$` matches before a FINAL NEWLINE with no `m` flag, so
+    // "NAME\n" passes the pattern on its own. That is Python and Perl; measured
+    // on 2026-09-16, `new RegExp('^[A-Za-z_][A-Za-z0-9_]{0,63}$').test('ABC\n')`
+    // is false. The build corrected the two copies in src/ and left this one,
+    // which is how a wrong comment survives a phase that set out to kill it.
+    // The two fixtures stay for the reason `isDrawableEnvName` keeps its two
+    // explicit checks: the pattern is a shared constant, and an `m` flag added
+    // to it for some other caller would open the hole in silence.
+    trailingNewline: sanitize(['P275_NL\n']),
+    carriageReturn: sanitize(['P275_CR\r']),
+    // Nothing is repaired into an acceptable shape: no trim, no case fold.
+    notTrimmed: sanitize([' P275_A ']),
+    order: sanitize(['P275_Z', 'P275_A', 'P275_M']),
+    duplicate: sanitize(['P275_A', 'P275_A']),
+    overCap: sanitize([...sixteen, 'P275_OVER']),
+    // R16b, THE FIX ROUND. The echo itself is bounded. `names` was always
+    // capped at sixteen by `envPassthroughRefusal`; `refused` was not, because
+    // it runs over the RAW file whose length is the file writer's to choose —
+    // and since this phase that writer is the exact actor layer one of the seal
+    // names. A verifier measured 200,000 junk names becoming a 12,088,932-byte
+    // paragraph in the Settings window. Two hundred here, of which sixteen may
+    // be echoed and 184 must be a COUNT.
+    flood: sanitize(Array.from({ length: 200 }, (_v, i) => `P275_FLOOD_${String(i)}`))
+  };
+
+  // --- rule 23. The three source union.
+  const row = ['P275_ROW_A', 'P275_ROW_B'];
+  const per = ['P275_ROW_B', 'P275_SET_A'];
+  const shared = ['P275_SET_A', 'P275_SHR_A'];
+  const rowCopy = [...row];
+  const perCopy = [...per];
+  const sharedCopy = [...shared];
+  const union = {
+    threeEmpty: envPassthroughFor(undefined, undefined, undefined) ?? null,
+    threeEmptyLists: envPassthroughFor([], [], []) ?? null,
+    sharedOnly: envPassthroughFor(undefined, undefined, shared) ?? null,
+    // The Phase 269 answer, asserted to be BYTE FOR BYTE what it was: the
+    // shared source joined on the END so nobody who never uses it sees an
+    // argv, a manifest row or a notice list move.
+    parentUndefined: envPassthroughFor(row, per, undefined) ?? null,
+    parentEmptyList: envPassthroughFor(row, per, []) ?? null,
+    merged: envPassthroughFor(row, per, shared) ?? null,
+    rowUnchanged: JSON.stringify(row) === JSON.stringify(rowCopy),
+    perUnchanged: JSON.stringify(per) === JSON.stringify(perCopy),
+    sharedUnchanged: JSON.stringify(shared) === JSON.stringify(sharedCopy)
+  };
+
+  // --- rule 12. Empty at install is not a nicety: it is what keeps the union
+  // `undefined` for a person who configured nothing, which is what keeps the
+  // login-shell probe unspawned on every launch.
+  const defaults = {
+    shared: defaultGmuxSettings().envPassthroughShared,
+    hasField: 'envPassthroughShared' in defaultGmuxSettings()
+  };
+
+  return { keys, cap, shapeTable, union, defaults };
+}
+
+/** The half that needs the settings store, which imports `electron`. */
+async function p275SealSection(): Promise<Record<string, unknown>> {
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await import(SETTINGS_STORE_SEAM)) as Record<string, unknown>;
+  } catch (err) {
+    return {
+      state: 'absent',
+      missing: `${SETTINGS_STORE_SEAM} did not import: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    };
+  }
+  const wanted = [
+    'dangerStateOf',
+    'isDangerStateEmpty',
+    'withSealedDangerState',
+    'sanitizeSettings',
+    'sharedRefusedEnvKeys'
+  ];
+  const absent = wanted.filter((name) => typeof mod[name] !== 'function');
+  if (absent.length > 0) {
+    return { state: 'absent', missing: `${absent.join(', ')} is not exported` };
+  }
+  const api = mod as unknown as P275StoreApi;
+
+  try {
+    // --- rule 7 and its ablation, rule 31. `getSettings` short-circuits on
+    // `isDangerStateEmpty` and returns the file VERBATIM, WITHOUT OPENING THE
+    // SEAL. It is a boolean expression over an object, so a field added to
+    // `DangerState` and forgotten here leaves the function COMPILING AND
+    // WRONG, and a settings.json whose only danger value is a shared name
+    // would be admitted unsealed. That is a complete bypass of layer one, and
+    // it is the single most important line in this phase.
+    const onlyShared = p275Settings({ envPassthroughShared: [P275_SHARED] });
+    const nothing = p275Settings({});
+    const empty = {
+      withOnlyASharedName: api.isDangerStateEmpty(api.dangerStateOf(onlyShared)),
+      withNothing: api.isDangerStateEmpty(api.dangerStateOf(nothing)),
+      // The control: the per-agent field has had this clause since Phase 269.
+      withOnlyAPerAgentName: api.isDangerStateEmpty(
+        api.dangerStateOf(p275Settings({ envPassthrough: { claude: [P275_SHARED] } }))
+      )
+    };
+
+    // --- rules 2 and 30. The sealed TEXT is what `sealDangerState` encrypts,
+    // so comparing these strings compares the bytes the keystore is handed.
+    const text = (s: GmuxSettings): string => JSON.stringify(api.dangerStateOf(s));
+    const seal = {
+      base: text(nothing),
+      afterAdd: text(onlyShared),
+      afterRemove: text(p275Settings({})),
+      // Sorted, so two orders of the same set seal to one text and a person is
+      // never asked to re-approve a reorder.
+      twoNamesOneOrder: text(
+        p275Settings({ envPassthroughShared: [P275_SHARED, P275_SECOND] })
+      ),
+      twoNamesOtherOrder: text(
+        p275Settings({ envPassthroughShared: [P275_SECOND, P275_SHARED] })
+      ),
+      // BARE names, never `envSharedKey`'s display form, and never an agent id.
+      sharedField: [...api.dangerStateOf(onlyShared).envShared]
+    };
+
+    // --- R-A, rule 27. A SHARED name sealed PER-AGENT.
+    const raIn = p275Settings({ envPassthroughShared: [P275_SHARED] });
+    const ra = api.withSealedDangerState(
+      raIn,
+      p275Seal({ env: [envNameKey('claude', P275_SHARED)] })
+    );
+
+    // --- R-B, rule 28. A PER-AGENT name sealed as SHARED.
+    const rbIn = p275Settings({ envPassthrough: { claude: [P275_SHARED] } });
+    const rb = api.withSealedDangerState(rbIn, p275Seal({ envShared: [P275_SHARED] }));
+
+    // --- The control beside both: sealed the RIGHT way, the name survives, so
+    // neither refusal above can be passing because the seal drops everything.
+    const okShared = api.withSealedDangerState(
+      raIn,
+      p275Seal({ envShared: [P275_SHARED] })
+    );
+    const okAgent = api.withSealedDangerState(
+      rbIn,
+      p275Seal({ env: [envNameKey('claude', P275_SHARED)] })
+    );
+
+    // --- rule 32. A seal written before this phase has no `envShared` member
+    // at all. It must cover no shared name rather than throw or admit one.
+    const oldSealState = { defaults: [], acks: [], fold: null, arch: null, env: [] };
+    const oldSeal = api.withSealedDangerState(
+      raIn,
+      oldSealState as unknown as P275DangerState
+    );
+
+    // --- rule 17. The shared list refuses every name any launchable agent's
+    // compiled `launch.env` sets, and the gate DERIVES that union itself from
+    // the registry rather than reading the store's answer twice.
+    const derived = [
+      ...new Set(LAUNCHABLE_AGENT_IDS.flatMap((id) => [...compiledLaunchEnvKeys(id)]))
+    ].sort();
+    const stored = [...api.sharedRefusedEnvKeys()].sort();
+    const refusedUnion = {
+      derived,
+      stored,
+      // Each one, put on the shared list by hand, must come back refused.
+      sanitized: sanitizeEnvPassthroughShared(derived, stored)
+    };
+
+    // --- rule 18, the SEPARATE budgets, driven through the door a settings
+    // file actually comes in at. Sixteen shared names and sixteen claude names
+    // must BOTH survive: one sixteen split between the two lists would mean a
+    // shared name silently shrinks what an agent may add on its own card.
+    const sixteenShared = Array.from({ length: 16 }, (_v, i) => `P275_S${String(i)}`);
+    const sixteenAgent = Array.from({ length: 16 }, (_v, i) => `P275_A${String(i)}`);
+    const both = api.sanitizeSettings({
+      envPassthroughShared: sixteenShared,
+      envPassthrough: { claude: sixteenAgent }
+    });
+    const budgets = {
+      shared: both.envPassthroughShared.length,
+      agent: (both.envPassthrough.claude ?? []).length
+    };
+
+    // --- rule 13. `sanitizeSettings` fills the field through the shared
+    // sanitizer, so a hand-edited file is bounded before the seal is asked.
+    const sanitized = api.sanitizeSettings({
+      envPassthroughShared: ['P275_KEEP', 7, 'PATH', 'A'.repeat(65), 'P275_ALSO']
+    }).envPassthroughShared;
+
+    return {
+      state: 'present',
+      empty,
+      seal,
+      ra: {
+        kept: ra.settings.envPassthroughShared,
+        rejected: ra.rejected,
+        reportedShared: ra.envRejected.shared,
+        reportedPerAgent: ra.envRejected.perAgent['claude'] ?? []
+      },
+      rb: {
+        kept: rb.settings.envPassthrough.claude ?? [],
+        rejected: rb.rejected,
+        reportedShared: rb.envRejected.shared,
+        reportedPerAgent: rb.envRejected.perAgent['claude'] ?? []
+      },
+      okShared: {
+        kept: okShared.settings.envPassthroughShared,
+        rejected: okShared.rejected
+      },
+      okAgent: {
+        kept: okAgent.settings.envPassthrough.claude ?? [],
+        rejected: okAgent.rejected
+      },
+      oldSeal: { kept: oldSeal.settings.envPassthroughShared, rejected: oldSeal.rejected },
+      refusedUnion,
+      budgets,
+      sanitized,
+      expectShared: envSharedKey(P275_SHARED),
+      expectAgent: envNameKey('claude', P275_SHARED),
+      name: P275_SHARED
+    };
+  } catch (err) {
+    return {
+      state: 'broken',
+      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 const agents = LAUNCHABLE_AGENT_IDS.map(compiledReport);
 const seam = await seamReport();
 const p33 = await p33Section();
 const p269 = p269Section();
 const p269Catalog = await p269CatalogSection();
+// PHASE 275. The pure half runs whatever the settings store does; the seal
+// half reports `absent` out loud if the store has not landed, so the gate
+// still reaches a verdict and never silently passes.
+const p275Pure = p275PureSection();
+const p275SealData = await p275SealSection();
 
 // ---------------------------------------------------------------------------
 // Phase 49 — the version probe is unreachable from the create path
@@ -1075,6 +1506,7 @@ process.stdout.write(
     p33,
     p269,
     p269Catalog,
+    p275: { ...p275Pure, seal: p275SealData },
     probeBudget
   })
 );

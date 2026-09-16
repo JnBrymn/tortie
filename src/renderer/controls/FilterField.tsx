@@ -33,6 +33,30 @@ export interface FilterFieldProps {
   icon?: string;
   /** Layout only — width and placement belong to the surface. */
   className?: string;
+  /**
+   * PHASE 275. A handle on the input itself, for a surface that has to focus
+   * it or read where the caret is. Optional, and absent from all five call
+   * sites that existed before this phase.
+   */
+  inputRef?: React.Ref<HTMLInputElement>;
+  /**
+   * PHASE 275. The field is the filter AND the keyboard driver for a listbox
+   * beside it.
+   *
+   * The shell-variable picker keeps focus in this field while ArrowUp and
+   * ArrowDown walk a list of fifty names, so the row a person has landed on
+   * has to be announced from HERE: `aria-activedescendant` is read off the
+   * element that holds DOM focus and nowhere else, and putting it on the
+   * listbox — which nothing is focused inside — announces nothing. The
+   * alternative already shipped next door is ShortcutsOverlay's
+   * `aria-current="true"` on the row with no activedescendant at all, which
+   * is weaker for exactly this reason: a screen reader is never told the
+   * cursor moved.
+   *
+   * Absent it emits NOTHING — no role, no aria — so every existing call site
+   * renders the byte-identical input it rendered before.
+   */
+  combobox?: { controls: string; activeId: string | null };
 }
 
 export function FilterField({
@@ -40,7 +64,9 @@ export function FilterField({
   onChange,
   placeholder,
   icon = 'search',
-  className
+  className,
+  inputRef,
+  combobox
 }: FilterFieldProps): React.JSX.Element {
   return (
     <div
@@ -50,6 +76,17 @@ export function FilterField({
       <input
         className="input"
         type="text"
+        {...(inputRef !== undefined ? { ref: inputRef } : {})}
+        {...(combobox !== undefined
+          ? {
+              role: 'combobox',
+              'aria-expanded': true,
+              'aria-controls': combobox.controls,
+              ...(combobox.activeId !== null
+                ? { 'aria-activedescendant': combobox.activeId }
+                : {})
+            }
+          : {})}
         value={value}
         spellCheck={false}
         autoComplete="off"

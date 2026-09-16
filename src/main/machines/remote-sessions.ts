@@ -301,6 +301,7 @@ import { assertRemoteEnvAllowed } from './remote-env';
 import { REMOTE_ENV_SLOT } from './remote-env-carriage';
 import {
   probeRemoteEnvNames,
+  remoteEnvNamesDroppedFor,
   remoteEnvNamesFor,
   type RemoteEnvProbeResult
 } from './remote-env-probe';
@@ -1551,6 +1552,13 @@ export async function remoteCreate(input: RemoteCreateInput): Promise<Session> {
   // expanded by that machine's own login shell, on that machine, into the argv
   // of that machine's own tmux, at the slot `remoteCreateArgs` puts in the line.
   const passthrough = remoteEnvNamesFor(entry, input.agent);
+  // PHASE 275. What the union asked for and this rung would not carry, being
+  // the cap's overflow and the alphabet's refusals. Computed HERE, beside the
+  // list that does travel, because `remoteEnvNamesFor` applies the cap before
+  // `probeRemoteEnvNames` ever sees the names — so without this the overflow
+  // vanishes with nothing said, and only on remote. Empty for everybody under
+  // sixteen names, which is everybody as shipped.
+  const envDropped = remoteEnvNamesDroppedFor(entry, input.agent);
   // PHASE 270, THE VERIFIER'S ROUND, AND IT IS THE ONE FINDING THAT BLOCKED.
   //
   // THE SERVER IS BOOTED BEFORE A CREATE THAT CARRIES NAMES, so the login shell
@@ -1790,16 +1798,23 @@ export async function remoteCreate(input: RemoteCreateInput): Promise<Session> {
   // any name this rung refused as not a variable name. `probeFailed` means
   // Tortie could not ask, which is not the same as the variable being absent —
   // the create expands the values independently of this answer.
-  if (
-    envProbe !== null &&
-    (envProbe.missing.length > 0 || envProbe.probeFailed)
-  ) {
+  //
+  // PHASE 275 MERGES THE CAP'S OWN DROPS IN. A name the union asked for and
+  // this rung refused never reached the probe, so `envProbe.missing` cannot
+  // know about it. It is the same fact from the person's side — this session
+  // started without a variable they named — so it is the same sentence, and
+  // merging it here rather than raising a second notice keeps the latch's
+  // promise of one notice per session.
+  const envMissing = [
+    ...new Set([...(envProbe?.missing ?? []), ...envDropped])
+  ].sort();
+  if (envMissing.length > 0 || envProbe?.probeFailed === true) {
     postDurabilityNotice({
       kind: 'env-unresolved',
       sessionId,
       sessionName: oneLine(input.name),
-      names: envProbe.missing,
-      probeFailed: envProbe.probeFailed
+      names: envMissing,
+      probeFailed: envProbe?.probeFailed ?? false
     });
   }
   return projectRow(row, stateOf(input.machineId));

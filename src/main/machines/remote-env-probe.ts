@@ -214,8 +214,13 @@ export async function probeRemoteEnvNames(
 /**
  * The names a session on another machine will carry, being the SAME union rule
  * the local create uses: the agent row's own `launch.envPassthrough` from
- * agents.json, unioned with the names the person set in Settings then Launch
- * defaults, deduped, row first.
+ * agents.json, unioned with the names the person set for THIS agent in Settings
+ * then Launch defaults, unioned with the names they set for EVERY agent
+ * (Phase 275), deduped, row first.
+ *
+ * WHAT THIS RUNG REFUSES IS NOW REPORTED rather than assumed impossible. The
+ * cap here is asked a SECOND time over a union three doors of sixteen can fill,
+ * and `remoteEnvNamesDroppedFor` below is what a caller names in the notice.
  *
  * `envPassthroughFor` is imported rather than restated, so there is ONE spelling
  * of that rule and a later change to it cannot make a local session and a remote
@@ -240,12 +245,87 @@ export function remoteEnvNamesFor(
   entry: LaunchableEntryLike | null,
   agent: LaunchableAgentKind
 ): string[] {
+  return filterRemoteEnvNames(remoteEnvUnionFor(entry, agent));
+}
+
+/**
+ * The union BEFORE this rung's cap and alphabet are applied (Phase 275). Pure
+ * apart from the guarded settings read, and the one place the three sources are
+ * joined for a remote session.
+ *
+ * WHY IT IS SPLIT OUT, CORRECTED BY THE FIX ROUND. The first version of this
+ * comment said the split existed "so that the two answers a caller needs — what
+ * travels, and what did not — are computed from ONE union rather than from two
+ * reads of the settings". That is not what the code does and a verifier caught
+ * it. Both callers call the two EXPORTED functions separately
+ * (`remote-sessions.ts:1554` and `:1561`, `remote-restore.ts:468` and `:476`),
+ * each of which calls this one, so there are two unions and two settings reads.
+ * The comment described a shape nobody built.
+ *
+ * What the split is actually for is that `remoteEnvNamesFor` applies the cap and
+ * the alphabet, so a caller that asked it for the OVERFLOW would be asking a
+ * function that has already thrown the overflow away. The union has to be
+ * reachable un-filtered, and this is that.
+ *
+ * AND THE RACE THE OLD COMMENT CLAIMED TO CLOSE IS CLOSED BY SOMETHING ELSE,
+ * which is why the two functions may stay separate. Each pair of calls is two
+ * adjacent SYNCHRONOUS statements with no `await` between them, so no settings
+ * write can interleave; and `getSettings` answers from a per-load cache that
+ * only a write clears, so even a non-adjacent pair reads one answer. A future
+ * round that puts an `await` between a `remoteEnvNamesFor` and its
+ * `remoteEnvNamesDroppedFor` reopens it, and the honest repair then is to pass
+ * one union into both rather than to re-assert this paragraph.
+ */
+function remoteEnvUnionFor(
+  entry: LaunchableEntryLike | null,
+  agent: LaunchableAgentKind
+): string[] {
   let settingsNames: readonly string[] | undefined;
+  let sharedNames: readonly string[] | undefined;
   try {
-    settingsNames = getSettings().envPassthrough[agent as LaunchableAgentId];
+    const settings = getSettings();
+    settingsNames = settings.envPassthrough[agent as LaunchableAgentId];
+    // PHASE 275. The third source, read through the SAME seal-checked door and
+    // joined by the SAME pure rule the local create uses, so a person's shared
+    // key reaches a session on another machine exactly as it reaches one here.
+    // Remote feels identical to local.
+    sharedNames = settings.envPassthroughShared;
   } catch {
     settingsNames = undefined;
+    sharedNames = undefined;
   }
-  const union = envPassthroughFor(entry?.launch.envPassthrough, settingsNames);
-  return filterRemoteEnvNames(union ?? []);
+  return (
+    envPassthroughFor(
+      entry?.launch.envPassthrough,
+      settingsNames,
+      sharedNames
+    ) ?? []
+  );
+}
+
+/**
+ * The union's names this rung will NOT carry (Phase 275) — the cap's overflow
+ * and the alphabet's refusals, sorted, so a caller can name them.
+ *
+ * WHY IT EXISTS, and it is a divergence Phase 275 would otherwise have created.
+ * `filterRemoteEnvNames` caps the union at `REMOTE_ENV_NAMES_MAX` = 16 and
+ * truncates SILENTLY, and `remoteEnvNamesFor` applies it BEFORE
+ * `probeRemoteEnvNames` gets the list — so a name past the cap never reaches
+ * the `dropped` list that function already computes and already reports. With
+ * two sources the comment on that constant, "the cap the settings door already
+ * enforces", was already untrue; with THREE doors of sixteen the union can
+ * reach 48 and it is badly untrue. Without this, a person over the cap loses
+ * names with nothing said, on remote only.
+ *
+ * IT RAISES NO CAP AND SENDS NOTHING. It is built from
+ * `droppedRemoteEnvNames`, which Phase 270 already wrote, over the same union;
+ * the far-side script, `REMOTE_ENV_ALLOWED` and the transport do not move. The
+ * caller merges the answer into the `env-unresolved` notice the session already
+ * raises, so the person is told which names did not travel, by name, once.
+ */
+export function remoteEnvNamesDroppedFor(
+  entry: LaunchableEntryLike | null,
+  agent: LaunchableAgentKind
+): string[] {
+  return droppedRemoteEnvNames(remoteEnvUnionFor(entry, agent));
 }

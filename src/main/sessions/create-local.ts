@@ -473,9 +473,17 @@ export async function createLocalSession(
   // name an agent appended to settings.json was already refused before this
   // line; nothing under here changes, being one probe, the merge, the notice
   // and the row, and the row goes on carrying NAMES ONLY.
+  //
+  // PHASE 275 ADDS THE THIRD SOURCE, being the names the person set for EVERY
+  // agent. It joins on the end, so the list a person who uses only the first
+  // two routes gets is byte for byte the list they got at the parent. It comes
+  // through the SAME seal-checked read, under its own seal field, so a shared
+  // name an agent wrote into settings.json was refused before this line too.
+  const settings = getSettings();
   const chosenPassthrough = envPassthroughFor(
     spec.envPassthrough,
-    getSettings().envPassthrough[input.agent as LaunchableAgentId]
+    settings.envPassthrough[input.agent as LaunchableAgentId],
+    settings.envPassthroughShared
   );
   if (chosenPassthrough !== undefined) spec.envPassthrough = chosenPassthrough;
 
@@ -610,8 +618,25 @@ export async function createLocalSession(
   const launchArgv = spawnArgvFor(spec.argv, bareName, capture);
 
   // PHASE 33. The variables this row asks Tortie to read from the login
-  // shell. One probe, 3 second deadline, group killed, and nothing is
-  // spawned at all when the row names none, which is every compiled agent.
+  // shell. One probe, group killed on the `PATH_CAPTURE_TIMEOUT_MS` deadline
+  // in ../tmux/resolve.ts, and nothing is spawned at all when the row names
+  // none, which is every compiled agent as shipped.
+  //
+  // PHASE 275 CORRECTED THIS COMMENT. It claimed three seconds, and the
+  // deadline has been `PATH_CAPTURE_TIMEOUT_MS = 10_000` for as long as this
+  // call has existed. The constant is NAMED here rather than its value
+  // restated, so a later change to it cannot make this line wrong again — and
+  // the old number is not written out even as a quotation, because
+  // `conformance:agents` rule 34 reads this file with a regular expression and
+  // cannot tell a quotation from a claim.
+  //
+  // WHO PAYS FOR THIS PROBE MOVED IN PHASE 275, and it is a stated cost rather
+  // than a defect. A person who set a name for claude alone paid it on claude
+  // launches and nowhere else. One name on the SHARED list makes every agent's
+  // create pay it. Measured on the operator's own login shell with the
+  // product's own recipe: 52 names, median 1,110 ms over five runs. A person
+  // who sets a key wants the key; the defence is that the shared list is empty
+  // at install and that an empty union spawns nothing at all.
   //
   // The resolved pairs live in this local and in the tmux `-e` set, and
   // nowhere else. They are deliberately NOT put on `spec.env`, because that

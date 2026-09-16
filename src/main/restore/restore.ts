@@ -82,6 +82,10 @@ import { postDurabilityNotice } from '../notice';
 // The pane env merge rule, owned by the create path's pure module so that the
 // two spawn sites cannot drift (Phase 33). One import of one pure function.
 import { loginPaneEnv, paneEnvFor } from '../sessions/launch-plan';
+// PHASE 275. The union rule itself, and the seal-checked settings it reads.
+// `@shared/launch-env` imports nothing, so this pulls in no graph.
+import { envPassthroughFor } from '@shared/launch-env';
+import { getSettings } from '../settings/store';
 // PHASE 202. Which vendor sign in this row was launched under, resolved AGAIN
 // from the name the row carries. One pure file read under
 // `<userData>/gmux/logins`; nothing here opens a keychain or spawns anything.
@@ -957,10 +961,40 @@ export async function restoreSessionInTmux(
   // and a restored pane see the same environment for the first time. A row
   // written before this phase names nothing, spawns no probe, and behaves
   // exactly as it did.
+  //
+  // PHASE 275 CLOSES A DIVERGENCE HERE RATHER THAN INHERITING IT. This path
+  // replayed `rec.envPassthrough` off the manifest row and nothing else, and
+  // `envPassthrough` is WRITE ONCE — deliberately excluded from
+  // `ManifestSessionPatch` in ../manifest/codecs.ts. The REMOTE restore re-reads
+  // the settings union by design and says so in as many words
+  // (../machines/remote-restore.ts). So at the parent, a name a person added in
+  // Settings after a session was created reached that session on a remote
+  // restore and never on a local one.
+  //
+  // Three reasons the local restore now reads the union too, and all three are
+  // needed. Remote feels identical to local is the operator's standing rule and
+  // this was the one place in the env path where it was not true. The
+  // reporter's own sentence is "applies to any agent session that needs keys",
+  // and a restored session is a session that needs keys. And it is STRICTLY
+  // SAFER than what was here: the names it adds come from the SEALED settings,
+  // while the names it already replayed come from the manifest row, which is
+  // not sealed — Phase 269's second recorded limit. The row is kept in the
+  // union because it is the only record of an agents.json name from a session
+  // created under a different agents.json.
+  //
+  // `shell` rows take the agent arm as an unknown id, which reads `undefined`
+  // out of the per-agent map. They still get the SHARED list, and that is the
+  // answer a person asking for "any agent session that needs keys" wants.
+  const restoreSettings = getSettings();
+  const restorePassthrough = envPassthroughFor(
+    rec.envPassthrough,
+    restoreSettings.envPassthrough[rec.agent as LaunchableAgentId],
+    restoreSettings.envPassthroughShared
+  );
   let resolvedEnv: Record<string, string> = {};
   let envProbe: tmux.CaptureEnvResult | null = null;
-  if (rec.envPassthrough !== undefined && rec.envPassthrough.length > 0) {
-    envProbe = await tmux.captureLoginShellEnv(rec.envPassthrough);
+  if (restorePassthrough !== undefined && restorePassthrough.length > 0) {
+    envProbe = await tmux.captureLoginShellEnv(restorePassthrough);
     resolvedEnv = envProbe.values;
   }
 

@@ -1062,6 +1062,25 @@ export const CHECKS = [
   // checked by sha256 after every ablation and again at the end. It launches no
   // Electron and starts no process but node.
   pure('ablation:p274'),
+  // PHASE 275's attack on `conformance:agents` section 9, the rules about the
+  // SHARED shell-variable list every agent reads, and on the two renderer suites
+  // that carry the picker. It breaks THIRTY-ONE clauses one at a time in two
+  // lanes — 27 against the gate (the two seal refusals both directions, the
+  // isDangerStateEmpty clause a new sealed field is most likely to be forgotten
+  // in, the union's order, the module that may import nothing, the cap sentence
+  // and the launch paths) and 4 against the picker suites (a row that must
+  // exist, a row that must be shown rather than hidden, a state that must be
+  // said while ticking, and the element the keyboard model rests on) — and
+  // proves each reddens THE RULE THAT OWNS IT, measured as a delta against the
+  // base so an inherited failure cannot be mistaken for a caused one. The count
+  // is the one the run prints; a lane added without moving this line is the
+  // drift it exists to stop. Unlike the two harnesses above it never writes
+  // into the working tree: it clones src/ and build/ with `cp -Rc` under
+  // /private/tmp, symlinks node_modules, edits the CLONE and removes it in a
+  // `finally` and on a signal, because a phase runs three builders in one
+  // worktree at once. It launches no Electron, starts no tmux server, spawns no
+  // agent and spends no token.
+  pure('ablation:p275'),
   // PHASE 273's app run, and the reading the phase exists for. ONE Electron on
   // a scratch profile and a scratch HOME, over a project the probe builds and
   // then opens THROUGH A REAL SYMLINK — belucid's shape, issue 25. Seven arms:
@@ -1093,6 +1112,29 @@ export const CHECKS = [
   // the before-and-after; the expectations never flip, so the findings ARE the
   // parent reading. It spawns no agent and spends no token.
   electron('probe:p274'),
+  // PHASE 275's BEFORE number, and it is a measurement rather than an assertion.
+  // ONE Electron on a scratch profile, a scratch HOME whose .zshrc exports a set
+  // of INVENTED variable names, and three stand-in agent executables so three
+  // cards draw. It counts the gestures it takes to put one variable name on one
+  // agent and then the same name on three, dispatching every gesture as a real
+  // DOM event on the real shipped control — except the pick from the native
+  // <datalist> popup, which Chromium draws outside the document and which is the
+  // defect the phase exists to fix, charged at its cheapest possible price so the
+  // before number is a floor. No session is created, no agent is launched, no
+  // token is spent, and not one name in it is a name the operator's own shell
+  // exports.
+  electron('probe:p275:gestures'),
+  // PHASE 275, THE APP RUN. ONE Electron on a scratch profile with a scratch
+  // HOME whose .zshrc exports 52 INVENTED names and its own tmux socket, all
+  // ended by build/electron-run.mjs in a finally. It drives the shared card,
+  // the picker, the batch confirm, a per-agent narrowing beside it and a real
+  // login shell that exports nothing, then starts three sessions whose agents
+  // are STAND-IN scripts this probe writes — each reads its OWN environ and
+  // records which NAMES it received, never a value. No real agent runs, no
+  // token is spent, and the one sentinel value is grepped for afterwards in
+  // the profile, the manifest, the logs and settings.json and must be in none
+  // of them.
+  electron('probe:p275'),
   // PHASE 261 item 1. The harness socket refusal, DRIVEN. ONE Electron at a
   // time, never two, on a scratch profile with a scratch HOME under its own
   // GMUX_HARNESS_DIR and the socket gmux-p261-<pid>. Five arms: the real app

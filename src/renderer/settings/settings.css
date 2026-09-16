@@ -1165,14 +1165,9 @@
   color: var(--text-primary);
 }
 
-/* The field and the button share the row's right-hand end, level with each
-   other: .set-select is 24px and so is this button. */
-.set-env-field {
-  flex: 0 1 200px;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
+/* Phase 275 removed `.set-env-field` with the inline text field and its
+   `<datalist>`. The one control that offers names is the picker sheet, whose
+   styles live in env-picker.css beside its component. */
 
 .set-env-add {
   flex: 0 0 auto;
@@ -1180,10 +1175,11 @@
   padding: 0 var(--space-4);
 }
 
-/* The reserved line under the field. It is only in the tree while the field
-   is open, and while it is open it ALWAYS says one of its three things, so
-   the field's box never moves as a person types. Hidden state, if one is ever
-   wanted here, goes by visibility and never by display. */
+/* The reserved line. In the picker sheet it is always in the tree and always
+   says one of its four things, so the list under it never moves as a person
+   types; on a card it is the rejection line, present only when there is
+   something to report. Hidden state, if one is ever wanted here, goes by
+   visibility and never by display. */
 .set-env-note {
   margin: var(--space-3) 0 0;
   font-size: var(--text-xs);
@@ -1202,11 +1198,19 @@
 }
 
 .set-env-empty,
+.set-env-inherit,
 .set-env-caption {
   margin: 0;
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   color: var(--text-muted);
+}
+
+/* Phase 275. What this agent gets from the card at the top of the page. One
+   line, drawn only when the shared list has something on it, so a person who
+   has never opened that card meets no extra sentence anywhere here. */
+.set-env-inherit {
+  margin-top: var(--space-2);
 }
 
 .set-env-chips {
@@ -1255,6 +1259,18 @@
 
 .set-confirm {
   width: 420px;
+}
+
+/* Phase 275. The names a batch confirm is about, drawn above the body as a
+   wrapped row of the same code chips the danger confirm uses for a command.
+   THE NAMES ARE DRAWN AND NEVER ONLY COUNTED: a person agreeing to a list has
+   to be able to read the list, and sixteen is the cap, so this row can never
+   be longer than sixteen short chips. */
+.set-confirm-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
 }
 
 .set-confirm-body {

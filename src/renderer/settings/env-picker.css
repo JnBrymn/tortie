@@ -1,0 +1,178 @@
+/* The shell-variable picker (Phase 275) — colocated with its component per the
+   growth guardrails. The shared modal shell (.modal-scrim, .modal,
+   .modal-title, .modal-actions) stays in styles/app.css, because every other
+   sheet draws it too, and the reserved note line (.set-env-note) stays in
+   settings.css beside the card it was written for.
+
+   WRITTEN `.modal.set-env-picker`, NEVER `.set-env-picker`, for the reason
+   shortcuts-overlay.css:16-18 records: it has to beat `.modal`'s own
+   `overflow-y: auto` and `width` in styles/app.css whatever order the bundler
+   emits the two stylesheets in.
+
+   THE BODY SCROLLS, NEVER THE SHEET. That is the whole of the first complaint.
+   A header, a field, a reserved line, a scrolling list and a footer: the field
+   and the count stay readable while the list is four hundred pixels down, and
+   the footer is never clipped. The list takes what is left with
+   `flex: 1 1 auto; min-height: 0`, so it grows with the window instead of
+   carrying a magic number — exactly `.shortcut-groups` next door. `min-height:
+   0` is not decoration: without it a flex child refuses to shrink below its
+   content and the list pushes the footer off the sheet. */
+
+.modal.set-env-picker {
+  /* The settings column caps at 560px and so does this, so the sheet reads as
+     the same width as the card it was opened from. */
+  width: min(560px, calc(100vw - var(--space-9)));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.set-env-picker-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.set-env-picker-head .modal-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+/* The live count. It is the cap's remaining room once anything is ticked, so
+   it is read often and must not be the quietest thing on the sheet. */
+.set-env-picker-count {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.set-env-picker-filter {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+/* The reserved line sits between the field and the list, and always says one
+   of its four things, so neither box moves as a person types. */
+.modal.set-env-picker > .set-env-note {
+  flex: 0 0 auto;
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+.set-env-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* About twelve rows at rest, and more on a taller window. MEASURED rather
+     than reasoned: `probe:p275` read this box at 308px tall in the 760x560
+     Settings window with 2,456px of rows inside it, and drove scrollTop from 0
+     to 2,150. 60vh of 560 is 336, and the flex column takes the rest, which is
+     why the resting height is not that number. The 51 names the operator's
+     shell exports scroll inside this box, in our document, with our
+     scrollbar. */
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  /* The sheet's own ground, said explicitly rather than inherited, so the
+     hover and cursor fills step UP from a known value. */
+  background: var(--bg-surface);
+  padding: var(--space-2) 0;
+}
+
+.set-env-list:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.set-env-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* 24px rows, the step the sheet's own type sits on. `scroll-margin` keeps a
+     row clear of the rounded edge when the arrows scroll it into view. */
+  min-height: 24px;
+  padding: 0 var(--space-4);
+  scroll-margin: var(--space-3) 0;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.set-env-opt:hover {
+  background: var(--bg-raised);
+}
+
+/* The keyboard cursor, kept SEPARATE from the ticked state: one is where the
+   arrows are and the other is what will be added. Drawing them the same way
+   would make a person unable to tell what pressing Add takes. */
+.set-env-opt.cursor {
+  background: var(--bg-active);
+}
+
+.set-env-opt.off {
+  cursor: default;
+  color: var(--text-secondary);
+}
+
+.set-env-opt.off:hover {
+  background: none;
+}
+
+.set-env-opt.cursor.off {
+  background: var(--bg-raised);
+}
+
+/* The tick slot is reserved whether or not there is a tick in it, so the names
+   stay in one column and the list does not shuffle as rows are chosen. */
+.set-env-opt-tick {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--accent);
+}
+
+.set-env-opt-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+/* The right-hand note: what this row already is, or why it cannot be taken.
+   Printed, never a tooltip — a fact behind a tooltip is a fact most people
+   never meet (EnableForDialog.tsx:122-132). */
+.set-env-opt-note {
+  flex: 0 1 auto;
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  /* --text-secondary and NEVER --text-muted, for the reason settings.css §1.1
+     records: muted passes 4.5:1 only up to --bg-surface (4.15:1 on
+     --bg-active), and every one of these notes can sit on a hovered row and
+     on the keyboard cursor's --bg-active fill. */
+  color: var(--text-secondary);
+}
+
+.set-env-picker-empty {
+  margin: var(--space-4);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.modal.set-env-picker > .modal-actions {
+  flex: 0 0 auto;
+  margin-top: var(--space-5);
+}

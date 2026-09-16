@@ -5,8 +5,8 @@
  * Phase 33 and nothing on any machine could reach it. The control is the
  * whole phase from a person's side, so what the battery has to hold is the
  * surface: the quiet empty state, the names offered without a value beside
- * them, the refusal a person reads at the field they typed into, the confirm
- * that names what is about to happen, and the compact resting row.
+ * them, the refusal a person reads, the confirm that names what is about to
+ * happen, and the compact resting row.
  *
  * ONE RULE IS ABOVE THE REST AND THIS FILE EXISTS MOSTLY FOR IT: **not one
  * byte of a value may appear on this surface.** The rendered markup is
@@ -14,11 +14,19 @@
  * along, because "names only" is a promise about bytes rather than about
  * intentions. The sentinel is invented here and is never a real key.
  *
- * It renders the exported pieces directly and reads the two source files as
- * bytes rather than mounting the section, for the reason
- * `p1741-font-field.test.tsx` next door wrote down: there is no DOM in this
- * lane, and zustand serves a server render its INITIAL state, so a store a
- * test sets is invisible to `renderToStaticMarkup`.
+ * It renders the exported pieces directly and reads the source files as bytes
+ * rather than mounting the section, for the reason `p1741-font-field.test.tsx`
+ * next door wrote down: there is no DOM in this lane, and zustand serves a
+ * server render its INITIAL state, so a store a test sets is invisible to
+ * `renderToStaticMarkup`.
+ *
+ * PHASE 275 MOVED THREE THINGS OUT OF THIS FILE AND THE MOVES ARE DELIBERATE.
+ * The inline field, its `<datalist>` and the note line under it are gone with
+ * the control that replaced them, so every assertion about a field lives in
+ * `p275-env-shared.test.tsx` beside the picker sheet. The refusal helper moved
+ * to `EnvPickerSheet.tsx` with the control that calls it, and is still the one
+ * and only call to `envPassthroughRefusal` in this window. Everything Phase
+ * 269 promised that a person still meets is asserted here, unchanged.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -30,23 +38,23 @@ import {
   ENV_REFUSED_EXACT,
   ENV_REFUSED_PATTERNS
 } from '@shared/agent-overlay';
-import {
-  ConfirmEnvModal,
-  EnvNamesGroup,
-  envAddDecision
-} from '../LaunchDefaultsSection';
-import {
-  ENV_NAMES_ONLY,
-  ENV_PROBE_FAILED,
-  ENV_SET_CAPTION,
-  envEmptyLine
-} from '../env-copy';
+import { ConfirmEnvModal, EnvNamesGroup } from '../LaunchDefaultsSection';
+import { envAddDecision } from '../EnvPickerSheet';
+import { ENV_SET_CAPTION, envEmptyLine } from '../env-copy';
 
 const section = readFileSync(
   join(__dirname, '..', 'LaunchDefaultsSection.tsx'),
   'utf8'
 );
+const picker = readFileSync(
+  join(__dirname, '..', 'EnvPickerSheet.tsx'),
+  'utf8'
+);
 const css = readFileSync(join(__dirname, '..', 'settings.css'), 'utf8');
+const pickerCss = readFileSync(
+  join(__dirname, '..', 'env-picker.css'),
+  'utf8'
+);
 const copy = readFileSync(join(__dirname, '..', 'env-copy.ts'), 'utf8');
 
 /**
@@ -56,8 +64,8 @@ const copy = readFileSync(join(__dirname, '..', 'env-copy.ts'), 'utf8');
 const SENTINEL = 'P269_TEST_VALUE_not_a_real_key';
 
 /** The declaration blocks of every rule whose selector names this class. */
-function blocksFor(cls: string): { selector: string; body: string }[] {
-  const bare = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+function blocksFor(cls: string, sheet: string = css): { selector: string; body: string }[] {
+  const bare = sheet.replace(/\/\*[\s\S]*?\*\//g, ' ');
   const out: { selector: string; body: string }[] = [];
   const re = /([^{}]+)\{([^{}]*)\}/g;
   let match: RegExpExecArray | null;
@@ -76,21 +84,29 @@ function group(
 ): string {
   return renderToStaticMarkup(
     <EnvNamesGroup
-      agentId="claude"
-      agentName="Claude Code"
+      scope="claude"
+      subject="Claude Code"
       names={[]}
-      candidates={undefined}
-      open={false}
-      draft=""
-      refusal={null}
+      emptyLine={envEmptyLine('Claude Code')}
+      inheritCount={0}
+      rejected={[]}
+      unread={[]}
+      unreadOver={0}
+      unnamed={0}
       onOpen={() => undefined}
-      onClose={() => undefined}
-      onDraft={() => undefined}
-      onSubmit={() => undefined}
       onRemove={() => undefined}
       {...over}
     />
   );
+}
+
+/**
+ * A source file with its comments removed, so a scan for a construct reads the
+ * CODE rather than the prose about it. Both headers say the word "datalist"
+ * because both explain why it went.
+ */
+function code(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
 }
 
 /** The markup with tags stripped, which is what a person actually reads. */
@@ -126,7 +142,9 @@ describe('the empty state', () => {
   });
 
   it('names the agent it is about', () => {
-    expect(group({ agentName: 'Codex' })).toContain('Add any others Codex needs.');
+    expect(group({ emptyLine: envEmptyLine('Codex') })).toContain(
+      'Add any others Codex needs.'
+    );
   });
 
   it('is TRUE about what a session already gets: PATH and LANG, no others', () => {
@@ -140,8 +158,17 @@ describe('the empty state', () => {
 
   it('opens no field and draws no confirm at rest', () => {
     expect(html).not.toContain('<input');
-    expect(html).not.toContain('<datalist');
     expect(html).not.toContain('alertdialog');
+  });
+
+  // Phase 275. The datalist is gone from the whole window, not just from the
+  // resting row: it is Electron's own autofill popup, outside our document,
+  // which is why it could neither be scrolled nor take more than one name.
+  it('there is no datalist anywhere in this window any more', () => {
+    const src = `${code(section)} ${code(picker)}`;
+    expect(src).not.toContain('datalist');
+    // And nothing attaches one: `list=` on an input is the only way in.
+    expect(src).not.toMatch(/\blist=/);
   });
 
   it('holds the slot the chips will take, so the card does not jump', () => {
@@ -153,89 +180,16 @@ describe('the empty state', () => {
     expect(slot[0]?.body).toContain('min-height');
   });
 
-  it('no rule in the group hides anything by display', () => {
-    for (const rule of blocksFor('.set-env-')) {
+  it('no rule in the group or the picker hides anything by display', () => {
+    for (const rule of [
+      ...blocksFor('.set-env-'),
+      ...blocksFor('.set-env-', pickerCss)
+    ]) {
       expect(
         /display\s*:\s*none/.test(rule.body),
         `${rule.selector} { ${rule.body} }`
       ).toBe(false);
     }
-  });
-});
-
-describe('the picker', () => {
-  const candidates = {
-    names: ['FIREWORKS_API_KEY', 'FIREWORKS_BASE_URL', 'MY_OWN_THING'],
-    probeFailed: false
-  };
-  const html = group({ open: true, candidates, draft: 'FIRE' });
-
-  it('is a text field with a datalist, and never a cage', () => {
-    // The Phase 174.1 ruling in this same window: a name the shell does not
-    // export yet is typed and accepted.
-    expect(html).toContain('type="text"');
-    expect(html).toContain('list="set-env-names-claude"');
-    expect(html).toContain('<datalist id="set-env-names-claude">');
-    expect(html).not.toContain('<select');
-  });
-
-  it('offers every candidate name, one option each', () => {
-    for (const n of candidates.names) expect(html).toContain(`value="${n}"`);
-    expect(html.split('<option').length - 1).toBe(candidates.names.length);
-  });
-
-  it('NEVER renders a value — the option carries a name and nothing else', () => {
-    const withValues = group({
-      open: true,
-      candidates: { names: ['FIREWORKS_API_KEY'], probeFailed: false }
-    });
-    expect(withValues).not.toContain(SENTINEL);
-    expect(withValues).not.toContain('=' + SENTINEL);
-    // The datalist draws options and no text at all, so nothing can ride
-    // alongside a name inside it.
-    const list = withValues.slice(
-      withValues.indexOf('<datalist'),
-      withValues.indexOf('</datalist>')
-    );
-    expect(list.replace(/<[^>]*>/g, '')).toBe('');
-  });
-
-  it('nothing in the copy module can interpolate a value', () => {
-    // There is no function here that takes anything but a name or an agent's
-    // display name, which is what keeps rule 1 of that file mechanical.
-    expect(copy).not.toMatch(/\bvalue\b\s*:/);
-    expect(copy).toContain('NAMES ONLY');
-  });
-
-  it('says what the list is, in the reserved line under the field', () => {
-    expect(words(html)).toContain(ENV_NAMES_ONLY);
-    expect(ENV_NAMES_ONLY).toBe(
-      'Names only. Tortie never reads a value into this window.'
-    );
-  });
-
-  it('says so when the shell did not answer, and stays typable', () => {
-    const failed = group({
-      open: true,
-      candidates: { names: [], probeFailed: true }
-    });
-    expect(words(failed)).toContain(ENV_PROBE_FAILED);
-    expect(failed).toContain('type="text"');
-    expect(failed).toContain('<datalist id="set-env-names-claude"></datalist>');
-  });
-
-  it('is asked for on open and nowhere else, so nothing probes at boot', () => {
-    expect(section).toContain('loadEnvCandidates(agentId);');
-    expect(section.split('loadEnvCandidates(agentId)').length - 1).toBe(1);
-  });
-
-  it('keeps what was typed', () => {
-    expect(html).toContain('value="FIRE"');
-  });
-
-  it('carries no count badge and no paragraph about where the names came from', () => {
-    expect(words(html)).not.toMatch(/\b3\b/);
-    expect(html).not.toContain('suggestion');
   });
 });
 
@@ -301,19 +255,6 @@ describe('the refusal', () => {
     );
   });
 
-  it('is drawn in the error colour, in the line the resting note holds', () => {
-    const html = group({ open: true, draft: 'PATH', refusal: refusalFor('PATH') });
-    expect(html).toContain('class="set-env-note error"');
-    expect(words(html)).toContain(refusalFor('PATH'));
-    // And it replaces the resting line rather than being added under it.
-    expect(words(html)).not.toContain(ENV_NAMES_ONLY);
-    // Nothing is written, and what was typed is still there to correct.
-    expect(html).toContain('value="PATH"');
-    const error = blocksFor('.set-env-note.error');
-    expect(error).toHaveLength(1);
-    expect(error[0]?.body).toContain('var(--error)');
-  });
-
   it('accepts an ordinary name, which is what opens the confirm', () => {
     expect(envAddDecision('  FIREWORKS_API_KEY  ', ctx)).toEqual({
       name: 'FIREWORKS_API_KEY'
@@ -321,22 +262,31 @@ describe('the refusal', () => {
     expect(envAddDecision('A_B9', ctx)).toEqual({ name: 'A_B9' });
   });
 
-  it('re-implements no part of the rule', () => {
-    expect(section).toContain(
-      "import { envPassthroughRefusal } from '@shared/agent-overlay';"
+  it('re-implements no part of the rule, and asks it from ONE place', () => {
+    expect(picker).toContain(
+      "import { envPassthroughRefusal, OVERLAY_LIMITS } from '@shared/agent-overlay';"
     );
-    // One call site, inside the one decision helper.
-    expect(section.split('envPassthroughRefusal(').length - 1).toBe(1);
+    // Two call sites in the window and both are in the picker: the decision
+    // helper, and the one that reads the CAP sentence rather than copying it.
+    expect(picker.split('envPassthroughRefusal(').length - 1).toBe(2);
+    expect(section).not.toContain('envPassthroughRefusal');
+  });
+
+  it('nothing in the copy module can interpolate a value', () => {
+    // There is no function here that takes anything but a name, a count or an
+    // agent's display name, which is what keeps rule 1 of that file
+    // mechanical.
+    expect(copy).not.toMatch(/\bvalue\b\s*:/);
+    expect(copy).toContain('NAMES ONLY');
   });
 });
 
-describe('the confirm', () => {
+describe('the confirm, for one name on one agent', () => {
   const html = renderToStaticMarkup(
     <ConfirmEnvModal
       pending={{
-        agentId: 'claude',
-        agentName: 'Claude Code',
-        name: 'FIREWORKS_API_KEY'
+        target: { kind: 'agent', agentId: 'claude', agentName: 'Claude Code' },
+        names: ['FIREWORKS_API_KEY']
       }}
       onCancel={() => undefined}
       onAdd={() => undefined}
@@ -420,8 +370,7 @@ describe('the resting row once names are set', () => {
     expect(html).not.toContain('alertdialog');
     const from = section.indexOf('onRemove={(name) => {');
     const arm = section.slice(from, section.indexOf('}}', from));
-    expect(arm).toContain('writeNames(names.filter');
-    expect(arm).not.toContain('onRequestEnv');
+    expect(arm).toContain('envPassthroughShared: names.filter');
     expect(arm).not.toContain('setPendingEnv');
   });
 
@@ -457,7 +406,11 @@ describe('the group lives in the card that already exists', () => {
   });
 
   it('draws every colour through a token', () => {
-    for (const r of blocksFor('.set-env-')) {
+    for (const r of [
+      ...blocksFor('.set-env-'),
+      ...blocksFor('.set-env-', pickerCss),
+      ...blocksFor('.set-confirm-names')
+    ]) {
       const colours = r.body.match(/(?:^|[\s:])(#[0-9a-fA-F]{3,8}|rgba?\()/g);
       expect(colours, `${r.selector} { ${r.body} }`).toBe(null);
     }
@@ -484,8 +437,7 @@ describe('the group lives in the card that already exists', () => {
   // The seal is what stops an agent on the machine granting itself a name, and
   // a name carries no warning marker, so a caption scoped to warning-marked
   // options read as if it did not cover them. It does: `dangerStateOf` seals
-  // every name under its agent id and `withSealedDangerState` drops an
-  // unsealed one.
+  // every name and `withSealedDangerState` drops an unsealed one.
   it('the seal caption names the shell variables, which carry no warning marker', () => {
     // JSX wraps the sentence over several source lines, so the caption is
     // read the way a person reads it rather than the way it is indented.
@@ -497,7 +449,7 @@ describe('the group lives in the card that already exists', () => {
   });
 
   it('uses no tmux word and no DOM-drawn menu', () => {
-    const all = `${copy} ${section}`;
+    const all = `${copy} ${section} ${picker}`;
     expect(/\bpane\b|\bprefix\b/i.test(copy)).toBe(false);
     expect(all).not.toContain('popupMenu');
   });

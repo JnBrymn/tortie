@@ -13,14 +13,19 @@
 import { create } from 'zustand';
 import type {
   AgentFlagCatalogs,
+  EnvRejections,
   EnvVarCandidates,
   GmuxSettings,
   GmuxSettingsPatch
 } from '@shared/settings';
-import { defaultGmuxSettings } from '@shared/settings';
-import type { AgentsScanResult, LaunchableAgentId } from '@shared/types';
+import { defaultGmuxSettings, noEnvRejections } from '@shared/settings';
+import type { AgentsScanResult } from '@shared/types';
 import type { ArchOptions, FoldOptions } from '@shared/fold';
-import type { ConfigRowsResult, InstalledGmuxApi } from '@shared/ipc';
+import type {
+  ConfigRowsResult,
+  EnvCandidateScope,
+  InstalledGmuxApi
+} from '@shared/ipc';
 import { gmuxBridge } from '../bridge';
 
 function bridge(): InstalledGmuxApi | undefined {
@@ -108,15 +113,35 @@ export interface SettingsStoreState {
    * ever held one.
    *
    * It is PER OPENING and deliberately not a cache. An entry is cleared the
-   * moment the field opens and filled when the answer lands, so a person who
-   * has just added a variable to their shell profile and reopened the field
-   * gets the new name rather than the answer from before they edited it. An
-   * agent with no entry has not been asked this opening; `probeFailed` is the
+   * moment the picker opens and filled when the answer lands, so a person who
+   * has just added a variable to their shell profile and reopened the picker
+   * gets the new name rather than the answer from before they edited it. A
+   * scope with no entry has not been asked this opening; `probeFailed` is the
    * answer that the shell did not reply at all, and the field stays typable in
    * both cases — nothing here ever blocks the person from naming a variable
    * their shell does not export yet.
+   *
+   * PHASE 275 KEYED IT BY SCOPE rather than by agent, because the shared list
+   * is keyed by nothing and still has to ask the same question. The key is
+   * `envScopeKey`'s, and the two key spaces cannot collide — see that
+   * function.
    */
-  envCandidates: Partial<Record<LaunchableAgentId, EnvVarCandidates>>;
+  envCandidates: Record<string, EnvVarCandidates | undefined>;
+
+  /**
+   * PHASE 275. What main's last read of `settings.json` DROPPED from the
+   * shell-variable lists, so Launch defaults can say it on the card that lost
+   * the name.
+   *
+   * A name no human confirmed through this window is dropped by the seal —
+   * that is layer one and this phase did not move it. Before this phase the
+   * only record of a drop was a line in `app.log`, so a person whose agent had
+   * quietly stopped seeing a key had nowhere to find out why. Every string
+   * here has already passed the shape gate in main, so nothing hostile can
+   * arrive through it, and an entry that could NOT be named safely is a count
+   * and never an echo.
+   */
+  envRejections: EnvRejections;
 
   /**
    * PHASE 175. Read the settings once and subscribe to main's broadcast, and
@@ -175,16 +200,43 @@ export interface SettingsStoreState {
   refreshArchOptions(): Promise<void>;
 
   /**
-   * PHASE 269. Ask main which names this login shell exports, for one agent.
+   * PHASE 269, scoped in Phase 275. Ask main which names this login shell
+   * exports, for one agent or for the shared list.
    *
-   * Called when the shell-variable field OPENS and nowhere else, so nothing is
-   * probed at boot and a person who never opens the field never starts a
-   * shell. Feature-detected on the one method, exactly like `agentFlagPresets`
-   * above: an older preload leaves the field typable and the line under it
-   * saying the shell did not answer, which is the truth from where the person
-   * is standing.
+   * Called when the picker OPENS and nowhere else, so nothing is probed at
+   * boot and a person who never opens it never starts a shell.
+   * Feature-detected on the one method, exactly like `agentFlagPresets` above:
+   * an older preload leaves the field typable and the line under it saying the
+   * shell did not answer, which is the truth from where the person is
+   * standing.
    */
-  loadEnvCandidates(agentId: LaunchableAgentId): void;
+  loadEnvCandidates(scope: EnvCandidateScope): void;
+
+  /**
+   * PHASE 275. Re-read what main dropped on its last read of the settings
+   * file. Reads only, from memory in main — it opens no file and spawns
+   * nothing.
+   *
+   * It is asked again after a write because `persistSettings` writes the
+   * seal-filtered settings BACK: the dropped names are then gone from the
+   * file, and going on saying they are ignored would be a lie.
+   */
+  refreshEnvRejections(): Promise<void>;
+}
+
+/**
+ * PHASE 275. The key one scope's candidate answer is filed under.
+ *
+ * THE TWO KEY SPACES CANNOT COLLIDE. `*` can never begin a
+ * `LaunchableAgentId`: `OVERLAY_ID_PATTERN` is `^[a-z][a-z0-9-]{0,31}$` and
+ * every one of the thirteen compiled ids begins with a lowercase letter, so
+ * the shared answer can never be served for an agent and an agent's answer can
+ * never be served as the shared one. It is the same belt the seal uses one
+ * layer down, where a per-agent seal key holds exactly one space and a bare
+ * shared name holds none.
+ */
+export function envScopeKey(scope: EnvCandidateScope): string {
+  return scope.kind === 'shared' ? '*shared' : scope.agentId;
 }
 
 let initialized = false;
@@ -206,6 +258,7 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => ({
   archOptions: null,
   archOptionsLoaded: false,
   envCandidates: {},
+  envRejections: noEnvRejections(),
 
   watchSettings() {
     if (watching) return;
@@ -261,6 +314,11 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => ({
 
     // Phase 158. The arch twin of the read above, and the same posture.
     void get().refreshArchOptions();
+
+    // Phase 275. One read at init, same posture again: main answers from the
+    // list it computed on its last settings read, so nothing is opened and
+    // nothing is spawned. Launch defaults asks again after every write.
+    void get().refreshEnvRejections();
   },
 
   async update(patch) {
@@ -390,22 +448,37 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => ({
     }
   },
 
-  loadEnvCandidates(agentId) {
+  loadEnvCandidates(scope) {
     const b = bridge();
+    const key = envScopeKey(scope);
     const put = (answer: EnvVarCandidates | undefined): void => {
-      set((s) => ({ envCandidates: { ...s.envCandidates, [agentId]: answer } }));
+      set((s) => ({ envCandidates: { ...s.envCandidates, [key]: answer } }));
     };
     // Clear first: the list is per OPENING, so a stale answer is never what a
-    // person reopening the field is shown. See the field comment above.
+    // person reopening the picker is shown. See the field comment above.
     put(undefined);
     if (typeof b?.envCandidateNames !== 'function') {
       put({ names: [], probeFailed: true });
       return;
     }
     void b
-      .envCandidateNames(agentId)
+      .envCandidateNames(scope)
       .then(put)
       .catch(() => put({ names: [], probeFailed: true }));
+  },
+
+  async refreshEnvRejections() {
+    const b = bridge();
+    // Feature detected on the one method, for the reason `foldOptions` is: a
+    // preload from before this phase has no such member, and a build that
+    // cannot ask has nothing to report rather than something to claim.
+    if (typeof b?.envRejections !== 'function') return;
+    try {
+      set({ envRejections: await b.envRejections() });
+    } catch {
+      // Leave the last good answer up rather than clearing a warning a person
+      // may be in the middle of reading.
+    }
   }
 }));
 

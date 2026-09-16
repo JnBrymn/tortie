@@ -393,6 +393,8 @@ export type AnyMenuActionId = MenuActionId | LayoutMenuActionId;
 
 import type {
   AgentFlagCatalogs,
+  EnvCandidateScope,
+  EnvRejections,
   EnvVarCandidates,
   GmuxSettings,
   GmuxSettingsPatch
@@ -407,6 +409,16 @@ export interface SettingsEventPayloadMap {
   'settings:changed': [settings: GmuxSettings];
 }
 
+/**
+ * PHASE 275. The two settings-domain shapes these channels are TYPED BY,
+ * re-exported so a reader of the contract can name them without having to know
+ * they are declared in `@shared/settings`. `src/shared/ipc/index.ts` does
+ * `export * from './app'`, so this is what makes them reachable as
+ * `@shared/ipc`. The declarations stay in the settings module, which is their
+ * domain; these are aliases and never a second definition.
+ */
+export type { EnvCandidateScope, EnvRejections, EnvVarCandidates };
+
 /** New invoke channels appended by the settings+hotkeys stream. */
 export interface SettingsInvokeChannelMap {
   /** Current persisted settings (defaults on first run). */
@@ -419,14 +431,31 @@ export interface SettingsInvokeChannelMap {
   'agents:flagPresets': { req: []; res: AgentFlagCatalogs };
   /**
    * The names the person's login shell exports, as suggestions for the
-   * Settings window's shell-variable field (Phase 269). NAMES ONLY: the probe
-   * behind it asks `awk` for the KEYS of its environment, so there is no path
-   * by which a value could cross this channel.
+   * Settings window's shell-variable picker (Phase 269, scoped in Phase 275).
+   * NAMES ONLY: the probe behind it asks `awk` for the KEYS of its environment,
+   * so there is no path by which a value could cross this channel.
+   *
+   * PHASE 275 TAKES A SCOPE rather than an agent id, because the shared list
+   * has no agent. It also stopped filtering out names the target list already
+   * holds: the picker draws those ticked and locked, so a person stops hunting
+   * for a name they already have and the list stops changing shape between
+   * openings.
    */
   'settings:envCandidates': {
-    req: [agentId: LaunchableAgentId];
+    req: [scope: EnvCandidateScope];
     res: EnvVarCandidates;
   };
+  /**
+   * What the last read of settings.json DROPPED from the two shell-variable
+   * lists (Phase 275), so the Settings window can say it instead of a person
+   * finding out when their agent stops seeing a key.
+   *
+   * READ ONLY and it starts nothing. Every name on the answer already passed
+   * the variable-name alphabet at the shape layer, so nothing here is a
+   * rendering primitive; an entry that could not be named safely is a count and
+   * never a string. NAMES ONLY — the shape has no field a value could ride on.
+   */
+  'settings:envRejections': { req: []; res: EnvRejections };
 }
 
 /**
@@ -445,10 +474,15 @@ export interface GmuxSettingsExtras {
   openSettings(): Promise<void>;
   agentFlagPresets(): Promise<AgentFlagCatalogs>;
   /**
-   * The login shell's exported variable NAMES, filtered to the ones this
-   * agent would actually accept (Phase 269). Never a value.
+   * The login shell's exported variable NAMES, filtered to the ones this list
+   * would actually accept (Phase 269, scoped in Phase 275). Never a value.
    */
-  envCandidateNames(agentId: LaunchableAgentId): Promise<EnvVarCandidates>;
+  envCandidateNames(scope: EnvCandidateScope): Promise<EnvVarCandidates>;
+  /**
+   * What the last settings read dropped from those lists (Phase 275). Names
+   * only, and every one of them is already safe to draw.
+   */
+  envRejections(): Promise<EnvRejections>;
   /** Fires in EVERY window whenever the persisted settings change. */
   onSettingsChanged(cb: (settings: GmuxSettings) => void): Unsubscribe;
 }

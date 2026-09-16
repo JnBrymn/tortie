@@ -134,6 +134,7 @@ import { resumeArmingVerdict, type ArmingRefusal } from './resume-arming';
 // carries whether it is starting for the first time or coming back.
 import {
   probeRemoteEnvNames,
+  remoteEnvNamesDroppedFor,
   remoteEnvNamesFor,
   type RemoteEnvProbeResult
 } from './remote-env-probe';
@@ -468,6 +469,14 @@ export async function restoreRemoteSession(
     remoteLaunchEntry(record.agent as LaunchableAgentKind),
     record.agent as LaunchableAgentKind
   );
+  // PHASE 275. The create path's twin, for the same reason: the cap is applied
+  // before the probe, so the overflow has to be computed beside the list that
+  // travels or it is lost in silence. Remote feels identical to local, and the
+  // two remote paths have to feel identical to each other first.
+  const envDropped = remoteEnvNamesDroppedFor(
+    remoteLaunchEntry(record.agent as LaunchableAgentKind),
+    record.agent as LaunchableAgentKind
+  );
   // PHASE 270, THE VERIFIER'S ROUND. THE SILENCE ENDS ON THIS PATH TOO.
   //
   // The build this round verified composed the names here and asked the machine
@@ -601,16 +610,20 @@ export async function restoreRemoteSession(
   // `probeFailed` means Tortie could not ask, which is not the same as the
   // variable being absent — the restore expands the values on the far side
   // independently of this answer, exactly as the create does.
-  if (
-    envProbe !== null &&
-    (envProbe.missing.length > 0 || envProbe.probeFailed)
-  ) {
+  //
+  // PHASE 275. The cap's own drops are merged in here exactly as the create
+  // path merges them, so a restore says the same sentence a create said about
+  // the same session.
+  const envMissing = [
+    ...new Set([...(envProbe?.missing ?? []), ...envDropped])
+  ].sort();
+  if (envMissing.length > 0 || envProbe?.probeFailed === true) {
     postDurabilityNotice({
       kind: 'env-unresolved',
       sessionId,
       sessionName: oneLine(record.name),
-      names: envProbe.missing,
-      probeFailed: envProbe.probeFailed
+      names: envMissing,
+      probeFailed: envProbe?.probeFailed ?? false
     });
   }
 

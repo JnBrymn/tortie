@@ -42,6 +42,16 @@
  * names is never in this file at all — only the name is, and the value is
  * resolved fresh at each launch.
  *
+ * PHASE 275 ADDED A SECOND, WIDER LIST and gave it its OWN seal field.
+ * `envPassthroughShared` is read for EVERY agent Tortie launches, including
+ * agents installed after the name was confirmed, so the agreement it carries is
+ * wider than a per-agent one. `DangerState.envShared` holds it separately from
+ * `DangerState.env` for the reason `arch` is separate from `fold`: a per-agent
+ * agreement must never be replayable as a shared one, and field separation
+ * makes that impossible by construction rather than by string discipline. The
+ * layer that did NOT move is the one above — a name no human confirmed is still
+ * dropped, whichever list it is on.
+ *
  * Ownership: src/main/settings/** (settings+hotkeys stream).
  */
 
@@ -51,6 +61,7 @@ import { app, safeStorage } from 'electron';
 import type {
   ArchSettings,
   AutoSaveSettings,
+  EnvRejections,
   FoldSettings,
   GmuxSettings,
   GmuxSettingsPatch
@@ -63,10 +74,12 @@ import {
   dangerKey,
   defaultGmuxSettings,
   envNameKey,
+  envSharedKey,
   foldKey,
   isAutoSaveMode,
   noArchChosen,
   noAutoSave,
+  noEnvRejections,
   noFoldChosen,
   sanitizeChromeDepth,
   sanitizeChromeHue,
@@ -74,6 +87,7 @@ import {
   sanitizeColorScheme,
   sanitizeContrastLevel,
   sanitizeEnvPassthrough,
+  sanitizeEnvPassthroughShared,
   sanitizeHighlightScheme,
   sanitizeUsageSettings,
   sanitizeWorkAreaFont,
@@ -171,6 +185,35 @@ function catalogedFlags(agentId: LaunchableAgentId): ReadonlySet<string> {
 }
 
 /**
+ * The names the SHARED list refuses because some launchable agent's COMPILED
+ * `launch.env` already sets them (Phase 275). Today exactly two: `FORCE_COLOR`
+ * (cursor) and `GROK_PRIVACY_NOTICE_ROLLOUT` (grok).
+ *
+ * REFUSING THEM ON THE SHARED LIST IS THE HONEST ANSWER, not an over-reach.
+ * The shared list reaches cursor too, and a shared `FORCE_COLOR` would make the
+ * `env-unresolved` notice say a cursor pane started WITHOUT a variable that
+ * pane actually has — the exact dishonesty `envPassthroughRefusal`'s last check
+ * exists to prevent. A per-agent list only has to ask about ITS agent; this one
+ * has to ask about all of them.
+ *
+ * SPELLED ONCE, HERE, and read by `sanitizeSettings` below and by the
+ * `settings:envCandidates` handler in ./ipc.ts, so the door that refuses a name
+ * and the list that offers one cannot come to different answers. Computed on
+ * first read from the compiled registry, which is a static table, so the answer
+ * cannot depend on a configuration file.
+ */
+let sharedRefusedKeys: readonly string[] | null = null;
+export function sharedRefusedEnvKeys(): readonly string[] {
+  if (sharedRefusedKeys !== null) return sharedRefusedKeys;
+  const all = new Set<string>();
+  for (const id of LAUNCHABLE_AGENT_IDS) {
+    for (const key of compiledLaunchEnvKeys(id)) all.add(key);
+  }
+  sharedRefusedKeys = [...all].sort();
+  return sharedRefusedKeys;
+}
+
+/**
  * The cataloged DANGER flags for an agent — the presets that turn a safeguard
  * off (e.g. `--dangerously-skip-permissions`,
  * `--dangerously-bypass-approvals-and-sandbox`).
@@ -224,6 +267,24 @@ export interface DangerState {
    * and fails safe to no names.
    */
   readonly env: readonly string[];
+  /**
+   * Every shell variable name on the SHARED list (Phase 275) — a BARE name,
+   * with no agent id in front of it, sorted so the state seals to one text.
+   *
+   * A SEPARATE FIELD rather than more entries in `env`, for the reason `arch`
+   * is a separate field from `fold` twenty lines above: agreeing to one must
+   * never be replayable as agreeing to the other. Here the two agreements
+   * differ in SCOPE — `env` covers one agent, this covers every agent Tortie
+   * can launch, INCLUDING AGENTS INSTALLED LATER — so a per-agent agreement
+   * replayed as a shared one is exactly the widening this phase exists to make
+   * a person ask for out loud.
+   *
+   * NON-OPTIONAL ON PURPOSE, so the compiler names every construction site
+   * rather than letting one default quietly to nothing. An old seal has no
+   * `envShared` member at all, which `openDangerSeal` reads as [] and which
+   * fails safe to no shared name.
+   */
+  readonly envShared: readonly string[];
 }
 
 /** The danger state of a settings object, sorted so it seals to one text. */
@@ -251,24 +312,64 @@ export function dangerStateOf(settings: GmuxSettings): DangerState {
     if (!Array.isArray(names)) continue;
     for (const name of names) env.push(envNameKey(id, name));
   }
+  // Phase 275. The shared names, BARE — `envSharedKey` is a display form and
+  // never goes in here (see its own comment in @shared/settings). Sorted for
+  // the same reason `env` is: the state has to seal to ONE text whatever order
+  // the list was written in, or a re-save with the same names would move the
+  // sealed blob and look like a change.
+  const envShared = [...settings.envPassthroughShared];
   return {
     defaults: defaults.sort(),
     acks: [...settings.dangerAcknowledged].sort(),
     fold,
     arch,
-    env: env.sort()
+    env: env.sort(),
+    envShared: envShared.sort()
   };
 }
 
-/** No danger state at all, which is the case for almost every settings file. */
+/**
+ * No danger state at all, which is the case for almost every settings file.
+ *
+ * THIS IS THE LINE A NEW SEALED FIELD IS MOST LIKELY TO BE FORGOTTEN IN, and
+ * forgetting it is a complete bypass rather than a cosmetic miss. `getSettings`
+ * short-circuits on this answer and returns the file VERBATIM, WITHOUT OPENING
+ * THE SEAL. It is a boolean expression over an object, so adding a field to
+ * `DangerState` leaves this function COMPILING AND WRONG: a settings.json whose
+ * only danger value is the new field would be admitted unsealed.
+ *
+ * Phase 275 added `envShared` and this clause with it. The ablation that proves
+ * the clause is not decoration lives in
+ * `__tests__/p275-env-shared-seal.test.ts` — a file whose ONLY danger value is
+ * a shared name must still reach the seal.
+ */
 export function isDangerStateEmpty(state: DangerState): boolean {
   return (
     state.defaults.length === 0 &&
     state.acks.length === 0 &&
     state.fold === null &&
     state.arch === null &&
-    state.env.length === 0
+    state.env.length === 0 &&
+    state.envShared.length === 0
   );
+}
+
+/**
+ * What the SEAL dropped from the two shell-variable lists on one read
+ * (Phase 275), by list, so the Settings window can say it on the card it
+ * belongs to rather than as one undifferentiated line.
+ *
+ * NAMES ONLY, and every one of them has already passed
+ * `OVERLAY_ENV_KEY_PATTERN` at the shape layer before this function ever runs,
+ * so nothing here is a rendering primitive. A hostile entry that could not be
+ * named safely never reaches the seal at all: the shape layer counted it and
+ * threw the bytes away.
+ */
+export interface SealEnvRejections {
+  /** Shared names the seal did not cover, bare. */
+  shared: string[];
+  /** Per-agent names the seal did not cover, by agent id. */
+  perAgent: Partial<Record<LaunchableAgentId, string[]>>;
 }
 
 /**
@@ -278,15 +379,37 @@ export function isDangerStateEmpty(state: DangerState): boolean {
  *
  * A rejected ACK is not reported: its only effect is that the user sees the
  * confirm modal one more time, which is the safe direction.
+ *
+ * PHASE 275 RETURNS THE ENV DROPS STRUCTURALLY AS WELL, in `envRejected`, and
+ * that is not a convenience. `rejected` is a flat list of OPAQUE KEYS mixing
+ * four spellings — `dangerKey`, `foldKey`, `archKey`, `envNameKey` and now
+ * `envSharedKey` — and no seal key is ever split back into parts anywhere in
+ * this module. Splitting one here so the Settings window could draw it would
+ * introduce the first parser over a key space whose whole safety argument is
+ * that a key only has to be UNAMBIGUOUS, never PARSEABLE. So the loop that
+ * knows which list a name came from records it there and then.
  */
 export function withSealedDangerState(
   settings: GmuxSettings,
   sealed: DangerState
-): { settings: GmuxSettings; rejected: string[] } {
+): {
+  settings: GmuxSettings;
+  rejected: string[];
+  envRejected: SealEnvRejections;
+} {
   const sealedDefaults = new Set(sealed.defaults);
   const sealedAcks = new Set(sealed.acks);
   const sealedEnv = new Set(sealed.env);
+  // PHASE 275, BELT ONE OF TWO, and it holds even if the two key spellings
+  // were identical. A per-agent name is tested ONLY against `sealedEnv` and a
+  // shared name ONLY against `sealedShared`. Neither Set is consulted for the
+  // other kind, on any path, so a name sealed one way cannot be admitted the
+  // other way. (Belt two is textual and lives on `envSharedKey` in
+  // @shared/settings: every per-agent key holds exactly one space, every bare
+  // shared name holds none, and the two spaces are disjoint.)
+  const sealedShared = new Set(sealed.envShared);
   const rejected: string[] = [];
+  const envRejected: SealEnvRejections = { shared: [], perAgent: {} };
   // Phase 138. The fold choice is dropped back to None unless the seal covers
   // that exact pair, and it IS reported, so the Settings window can say one
   // sentence about it. A dropped fold choice costs nothing: the page draws
@@ -327,22 +450,42 @@ export function withSealedDangerState(
   const envPassthrough: GmuxSettings['envPassthrough'] = {};
   for (const [id, names] of Object.entries(settings.envPassthrough)) {
     if (!Array.isArray(names)) continue;
+    const dropped: string[] = [];
     const kept = names.filter((name) => {
       if (sealedEnv.has(envNameKey(id, name))) return true;
       rejected.push(envNameKey(id, name));
+      dropped.push(name);
       return false;
     });
     if (kept.length > 0) envPassthrough[id as LaunchableAgentId] = kept;
+    if (dropped.length > 0) envRejected.perAgent[id as LaunchableAgentId] = dropped;
   }
+  // PHASE 275. The shared list, against its OWN seal field and against nothing
+  // else. A dropped shared name is pushed into `rejected` through
+  // `envSharedKey`, so the one warning line in app.log reads
+  // `* ANTHROPIC_API_KEY` beside `claude FOO` and a person can tell WHICH list
+  // lost a name — which matters more here than it did for one agent, because
+  // the two lists are drawn on two different cards.
+  const envPassthroughShared = settings.envPassthroughShared.filter((name) => {
+    if (sealedShared.has(name)) return true;
+    rejected.push(envSharedKey(name));
+    envRejected.shared.push(name);
+    return false;
+  });
   const acks = settings.dangerAcknowledged.filter((k) => sealedAcks.has(k));
   if (rejected.length === 0 && acks.length === settings.dangerAcknowledged.length) {
-    return { settings, rejected };
+    return { settings, rejected, envRejected };
   }
   return {
     settings: {
       ...settings,
       launchDefaults,
       envPassthrough,
+      // Phase 275. Carried here rather than left on the spread, so the strip
+      // path in `persistSettings` — the one that runs when the OS keystore
+      // cannot seal — writes NO shared name rather than writing one the next
+      // load would refuse.
+      envPassthroughShared,
       dangerAcknowledged: acks,
       fold: foldRejected ? noFoldChosen() : settings.fold,
       // Phase 175. The seal drops the harness PAIR and only the pair. The
@@ -357,7 +500,8 @@ export function withSealedDangerState(
           }
         : settings.arch
     },
-    rejected
+    rejected,
+    envRejected
   };
 }
 
@@ -400,9 +544,9 @@ export function withSealedDangerState(
  *
  * COST WHEN UNUSED. A settings file with no danger value never reaches the
  * keystore at all, so the common case adds no keychain access and no prompt.
- * A machine that names a shell variable (Phase 269) leaves that common case,
- * exactly as a danger flag or a fold choice already does; a machine that names
- * none is byte for byte unchanged.
+ * A machine that names a shell variable (Phase 269, and the shared list in
+ * Phase 275) leaves that common case, exactly as a danger flag or a fold choice
+ * already does; a machine that names none is byte for byte unchanged.
  */
 const SEAL_PREFIX = 'gmux-danger-seal-v1:';
 
@@ -411,7 +555,8 @@ const EMPTY_DANGER_STATE: DangerState = {
   acks: [],
   fold: null,
   arch: null,
-  env: []
+  env: [],
+  envShared: []
 };
 
 /** Is `safeStorage` usable right now? False before `app` is ready. */
@@ -471,7 +616,12 @@ function openDangerSeal(blob: unknown): DangerState | null {
       // Phase 269. `env` reads through the same `strings()` helper the two
       // lists above use and defaults to [], so a seal written before this
       // phase opens and covers no passthrough name at all.
-      env: strings(asState.env)
+      env: strings(asState.env),
+      // Phase 275. Same helper, same default. A seal written before this phase
+      // has no `envShared` member, opens as [], and covers NO shared name — so
+      // an agreement a person gave to one agent's list can never come back as
+      // an agreement covering every agent.
+      envShared: strings(asState.envShared)
     };
   } catch {
     // Forged, truncated, or written by a different machine's key. It proves
@@ -531,6 +681,17 @@ export function sanitizeSettings(raw: unknown): GmuxSettings {
     (id) => LAUNCHABLE_SET.has(id),
     compiledLaunchEnvKeys
   );
+
+  // PHASE 275. The SHARED list, through its own sanitizer for the same two
+  // step reason: this bounds what a value may be, and the seal in `getSettings`
+  // is what asks who wrote it. The `refused`/`unnamed` halves of the answer are
+  // thrown away HERE and re-derived in `loadFile` — see the comment there for
+  // why the reporting is not smuggled out of this function, which is pure and
+  // is called by tests, by `applySettingsPatch` and by the load.
+  out.envPassthroughShared = sanitizeEnvPassthroughShared(
+    obj['envPassthroughShared'],
+    sharedRefusedEnvKeys()
+  ).names;
 
   // Per-agent SpecStory capture defaults (Phase 15). Unknown ids dropped and
   // only `true` is stored: an explicit false is the absence of the key, which
@@ -736,6 +897,34 @@ let cached: SettingsFile | null = null;
  */
 let sealChecked: GmuxSettings | null = null;
 
+/**
+ * WHAT THE LAST READ OF `settings.json` DROPPED from the shell-variable lists
+ * (Phase 275), split by the layer that dropped it.
+ *
+ * TWO LAYERS AND THEY ARE NOT INTERCHANGEABLE. The SHAPE layer drops a name
+ * that could never be read — a non-string, a refused name, a seventeenth — and
+ * it cannot tell who wrote the file, which is Phase 269's recorded contract and
+ * is why `sanitizeEnvPassthrough` says nothing. The SEAL layer drops a name
+ * that is perfectly well formed and that no human confirmed, which is the
+ * interesting one, and it runs over the already-sanitized settings so every
+ * name it reports is provably safe to draw.
+ *
+ * WHY IT IS HELD HERE RATHER THAN RECOMPUTED ON ASK. `getSettings` short
+ * circuits on `sealChecked` after the first call of a load, so the seal answer
+ * exists exactly once per load and asking again would either re-open the
+ * keychain or invent a second answer.
+ */
+let shapeEnvRejections: {
+  shared: string[];
+  sharedOver: number;
+  unnamed: number;
+} = {
+  shared: [],
+  sharedOver: 0,
+  unnamed: 0
+};
+let sealEnvRejections: SealEnvRejections | null = null;
+
 function loadFile(): SettingsFile {
   if (cached !== null) return cached;
   let parsed: unknown = null;
@@ -764,11 +953,37 @@ function loadFile(): SettingsFile {
     ...(bounds !== undefined ? { settingsWindowBounds: bounds } : {}),
     ...(typeof seal === 'string' ? { dangerSeal: seal } : {})
   };
+  // PHASE 275. The shape layer's own report, RE-DERIVED here rather than
+  // smuggled out of `sanitizeSettings` through a module global. That function
+  // is documented pure, is exported, and is called by tests and by
+  // `applySettingsPatch`; giving it a side effect so this line could read one
+  // would make a patch merge quietly rewrite what the Settings window draws.
+  // The cost is running one filter twice over at most sixteen short strings.
+  const rawSettings = obj['settings'];
+  const sharedShape = sanitizeEnvPassthroughShared(
+    rawSettings !== null && typeof rawSettings === 'object'
+      ? (rawSettings as Record<string, unknown>)['envPassthroughShared']
+      : undefined,
+    sharedRefusedEnvKeys()
+  );
+  shapeEnvRejections = {
+    shared: sharedShape.refused,
+    sharedOver: sharedShape.refusedOver,
+    unnamed: sharedShape.unnamed
+  };
   sealChecked = null;
+  sealEnvRejections = null;
   return cached;
 }
 
-/** Log a rejection once per load, naming the flags and the reason. */
+/**
+ * Log a rejection once per load, naming the flags and the reason.
+ *
+ * PHASE 275. The keys arrive already spelled by the loop that dropped them, so
+ * a shared name reads `* ANTHROPIC_API_KEY` (through `envSharedKey`) beside a
+ * per-agent `claude FOO`. Nothing here parses one back apart — this function
+ * joins opaque strings, which is all a seal key ever has to be.
+ */
 function warnRejected(rejected: readonly string[]): void {
   if (rejected.length === 0) return;
   settingsLog.warn(
@@ -820,6 +1035,13 @@ function persistSettings(next: GmuxSettings): GmuxSettings {
     ...(seal !== undefined ? { dangerSeal: seal } : {})
   };
   sealChecked = settings;
+  // PHASE 275. A successful write CLEARS the rejections, and that is honesty
+  // rather than tidiness: `writeFile` below persists the seal-filtered
+  // settings, so the dropped names are gone from settings.json. Saying they are
+  // still being ignored would be a sentence about a file that no longer says
+  // what it said.
+  shapeEnvRejections = { shared: [], sharedOver: 0, unnamed: 0 };
+  sealEnvRejections = { shared: [], perAgent: {} };
   writeFile(cached);
   return settings;
 }
@@ -837,12 +1059,16 @@ export function getSettings(): GmuxSettings {
   const file = loadFile();
   if (sealChecked !== null) return sealChecked;
   if (isDangerStateEmpty(dangerStateOf(file.settings))) {
-    // The common case, and the one that never touches the keychain.
+    // The common case, and the one that never touches the keychain. Phase 275:
+    // a file whose only danger value is a SHARED name does not take this
+    // branch, because `isDangerStateEmpty` asks about `envShared`. That clause
+    // is the whole of layer one for this phase and it has an ablation.
     sealChecked = file.settings;
+    sealEnvRejections = { shared: [], perAgent: {} };
     return sealChecked;
   }
   const sealed = openDangerSeal(file.dangerSeal);
-  const { settings, rejected } = withSealedDangerState(
+  const { settings, rejected, envRejected } = withSealedDangerState(
     file.settings,
     sealed ?? EMPTY_DANGER_STATE
   );
@@ -852,8 +1078,60 @@ export function getSettings(): GmuxSettings {
   if (sealed !== null) {
     sealChecked = settings;
     warnRejected(rejected);
+    // Phase 275. Recorded on exactly the branch that announces, so the Settings
+    // window never draws a rejection that is not final either.
+    sealEnvRejections = envRejected;
   }
   return settings;
+}
+
+/**
+ * What the last read dropped from the two shell-variable lists (Phase 275),
+ * for the Settings window to draw on the card it belongs to.
+ *
+ * READ ONLY, and it answers about the load rather than about the disk: it is
+ * the pair of reports the current load produced, and the next successful write
+ * clears it. Calling `getSettings()` first is what makes the seal half
+ * meaningful — before the first read of a load there has been no seal check to
+ * report, and this answers empty rather than inventing one.
+ *
+ * THE TWO LAYERS LEAVE THIS FUNCTION APART, AND THE FIX ROUND IS WHY. The
+ * comment thirty lines above this one says the shape layer and the seal layer
+ * "are not interchangeable" and keeps them in two module fields for exactly that
+ * reason — and then the build this round verified concatenated them here, into
+ * one list the window drew under the SEAL's sentence. Two verifiers found it
+ * independently, one in a harness and one in the running window:
+ *
+ *   - hand-write PATH and twenty junk names into a sealed settings.json and the
+ *     card drew 21 names under "Ignored, because they were not added here",
+ *     while app.log — which sees the seal layer alone — named 12. The window and
+ *     the log disagreed about what had happened;
+ *   - put sixteen shape-valid junk names AHEAD of a name the seal does cover and
+ *     the real name is pushed out at the shape layer, so the card named that
+ *     name FIRST and said it had never been added here. It had. The one line
+ *     that exists to say honestly why a key stopped arriving was untrue about
+ *     the only name the person cared about.
+ *
+ * Nothing unsafe was delivered on either reading — the name was dropped, the cap
+ * still failed closed, and no value moved — so this is an honesty defect and it
+ * is repaired where the two answers are still apart rather than after they are
+ * joined. The concatenation is gone: `shared` is the seal's answer and
+ * `sharedUnread` is the shape layer's, and `env-copy.ts` gives each its own
+ * sentence, because "add it here" is the fix for one of them and a dead end for
+ * the other.
+ *
+ * NAMES ONLY. There is no field on `EnvRejections` that could carry a value,
+ * and every name on it passed the shape gate before it got here.
+ */
+export function envRejectionsNow(): EnvRejections {
+  const seal = sealEnvRejections;
+  const answer = noEnvRejections();
+  answer.unnamed = shapeEnvRejections.unnamed;
+  answer.shared = [...(seal?.shared ?? [])];
+  answer.sharedUnread = [...shapeEnvRejections.shared];
+  answer.sharedUnreadOver = shapeEnvRejections.sharedOver;
+  answer.perAgent = { ...(seal?.perAgent ?? {}) };
+  return answer;
 }
 
 /** Patch + persist + notify main-side listeners; returns the new settings. */

@@ -194,8 +194,13 @@ const api: InstalledGmuxApi = {
   openSettings: () => invoke('settings:openWindow'),
   agentFlagPresets: () => invoke('agents:flagPresets'),
   // Phase 269: the login shell's exported variable NAMES, for the Settings
-  // window's shell-variable field. Names only — no value crosses this bridge.
-  envCandidateNames: (agentId) => invoke('settings:envCandidates', agentId),
+  // window's shell-variable picker, scoped in Phase 275 because the shared list
+  // has no agent. Names only — no value crosses this bridge, in either
+  // direction, on either channel.
+  envCandidateNames: (scope) => invoke('settings:envCandidates', scope),
+  // Phase 275: what the last settings read dropped from those lists, so the
+  // window can say it. Read only; it starts nothing and carries no value.
+  envRejections: () => invoke('settings:envRejections'),
   onSettingsChanged: (cb) => on(EVT_SETTINGS_CHANGED, cb),
   // Phase 19 item 11 optional extra: the machine woke up. The terminal clears
   // its WebGL glyph atlas on this, because a texture atlas does not survive

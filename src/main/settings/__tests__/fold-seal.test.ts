@@ -182,7 +182,9 @@ describe('the seal', () => {
       acks: [],
       fold: null,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.fold).toEqual({ agentId: null, model: null });
     expect(out.rejected).toEqual([`${AGENT} ${MODEL}`]);
@@ -198,7 +200,9 @@ describe('the seal', () => {
       acks: [],
       fold: `${AGENT} ${MODEL}`,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.fold).toEqual({ agentId: AGENT, model: MODEL });
     expect(out.rejected).toEqual([]);

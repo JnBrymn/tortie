@@ -6,6 +6,15 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 ## Unreleased
 
+### Added
+
+- You can now name the shell variables every agent needs once, under Every agent in Settings, instead of naming them again for each agent; each agent's card says what it inherits, and you can still narrow one agent by naming variables on its own card. The confirmation says what you are agreeing to, which is that every agent Tortie launches gets them, including agents you install later.
+- The list of names your shell exports now scrolls and filters as you type, and takes several names at once under one confirmation instead of one trip per name. A name your shell does not export yet is still typed and accepted, and now appears as a row of its own so you can see that it took.
+
+### Changed
+
+- A shell variable you name in Settings now reaches a session that comes back after a quit or a reboot, not only a session you start fresh.
+
 ### Fixed
 
 - A project you opened through a symbolic link now saves. Every file in one used to refuse every save with a message saying the project was not open, when it was.
@@ -14,6 +23,8 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 - Copy Relative Path no longer appears on a tab whose file sits outside your project, where it used to copy the file's whole path out of a row labelled Relative. Copy Path still gives you that path.
 - A save that is refused now says what actually happened — the project was closed, a folder on the way to the file could not be read, the file is inside a .git folder — instead of saying your project is not open whatever the cause, and the cause is written to Tortie's own log so a report of one can be answered.
 - A file at the top of a project whose name begins with two dots now saves. It used to be refused with that same wrong message.
+- Settings now says on the card itself when a shell variable name in the settings file was ignored, and whether adding it in Settings would help, instead of leaving that only in Tortie's own log.
+- A session on another machine now names the variables it could not carry when you have asked for more than it will take, instead of dropping them with nothing said.
 
 ## 0.106.0 (2026-09-14)
 

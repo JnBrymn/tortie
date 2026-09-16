@@ -18,6 +18,7 @@ import type {
   EnvVarCandidates,
   GmuxSettings
 } from '@shared/settings';
+import { noEnvRejections } from '@shared/settings';
 import type { LaunchableAgentId } from '@shared/types';
 // Phase 269: the ONE spelling of "will Tortie read this variable?", shared
 // with the Settings window so the file a name is refused in cannot disagree
@@ -34,7 +35,12 @@ import { rebuildAppMenu } from '../menu';
 import { handle } from '../typed-ipc';
 import { broadcastEvent } from '../typed-events';
 import { registerSpecStoryStatusIpc } from '../specstory';
-import { getSettings, updateSettings } from './store';
+import {
+  envRejectionsNow,
+  getSettings,
+  sharedRefusedEnvKeys,
+  updateSettings
+} from './store';
 import { openSettingsWindow } from './window';
 
 // ---------------------------------------------------------------------------
@@ -146,29 +152,67 @@ export function registerSettingsIpc(ipc: IpcMain): void {
   handle(ipc, 'agents:flagPresets', () => getFlagCatalogViews());
 
   // PHASE 269. The names the person's login shell exports, as suggestions for
-  // the shell-variable field in Launch defaults. NAMES ONLY: the probe asks
+  // the shell-variable picker in Launch defaults. NAMES ONLY: the probe asks
   // `awk` for the KEYS of its environment and prints nothing else, so there is
   // no path by which a value could reach this handler, let alone a renderer.
   //
-  // The list is filtered by the SAME refusal the field shows a sentence for,
-  // against this agent's current sealed names and its compiled env keys, so
-  // the picker offers only names that would actually be accepted.
-  handle(ipc, 'settings:envCandidates', async (_e, agentId) => {
+  // The list is filtered by the SAME refusal the picker shows a sentence for,
+  // so the picker offers only names that would actually be accepted.
+  //
+  // PHASE 275 CHANGED TWO THINGS HERE.
+  //
+  // It takes a SCOPE. The shared list has no agent, so it cannot take one, and
+  // the two arms refuse different sets: an agent arm refuses that agent's own
+  // compiled `launch.env` keys, the shared arm refuses the union over every
+  // launchable agent, because the shared list reaches every one of them.
+  // `sharedRefusedEnvKeys` in ./store.ts is the ONE spelling of that union,
+  // read here and by the shared sanitizer, so the door that refuses a name and
+  // the list that offers one cannot disagree.
+  //
+  // AND IT STOPPED FILTERING OUT `existing`. Doing so made a name a person
+  // already had VANISH from the list, so the list changed shape between
+  // openings and a person hunted for a name that was there all along. The
+  // picker draws those rows ticked and locked instead — EnableForDialog's
+  // treatment, and the reason it gives applies here: a row that cannot be
+  // chosen is shown with its reason, never hidden. The cap stays disabled for
+  // the same reason it always was: this is a suggestion list, and the add is
+  // where the cap is said.
+  handle(ipc, 'settings:envCandidates', async (_e, scope) => {
     const probe = await loginShellEnvNames();
-    const existing = getSettings().envPassthrough[agentId] ?? [];
-    const agentEnvKeys = compiledLaunchEnvKeys(agentId);
+    const agentEnvKeys =
+      scope.kind === 'shared'
+        ? sharedRefusedEnvKeys()
+        : compiledLaunchEnvKeys(scope.agentId);
     const names = probe.names.filter(
       (name) =>
         envPassthroughRefusal(name, {
-          existing,
           agentEnvKeys,
-          // The list is a suggestion, not the add itself: a full list still
-          // shows what the shell has, and the add is where the cap is said.
-          cap: Number.MAX_SAFE_INTEGER
+          cap: Number.MAX_SAFE_INTEGER,
+          ...(scope.kind === 'shared' ? { scope: 'shared' as const } : {})
         }) === null
     );
     const answer: EnvVarCandidates = { names, probeFailed: probe.probeFailed };
     return answer;
+  });
+
+  // PHASE 275. What the last read of settings.json DROPPED from those two
+  // lists. Phase 269 named every drop in app.log and nowhere else, so a person
+  // whose key stopped arriving had to find a log file to learn why. This is the
+  // same fact, on the card it belongs to.
+  //
+  // `getSettings()` FIRST, and the order is load bearing: the seal half of the
+  // answer only exists once a load has actually run its seal check, and asking
+  // before that would report "nothing was dropped" about a check that has not
+  // happened.
+  handle(ipc, 'settings:envRejections', () => {
+    try {
+      getSettings();
+      return envRejectionsNow();
+    } catch {
+      // A read that cannot happen has dropped nothing, and a Settings window
+      // that drew an error here would be reporting on its own failure to ask.
+      return noEnvRejections();
+    }
   });
 
   // Phase 15: the SpecStory section's status pull + its two auth actions. It

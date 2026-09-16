@@ -495,12 +495,26 @@ export const ENV_REFUSED_PREFIXES: readonly string[] = ENV_REFUSED_PATTERNS.map(
 
 /** What a refusal needs to know beyond the name itself (Phase 269). */
 export interface EnvPassthroughContext {
-  /** Names this agent already has on its list. */
+  /** Names this list already holds. */
   readonly existing?: readonly string[];
-  /** Names the agent's own compiled `launch.env` sets (two agents have any). */
+  /**
+   * Names a compiled `launch.env` already sets. For an agent list that is that
+   * agent's own two-or-fewer keys; for the SHARED list (Phase 275) it is the
+   * union over every launchable agent, because the shared list reaches them
+   * all.
+   */
   readonly agentEnvKeys?: readonly string[];
-  /** How many names one agent may carry. Defaults to the overlay's 16. */
+  /** How many names one list may carry. Defaults to the overlay's 16. */
   readonly cap?: number;
+  /**
+   * WHICH LIST is being added to (Phase 275). It changes exactly one sentence,
+   * being the cap refusal, because "the most Tortie will read for one agent" is
+   * FALSE at the shared door — that list is read for every agent.
+   *
+   * Defaults to `'agent'`, so every call site written before Phase 275 says
+   * the sentence it always said.
+   */
+  readonly scope?: 'agent' | 'shared';
 }
 
 /**
@@ -541,7 +555,20 @@ export function envPassthroughRefusal(
   }
   const cap = ctx.cap ?? OVERLAY_LIMITS.maxEnvPassthroughNames;
   if ((ctx.existing ?? []).length >= cap) {
-    return 'Sixteen names is the most Tortie will read for one agent.';
+    // PHASE 275. TWO CAPS, ONE NUMBER. The shared list gets its own sixteen and
+    // each agent list keeps its own sixteen; they do not share a budget. A
+    // single sixteen split between them would mean a shared name silently
+    // shrinks what an agent may add on its own card — taking away per-agent
+    // narrowing at exactly the moment the phase promises to keep it — and a
+    // person who filled the shared list would meet a refusal about a list they
+    // are not looking at.
+    //
+    // BOTH SENTENCES STAY IN THIS FUNCTION and neither moves to env-copy.ts,
+    // for the reason that file states about itself: the file that refuses must
+    // not be able to disagree with the file that explains.
+    return ctx.scope === 'shared'
+      ? 'Sixteen names is the most Tortie will read for every agent.'
+      : 'Sixteen names is the most Tortie will read for one agent.';
   }
   if (ENV_REFUSED_EXACT.includes(name)) {
     return `${name} decides which program or which startup file runs.`;
@@ -555,7 +582,15 @@ export function envPassthroughRefusal(
     return moved.why;
   }
   if ((ctx.agentEnvKeys ?? []).includes(name)) {
-    return `This agent already sets ${name} itself. Pick one source for each name.`;
+    // PHASE 275. On the shared door the subject is not one agent: the list
+    // reaches every agent, and this name is one that SOME agent's compiled row
+    // already sets. Saying "this agent" there would name an agent the person is
+    // not looking at. The refusal itself is the same and is the same honesty
+    // rule — a pane that has the variable must never be reported as starting
+    // without it.
+    return ctx.scope === 'shared'
+      ? `An agent Tortie launches already sets ${name} itself. Pick one source for each name.`
+      : `This agent already sets ${name} itself. Pick one source for each name.`;
   }
   return null;
 }

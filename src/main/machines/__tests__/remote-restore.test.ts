@@ -337,8 +337,26 @@ describe('the shape a remote restore takes, read off its own source', () => {
   it('asks the machine which names it has, and raises the notice', () => {
     expect(code).toContain('probeRemoteEnvNames(ctx, passthrough)');
     expect(code).toContain("kind: 'env-unresolved'");
-    expect(code).toContain('names: envProbe.missing');
-    expect(code).toContain('probeFailed: envProbe.probeFailed');
+    expect(code).toContain('names: envMissing');
+    expect(code).toContain('probeFailed: envProbe?.probeFailed ?? false');
+  });
+
+  /**
+   * PHASE 275. The notice names what the CAP dropped too.
+   *
+   * `remoteEnvNamesFor` applies `REMOTE_ENV_NAMES_MAX` before
+   * `probeRemoteEnvNames` ever sees the list, so a name past sixteen never
+   * reaches the `dropped` list that function already computes and already
+   * reports. With three doors of sixteen the union can reach 48, so without
+   * this the overflow would vanish with nothing said — and only on remote,
+   * which is the divergence the standing rule forbids.
+   */
+  it('merges what this rung refused into the same notice', () => {
+    expect(code).toContain('remoteEnvNamesDroppedFor(');
+    expect(code).toContain('envDropped');
+    // ONE notice, not two. The latch is per session and a second notice for the
+    // same session would be silenced by it anyway.
+    expect(code.split("kind: 'env-unresolved'")).toHaveLength(2);
   });
 
   /**

@@ -137,7 +137,9 @@ describe('danger state', () => {
       acks: [],
       fold: null,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.launchDefaults.claude).toEqual([SAFE]);
     expect(out.rejected).toEqual([DANGER_KEY]);
@@ -157,7 +159,9 @@ describe('danger state', () => {
       acks: [DANGER_KEY],
       fold: null,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.launchDefaults.claude).toEqual([DANGER, SAFE]);
     expect(out.settings.dangerAcknowledged).toEqual([DANGER_KEY]);

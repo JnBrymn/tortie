@@ -270,7 +270,9 @@ describe('the seal', () => {
       acks: [],
       fold: null,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.arch).toEqual({
       enabled: false,
@@ -291,7 +293,9 @@ describe('the seal', () => {
       acks: [],
       fold: null,
       arch: `${AGENT} ${MODEL}`,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.arch).toEqual({ enabled: false, agentId: AGENT, model: MODEL, wrapperPass: false });
     expect(out.rejected).toEqual([]);
@@ -357,7 +361,9 @@ describe('a fold agreement is not an arch agreement', () => {
       acks: [],
       fold: `${AGENT} ${MODEL}`,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.arch).toEqual({
       enabled: false,
@@ -378,7 +384,9 @@ describe('a fold agreement is not an arch agreement', () => {
       acks: [],
       fold: null,
       arch: `${AGENT} fold-model`,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.fold).toEqual({ agentId: null, model: null });
   });
@@ -453,7 +461,9 @@ describe('the visibility switch (Phase 175)', () => {
       acks: [],
       fold: null,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.arch).toEqual({
       enabled: true,
@@ -546,7 +556,9 @@ describe('the wrapper pass switch (Phase 257)', () => {
       acks: [],
       fold: null,
       arch: null,
-      env: []
+      env: [],
+      // Phase 275. A seal that covers no shared name.
+      envShared: []
     });
     expect(out.settings.arch).toEqual({
       enabled: true,

@@ -86,9 +86,22 @@ export const REMOTE_ENV_MAX_VALUE_CHARS = 4096;
 /**
  * The most names one create may carry, being 16.
  *
- * It is the cap the settings door already enforces
- * (`OVERLAY_LIMITS.maxEnvPassthroughNames`, `@shared/agent-overlay`), asked a second time
- * here so a name reaching this rung from any future caller is still bounded.
+ * IT IS THE SAME NUMBER AS THE SETTINGS DOOR'S AND IT IS NOT THE SAME CAP.
+ * `OVERLAY_LIMITS.maxEnvPassthroughNames` (`@shared/agent-overlay`) is enforced
+ * PER DOOR, and since Phase 275 there are three doors a name can arrive
+ * through: an agents.json row, the per-agent settings list, and the shared
+ * list. Sixteen each, so the union reaching this rung can be 48.
+ *
+ * PHASE 275 CORRECTED THIS COMMENT, which read "the cap the settings door
+ * already enforces". That was already untrue with two sources and would have
+ * been badly untrue with three: it invited a reader to believe this cap can
+ * never bite, and `filterRemoteEnvNames` below truncates SILENTLY. What is true
+ * is that this cap is asked a SECOND time over a union no single door bounds,
+ * and that what it drops is now REPORTED — `remoteEnvNamesDroppedFor` in
+ * ./remote-env-probe.ts builds the answer from `droppedRemoteEnvNames` below,
+ * and the remote create and the remote restore merge it into the
+ * `env-unresolved` notice. The number itself does not move, and neither does
+ * the far-side script or the transport.
  */
 export const REMOTE_ENV_NAMES_MAX = 16;
 
@@ -116,11 +129,24 @@ const ENV_NAME_RE = new RegExp(OVERLAY_ENV_KEY_PATTERN);
  * command line, and the caller reports it in `missing` so a person sees it
  * named in the notice rather than losing it in silence.
  *
- * THE NEWLINE TEST IS NOT REDUNDANT AND IT IS THE REASON THIS IS NOT ONE LINE.
- * JavaScript's `$` matches at the end of the input OR immediately before a
- * final newline, with no `m` flag needed, so `"NAME\n"` passes
- * {@link OVERLAY_ENV_KEY_PATTERN} on its own. A trailing newline is exactly the
- * byte that would start a second word in a shell, so it is tested for by hand.
+ * THE NEWLINE TEST IS A BELT AND THE REASON WRITTEN HERE USED TO BE WRONG.
+ *
+ * It said JavaScript's `$` matches at the end of the input OR immediately
+ * before a final newline with no `m` flag, so `"NAME\n"` would pass
+ * {@link OVERLAY_ENV_KEY_PATTERN} on its own. THAT IS PYTHON AND PERL, NOT
+ * JAVASCRIPT. Measured on 2026-09-16 with this repository's own pattern:
+ * `new RegExp('^[A-Za-z_][A-Za-z0-9_]{0,63}$').test('ABC\n')` is **false**, and
+ * it is only `true` once the `m` flag is added. Phase 275 found it because an
+ * ablation that deleted the two lines below left every gate green.
+ *
+ * THE TWO LINES STAY ANYWAY, and the honest reason is a different one. A
+ * trailing newline is the byte that would start a second word in a shell, and
+ * this is the last place on this Mac a name is checked before it is quoted into
+ * a command line that the far machine's login shell will read. A guard at that
+ * boundary should not rest on where a regular expression decides `$` is: the
+ * pattern is a shared constant, an `m` flag added to it for some other caller
+ * would open this hole silently, and two `includes` calls cost nothing. They
+ * are belt and braces, stated as belt and braces.
  */
 export function filterRemoteEnvNames(names: readonly string[]): string[] {
   const out: string[] = [];

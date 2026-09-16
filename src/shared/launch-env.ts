@@ -24,30 +24,69 @@
  * function body, relocated.
  *
  * This module imports NOTHING. It may never import anything.
+ *
+ * PHASE 275 PUT A GATE BEHIND THAT SENTENCE, because nothing mechanical held it:
+ * `build/assert-import-boundaries.mjs` allows shared -> shared, the cycle gate
+ * skips type-only imports, and no test named this file. `conformance:agents`
+ * now asserts this file's import count is zero. The three things a later round
+ * is likely to reach for, each of which would break it, are refused by name:
+ * taking the whole settings object (needs `GmuxSettings`), keying the shared
+ * list by agent inside the function (needs `LaunchableAgentId`), and enforcing
+ * the name cap here (needs `OVERLAY_LIMITS`).
  */
 
 /**
  * The names this launch will read from the login shell: the agent row's own
  * `launch.envPassthrough` (agents.json, Phase 33) UNIONED with the names the
- * person set in Settings then Launch defaults, row first, deduped.
+ * person set for THIS agent in Settings then Launch defaults, UNIONED with the
+ * names they set for EVERY agent (Phase 275) — row first, deduped.
  *
- * TWO ROUTES, ONE ANSWER. agents.json stays the power-user route and Tortie
- * still never writes it; the Settings route is the one a person who has no such
- * file can reach, and it is sealed the way a danger flag is. Neither shadows
- * the other, because a person who has set both meant both.
+ * THREE ROUTES, ONE ANSWER. agents.json stays the power-user route and Tortie
+ * still never writes it; the per-agent Settings route is the one a person who
+ * has no such file can reach; the shared list is the one a person reaches when
+ * the key belongs to a PROVIDER rather than to an agent, which is the shape an
+ * API key actually has — one DeepSeek key is the same key whichever agent talks
+ * to DeepSeek. All three are sealed or compiled, and none shadows another,
+ * because a person who has set more than one of them meant all of them.
  *
- * Returns undefined when both are empty, so the spec of an agent nobody has
+ * ORDER: row, then per-agent, then shared, and the first two do not move by one
+ * byte. Phase 275 added the third source ON THE END for exactly that reason —
+ * everybody who had a row and a per-agent list gets the identical list in the
+ * identical order they got at the parent, so no argv order, no manifest row and
+ * no notice list changes for a person who never uses the shared list.
+ *
+ * Returns undefined when all three are empty, so the spec of an agent nobody has
  * configured is byte for byte what it was before Phase 269, no probe is
  * spawned, no record field is written and no launch pays for a feature it does
  * not use. PHASE 270 leans on exactly that for a session on another machine:
- * undefined means no far-side probe is sent and no slot is composed.
+ * undefined means no far-side probe is sent and no slot is composed. PHASE 275
+ * leans on it again: `envPassthroughShared` defaults to `[]`, so a fresh install
+ * still spawns no login shell on any launch.
  *
- * Pure, and it mutates neither input.
+ * THE UNION IS DELIBERATELY UNCAPPED. The cap belongs to the doors a name is
+ * added at (`OVERLAY_LIMITS.maxEnvPassthroughNames`, counted separately for the
+ * shared list and for each agent list) and to the remote carriage. Spelling
+ * `16` here would be a second spelling of a number this repository spells once,
+ * and it would need an import this file may not have.
+ *
+ * `sharedNames` is a THIRD PARAMETER and not an optional one with a default.
+ * Every call site passes it explicitly, so a launch path that forgets the shared
+ * list is a compile error rather than a session that quietly carries two sources
+ * out of three.
+ *
+ * Pure, and it mutates none of its inputs.
  */
 export function envPassthroughFor(
   rowNames: readonly string[] | undefined,
-  settingsNames: readonly string[] | undefined
+  settingsNames: readonly string[] | undefined,
+  sharedNames: readonly string[] | undefined
 ): string[] | undefined {
-  const union = [...new Set([...(rowNames ?? []), ...(settingsNames ?? [])])];
+  const union = [
+    ...new Set([
+      ...(rowNames ?? []),
+      ...(settingsNames ?? []),
+      ...(sharedNames ?? [])
+    ])
+  ];
   return union.length === 0 ? undefined : union;
 }

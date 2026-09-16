@@ -11,7 +11,11 @@
  */
 
 import type { LaunchableAgentId, LaunchableAgentKind } from './types';
-import { envPassthroughRefusal } from './agent-overlay';
+import {
+  envPassthroughRefusal,
+  OVERLAY_ENV_KEY_PATTERN,
+  OVERLAY_LIMITS
+} from './agent-overlay';
 
 // ---------------------------------------------------------------------------
 // Settings shape
@@ -60,6 +64,33 @@ export interface GmuxSettings {
    * launch reads the union of the two.
    */
   envPassthrough: Partial<Record<LaunchableAgentId, string[]>>;
+  /**
+   * The shell variable NAMES every agent gets (Phase 275), beside the
+   * per-agent map above. Keyed by nothing: one list, every launchable agent,
+   * including agents installed after the name was confirmed.
+   *
+   * WHY IT EXISTS. An API key is a property of a PROVIDER, not of an agent.
+   * One DeepSeek key is the same key whichever agent talks to DeepSeek, so the
+   * per-agent map made a person repeat identical work once per agent — which
+   * is what issue 20's reporter hit. And the per-agent shape was buying less
+   * than it cost: the values come from the person's own login shell, and every
+   * one of those agents, run in Terminal, already receives all of them.
+   *
+   * IT DOES NOT REPLACE THE MAP ABOVE, and a phase that deletes that map to
+   * simplify the drawing has removed the only reason the per-agent design was
+   * defensible. A person who wants one agent narrower keeps that. A launch
+   * reads the UNION (`envPassthroughFor`, @shared/launch-env), so a person who
+   * set both meant both.
+   *
+   * SEALED IN ITS OWN FIELD — `DangerState.envShared` in
+   * src/main/settings/store.ts, never in `env`. The agreement this list carries
+   * is WIDER than a per-agent one, so a per-agent agreement must never be
+   * replayable as this one. That is layer two of the seal moving by design; the
+   * layer that does NOT move is that a name no human confirmed is dropped.
+   *
+   * VALUES ARE STORED NOWHERE, exactly as above.
+   */
+  envPassthroughShared: string[];
   /**
    * "<agentId> <flag>" keys whose danger confirm has been accepted once —
    * first enable of a danger preset confirms, later re-enables don't (S13).
@@ -809,6 +840,11 @@ export function defaultGmuxSettings(): GmuxSettings {
     hotkeys: {},
     launchDefaults: {},
     envPassthrough: {},
+    // PHASE 275. Empty at install is not a nicety. It is what keeps
+    // `envPassthroughFor` answering `undefined` for a person who has
+    // configured nothing, which is what keeps the login shell probe unspawned
+    // on every launch — one shared name makes EVERY agent's create pay for it.
+    envPassthroughShared: [],
     dangerAcknowledged: [],
     captureDefaults: {},
     scrollbackLines: DEFAULT_SCROLLBACK_LINES,
@@ -861,6 +897,29 @@ export function envNameKey(agentId: string, name: string): string {
 }
 
 /**
+ * How a SHARED name is WRITTEN when it has to be read beside a per-agent key
+ * (Phase 275) — in `warnRejected`'s log line and in the rejection the Settings
+ * window draws.
+ *
+ * IT IS NOT A SEAL KEY. The shared seal holds BARE names in its own field
+ * (`DangerState.envShared`, src/main/settings/store.ts), and this prefix is
+ * never put into that field, never compared against it, and never parsed back
+ * apart. It exists so one log line can print `* ANTHROPIC_API_KEY` next to
+ * `claude FOO` and a person can tell which list lost a name.
+ *
+ * THE TWO KEY SPACES ARE PROVABLY DISJOINT and this function cannot collide
+ * with either of them. `envNameKey` joins with a single space and
+ * `OVERLAY_ENV_KEY_PATTERN` forbids a space in a name, so every per-agent key
+ * holds EXACTLY ONE space and every bare shared name holds NONE. The agent id
+ * half is never pattern-matched at all — it is drawn from the compiled closed
+ * set `LAUNCHABLE_AGENT_IDS`, every member of which begins with a lowercase
+ * letter — so no `envNameKey` output can begin with `*` either.
+ */
+export function envSharedKey(name: string): string {
+  return `* ${name}`;
+}
+
+/**
  * The names a person's login shell exports, offered as suggestions in the
  * Settings window (Phase 269). NAMES ONLY — there is no field on this shape
  * that could carry a value.
@@ -870,6 +929,195 @@ export interface EnvVarCandidates {
   names: string[];
   /** True when the login shell did not answer at all. */
   probeFailed: boolean;
+}
+
+/**
+ * WHICH LIST the Settings window is asking candidates for (Phase 275).
+ *
+ * A discriminated union rather than a nullable agent id, because a shared list
+ * has no agent and `null` would have to mean "shared" by convention. The two
+ * arms refuse different things — the agent arm refuses that agent's own
+ * compiled `launch.env` keys, the shared arm refuses the union over every
+ * launchable agent, because the shared list reaches every one of them — so the
+ * handler has to tell them apart rather than guess.
+ */
+export type EnvCandidateScope =
+  | { kind: 'agent'; agentId: LaunchableAgentId }
+  | { kind: 'shared' };
+
+/**
+ * What the last read of `settings.json` DROPPED from the shell-variable lists
+ * (Phase 275), so the Settings window can say it instead of a person finding
+ * out when their agent stops seeing a key.
+ *
+ * TWO LAYERS DROP A NAME AND THEY GET TWO FIELDS, which is THE FIX ROUND'S
+ * REPAIR and it is a truthfulness repair rather than a shape preference. The
+ * build this round verified concatenated both layers into one `shared` list and
+ * drew the SEAL's sentence — "Ignored, because they were not added here" — over
+ * all of it. Measured on the shipping store on 2026-09-16: a settings file
+ * holding sixteen shape-valid junk names ahead of a name the seal DOES cover
+ * pushed the real name out at the SHAPE layer, and the one line telling a person
+ * why their own confirmed key stopped arriving named that key FIRST and told
+ * them it had never been added here. It had. The two layers mean different
+ * things to the person reading them, so they are two fields and two sentences:
+ *
+ *  - `shared` is the SEAL's answer. The name is well formed and Tortie would
+ *    read it; no human confirmed it in this window. Adding it here fixes it.
+ *  - `sharedUnread` is the SHAPE layer's answer. Tortie will not read that name
+ *    at all — it is not a name, or it is on a denylist, or it is a duplicate, or
+ *    it is past the sixteen this door reads. Adding it here does NOT fix it, so
+ *    sending a person to the Add sheet would be sending them to a dead end.
+ *
+ * SAFE TO DRAW, by construction. Every string on this shape has already passed
+ * `OVERLAY_ENV_KEY_PATTERN` — letters, digits and underscore, at most 64 bytes,
+ * no newline — so nothing here is a rendering primitive. An entry that could
+ * NOT be named safely (a non-string, a 4 KB blob, a string with a newline in
+ * it) is counted in `unnamed` and is never echoed. That is the difference
+ * between "never silently dropped" and "hand an attacker a DOM".
+ *
+ * AND EVERY LIST HERE IS BOUNDED, which the verified build's was not. The seal
+ * half always was, because the seal runs over the already-capped sanitized
+ * settings; the shape half was not, because it ran over the RAW file. Measured
+ * the same day: 200,000 junk names in `settings.json` produced 200,000 echoed
+ * names and a single 12,088,932-byte paragraph in the Settings window. The count
+ * past the echo cap is `sharedUnreadOver` — counted, never echoed, the same
+ * channel `unnamed` already is.
+ *
+ * NAMES ONLY. There is no field here that could carry a value.
+ */
+export interface EnvRejections {
+  /** Shared names THE SEAL dropped on the last read, bare. */
+  shared: string[];
+  /** Shared names THE SHAPE LAYER dropped on the last read, bare, capped. */
+  sharedUnread: string[];
+  /** Shape-layer drops past the echo cap: counted, never echoed. */
+  sharedUnreadOver: number;
+  /** Per-agent names the seal dropped on the last read, by agent id. */
+  perAgent: Partial<Record<LaunchableAgentId, string[]>>;
+  /** Entries dropped that could not be named safely. */
+  unnamed: number;
+}
+
+/** No rejection at all, which is what almost every settings file reads as. */
+export function noEnvRejections(): EnvRejections {
+  return { shared: [], sharedUnread: [], sharedUnreadOver: 0, perAgent: {}, unnamed: 0 };
+}
+
+/**
+ * Coerce a parsed `envPassthroughShared` value into a valid list, and SAY WHAT
+ * IT DROPPED (Phase 275).
+ *
+ * A NEW FUNCTION rather than a widening of `sanitizeEnvPassthrough` below, for
+ * two reasons. That one takes a MAP and asks `agentEnvKeys(id)`, and a shared
+ * list has no agent. And its documented silence is a contract Phase 269 wrote
+ * and this phase does not edit — the reporting belongs to the new field.
+ *
+ * THE UNIT THAT IS DROPPED WHOLE IS ONE NAME. A name is kept entirely or
+ * dropped entirely: never trimmed, case-folded, truncated, de-duplicated into
+ * something else, or otherwise repaired into an acceptable shape. The FIELD is
+ * dropped whole only when it is not an array.
+ *
+ * ONE BAD ENTRY NEVER DENIES THE REST, and that is a security decision rather
+ * than a convenience. Dropping the whole list because one entry is junk is a
+ * denial any agent with write access could author in one line, and it would
+ * take away every key a person set. Per-name dropping fails closed per name,
+ * and it is the treatment `sanitizeEnvPassthrough` already gives.
+ *
+ * `sharedRefusedEnvKeys` is the union of every launchable agent's compiled
+ * `launch.env` keys — today exactly `FORCE_COLOR` (cursor) and
+ * `GROK_PRIVACY_NOTICE_ROLLOUT` (grok). Refusing them HERE is the honest
+ * answer: the shared list reaches cursor too, and a shared `FORCE_COLOR` would
+ * make the `env-unresolved` notice say a cursor pane started WITHOUT a variable
+ * that pane actually has, which is the exact dishonesty
+ * `envPassthroughRefusal`'s last check exists to prevent.
+ *
+ * `refused` IS CAPPED, AND THE FIX ROUND ADDED THAT CAP. Everything else on
+ * this function was bounded by the sixteen `envPassthroughRefusal` enforces,
+ * because `names` is what the cap counts. `refused` is not — it runs over the
+ * RAW file, whose length is chosen by whoever wrote the file, which since this
+ * phase is the exact actor layer one of the seal names. The verified build
+ * pushed every refused entry into it, `store.ts` copied the whole list into the
+ * `settings:envRejections` answer, and `env-copy.ts` joined the lot into ONE
+ * paragraph in the Settings window. Measured against the shipping store on
+ * 2026-09-16, with a 53-byte name: 1,000 names gave a 57,932-byte line, 50,000
+ * gave 2,988,932 bytes, and 200,000 gave 12,088,932 bytes at a 115 ms load. A
+ * SECOND re-derivation the same day, with a short name, read 11,888 bytes at
+ * 1,000 — the same defect at a fifth the size, and the two readings are quoted
+ * together on purpose, because the per-name cost is chosen by whoever writes the
+ * file and so is the count. Nothing was unsafe — every echoed byte had passed
+ * the alphabet — but a rendering primitive is a size as well as a character set,
+ * and the size was the attacker's to choose.
+ *
+ * So the echo stops at the number this domain already spells, sixteen, and the
+ * rest is a COUNT in `refusedOver`. A count is the channel `unnamed` has always
+ * been, and it is separate from `unnamed` because the two say different things
+ * to a person: `unnamed` means "that was not a variable name", `refusedOver`
+ * means "there were more of these and Tortie stopped listing them".
+ *
+ * It never throws.
+ */
+export function sanitizeEnvPassthroughShared(
+  raw: unknown,
+  sharedRefusedEnvKeys: readonly string[]
+): { names: string[]; refused: string[]; refusedOver: number; unnamed: number } {
+  const names: string[] = [];
+  const refused: string[] = [];
+  let refusedOver = 0;
+  let unnamed = 0;
+  if (!Array.isArray(raw)) return { names, refused, refusedOver, unnamed };
+  for (const entry of raw as unknown[]) {
+    if (typeof entry === 'string') {
+      const refusal = envPassthroughRefusal(entry, {
+        existing: names,
+        agentEnvKeys: sharedRefusedEnvKeys,
+        scope: 'shared'
+      });
+      if (refusal === null) {
+        names.push(entry);
+        continue;
+      }
+    }
+    if (!isDrawableEnvName(entry)) unnamed += 1;
+    else if (refused.length < OVERLAY_LIMITS.maxEnvPassthroughNames) refused.push(entry);
+    else refusedOver += 1;
+  }
+  return { names, refused, refusedOver, unnamed };
+}
+
+/**
+ * Is this entry safe to print in a log line and to put in the DOM?
+ *
+ * THE LENGTH TEST RUNS FIRST ON PURPOSE, so a 4 MB string written into
+ * settings.json by hand is refused by a comparison rather than by a regex walk.
+ *
+ * THE NEWLINE TEST IS A BELT, AND THE INTEGRATOR'S ROUND CORRECTED WHY. The
+ * first draft of this comment copied the one on `filterRemoteEnvNames` in
+ * src/main/machines/remote-env-carriage.ts, which claimed JavaScript's `$`
+ * matches immediately before a FINAL NEWLINE with no `m` flag, so `"NAME\n"`
+ * would pass {@link OVERLAY_ENV_KEY_PATTERN} on its own. That is Python and
+ * Perl. Measured on 2026-09-16:
+ * `new RegExp('^[A-Za-z_][A-Za-z0-9_]{0,63}$').test('ABC\n')` is **false**.
+ * THERE WERE THREE COPIES, NOT TWO. The build fixed this one and the one in
+ * remote-env-carriage.ts and said so in these words — and then a verifier found
+ * a third, in `build/agents-conformance-probe.mts`'s own `trailingNewline`
+ * fixture comment, which the fix round corrected. That is the whole argument
+ * for the two explicit checks below: a wrong claim about a regular expression
+ * propagates by copy faster than anybody re-measures it.
+ *
+ * The two lines stay. This answer decides whether a string a person never typed
+ * goes into a warning record and into the DOM, and a guard at that boundary
+ * should not rest on where a regular expression decides `$` is — the pattern is
+ * a shared constant, and an `m` flag added to it for some other caller would
+ * open the hole silently.
+ */
+function isDrawableEnvName(entry: unknown): entry is string {
+  return (
+    typeof entry === 'string' &&
+    entry.length <= OVERLAY_LIMITS.maxEnvKeyLength &&
+    !entry.includes('\n') &&
+    !entry.includes('\r') &&
+    new RegExp(OVERLAY_ENV_KEY_PATTERN).test(entry)
+  );
 }
 
 /**

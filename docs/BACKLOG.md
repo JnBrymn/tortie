@@ -28217,7 +28217,11 @@ module imports nothing and may never import anything; it stays that way.
 - **One app run** drives every item: the shared set, a per-agent narrowing beside it, the batch add,
   the confirmation, and a session that actually receives the variable — read back from the pane's own
   environment and NOT from our own record of it. One Electron, scratch profile, scratch HOME, its own
-  socket, ended in a `finally`.
+  socket, ended in a `finally`. It is `npm run probe:p275`
+  (`build/p275/probe-p275.mjs`), and the way it reads the pane's own environment is that the three
+  agents are STAND-IN executables the probe writes: launched as a session, each reads its own
+  `environ` and records WHICH NAMES it received, never a value. `npm run probe:p275:gestures`
+  (`build/p275/probe-p275-gestures.mjs`) is the parent-commit BEFORE number beside it.
 - **The gates the paths earn**: `conformance:agents` (the confirm hash and the seed list),
   `conformance:contract` for the settings shape, and the `gate:contract` baseline regenerated in the
   same commit with the moved lines named.

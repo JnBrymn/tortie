@@ -34,6 +34,7 @@ import {
 // parent.
 import {
   parseRemoteEnvAnswer,
+  remoteEnvNamesDroppedFor,
   remoteEnvNamesFor,
   remoteEnvProbeMarker,
   REMOTE_ENV_PROBE_SCRIPT_ID
@@ -358,6 +359,46 @@ describe('rule 7 — the names, filtered on this Mac before anything is composed
         'claude'
       )
     ).toEqual(['ANTHROPIC_API_KEY']);
+  });
+
+  /**
+   * PHASE 275. WHAT THIS RUNG REFUSES IS NOW ANSWERABLE, and that is the half
+   * a person could not see before.
+   *
+   * The cap is applied by `remoteEnvNamesFor` BEFORE `probeRemoteEnvNames` gets
+   * the list, so a name past sixteen never reaches the `dropped` list that
+   * function already computes and already reports. `REMOTE_ENV_NAMES_MAX` is
+   * asked over a union three doors of sixteen can fill, so the union can reach
+   * 48, and without an answer here the overflow vanishes with nothing said —
+   * on remote only, which is the divergence the standing rule forbids.
+   *
+   * THE CAP IS NOT RAISED and nothing new is sent. This is `droppedRemoteEnvNames`,
+   * which Phase 270 already wrote, asked over the same union.
+   */
+  it('names the cap overflow and the alphabet refusals together', () => {
+    const many = Array.from({ length: 20 }, (_, i) => `P275_N${String(i)}`);
+    const row = {
+      launch: { envPassthrough: [...many, 'A;id'] }
+    } as never;
+    const carried = remoteEnvNamesFor(row, 'claude');
+    const dropped = remoteEnvNamesDroppedFor(row, 'claude');
+    expect(carried).toHaveLength(REMOTE_ENV_NAMES_MAX);
+    // The four the cap pushed out, plus the one the alphabet refused.
+    expect(dropped).toEqual([...many.slice(16), 'A;id'].sort());
+    // Disjoint: a name is carried or it is reported, never both and never
+    // neither.
+    expect(dropped.filter((n) => carried.includes(n))).toEqual([]);
+    expect(new Set([...carried, ...dropped]).size).toBe(many.length + 1);
+  });
+
+  it('answers with nothing to report for an agent nobody configured', () => {
+    expect(remoteEnvNamesDroppedFor(null, 'shell')).toEqual([]);
+    expect(
+      remoteEnvNamesDroppedFor(
+        { launch: { envPassthrough: ['ANTHROPIC_API_KEY'] } } as never,
+        'claude'
+      )
+    ).toEqual([]);
   });
 });
 

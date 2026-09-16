@@ -1294,6 +1294,43 @@ const p270Carriage = await p270Load('remote-env-carriage');
 const p270Probe = await p270Load('remote-env-probe');
 
 /**
+ * CONDITION 98's HALF THAT USED TO BE A STRING PIN. Does the `env-unresolved`
+ * notice this file raises carry the names the far machine said it did not have?
+ *
+ * WHY IT IS DERIVED. Until Phase 275 this was `code.includes('names:
+ * envProbe.missing')`, and it went red on a change that made the notice say
+ * MORE rather than less: both remote paths now pass `names: envMissing`, where
+ * `envMissing` is the probe's own `missing` unioned with the names this rung's
+ * cap refused to carry. A name past `REMOTE_ENV_NAMES_MAX` never reaches
+ * `probeRemoteEnvNames` at all, so `envProbe.missing` cannot know about it —
+ * the pin was guarding a spelling, and the property underneath it is that the
+ * probe's answer is what the person is told.
+ *
+ * So the expression after `names:` inside the notice object is read, and it
+ * answers yes when that expression names `.missing` itself, or when it is a
+ * single local whose own initializer does. A literal, or a list assembled from
+ * something that is not the probe, still answers no — which is what condition
+ * 98 was always really asking.
+ *
+ * `code` arrives with comments already stripped by the caller, so a paragraph
+ * naming `envProbe.missing` cannot answer a question about what the code does.
+ */
+function noticeNamesTheMissing(code: string): boolean {
+  const notice = /kind:\s*'env-unresolved'[\s\S]{0,600}?\bnames:\s*([^\n]+)/.exec(
+    code
+  );
+  if (notice === null) return false;
+  const expr = (notice[1] ?? '').replace(/,\s*$/, '').trim();
+  if (/\.missing\b/.test(expr)) return true;
+  const local = /^[A-Za-z_$][\w$]*$/.exec(expr);
+  if (local === null) return false;
+  const decl = new RegExp(
+    `\\b(?:const|let|var)\\s+${expr}\\b[^=]*=([\\s\\S]{0,400}?);`
+  ).exec(code);
+  return decl !== null && /\.missing\b/.test(decl[1] ?? '');
+}
+
+/**
  * PHASE 200, THE MIXED LOADER ARM. A SECOND COPY of `src/main/errors`, loaded
  * under a URL of its own so its `GmuxError` is a DIFFERENT CONSTRUCTOR from the
  * one this file imported at the top. That is exactly the shape the 0.98.0 audit
@@ -2231,7 +2268,23 @@ process.stdout.write(
             asksForNames: [...code.matchAll(/remoteEnvNamesFor\(/g)].length,
             probes: [...code.matchAll(/probeRemoteEnvNames\(/g)].length,
             raisesNotice: [...code.matchAll(/'env-unresolved'/g)].length,
-            namesTheMissing: code.includes('names: envProbe.missing'),
+            // PHASE 275 MADE THIS DERIVE INSTEAD OF PIN, and the reason is
+            // that the pin went red on a change that STRENGTHENED the thing it
+            // guards. It read the literal `names: envProbe.missing`, and both
+            // files now write `names: envMissing`, where `envMissing` is that
+            // same probe answer UNIONED with what this rung's own cap refused
+            // to carry — a name the union asked for and that never reached the
+            // probe, so `envProbe.missing` could not know about it.
+            //
+            // So the question is asked the way condition 98 actually means it:
+            // the `names` the notice carries must trace to the probe's
+            // `missing`. The expression after `names:` inside the
+            // `env-unresolved` object is read, and it counts either when it
+            // names `.missing` itself (the parent's shape) or when it is a
+            // local whose own initializer does (this phase's). Nothing here
+            // accepts a literal or a list built from somewhere else, which is
+            // what the pin was really defending.
+            namesTheMissing: noticeNamesTheMissing(code),
             passesEnvNames: [...code.matchAll(/envNames: passthrough/g)].length,
             widensTheDeadline: [
               ...code.matchAll(/REMOTE_CREATE_ENV_TIMEOUT_MS/g)
