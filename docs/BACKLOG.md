@@ -27573,6 +27573,22 @@ canonical spelling: on this machine `realpath('/private/tmp/rpcase/realname')` a
 `/private/tmp/rpcase/RealName`. Both sides of the comparison go through it, so a case-variant spelling
 of an open project cannot reach this refusal, and any round tempted to blame case can stop.
 
+> **THAT PARAGRAPH IS WRONG AND IT IS THE CAUSE. Corrected 2026-09-16, after the reporter answered.**
+> The measurement above is right and the conclusion drawn from it is backwards. `realpath`
+> canonicalises the case of the ROOT; the PATH is never realpathed before the lexical comparison, so
+> the canonicalisation is what CREATES the mismatch rather than what prevents it. "Both sides of the
+> comparison go through it" is the false clause — only one side does. The reporter's own reading,
+> sent 2026-09-15: he opened `/Users/sean/source/SpecStory/getspecstory/specstory-cli` and `pwd -P`
+> answered `/Users/sean/Source/...` with a capital S. Driven through the shipped functions over that
+> exact shape: at `1f311103` the lowercase spelling is REFUSED and the disk spelling SAVES; at
+> `cd524701` both SAVE. **It was never about symlinks.** The defect is one folder with two spellings,
+> and macOS offers two ways to make one — a symlink, or a case-insensitive volume, which is the
+> DEFAULT on APFS and is what both this machine and the reporter's are running. Phase 273 repaired
+> the comparison rather than either cause, which is why it fixes this without having known it. The
+> escape verifier drove the case variant explicitly and recorded it as newly admitted; this paragraph
+> is why that reading was under-weighted when the verdicts were read. Phase 274 below is the round
+> that follows from the correction.
+
 **FOR THE ROUTE HE DESCRIBES, BOTH SIDES COME FROM THE SAME TABLE ROW, WHICH IS WHY THIS IS STRANGE.**
 The tree's `rootPath` is `localPathOf(target)`, which is `target.path`
 (`shared/workspace-target.ts:117-121`), and the target is the open project whose list the renderer got
@@ -27866,6 +27882,172 @@ save's stop, or to the three answers a stale save offers, which are Phases 240 a
 implicated. No redesign of the save dialog. Remote projects are out of scope: their paths are on
 another machine and never reach `realpath` here. And **the phase does not close issue 25 on a green
 gate** — it closes when belucid confirms on a build, or it stays open and says what is still unknown.
+
+
+## Phase 274 — one folder, two spellings, everywhere else it is compared (issue 25's second half, 2026-09-16)
+
+**Subject.** `fix(paths): one folder is one project however it is spelled`
+
+**First body line.** `Phase 274: one folder, two spellings`
+
+**Semver.** Patch if the repair is contained to comparisons. **Minor if it turns out a manifest
+migration is needed**, because a migration changes durable state and the release note has to say so.
+The phase decides which from its own reading and does not assume the cheaper one.
+
+**Tier 3, and it is not negotiable.** The candidate sites are `projects.path`, the sessions join on
+`project_path`, and the persisted layout keys. "Can it lose or corrupt the person's work, being tmux,
+the manifest, restore or session lifecycle?" — yes, directly: the failure mode under investigation is
+a person's sessions dividing between two rows for one folder. Any migration is durability-critical and
+earns the tier on its own.
+
+**Charter.** [Issue 25](https://github.com/gregce/tortie/issues/25), the Phase 272 and 273 entries
+above, **the correction now written into Phase 272's entry**, and the reporter's own research of
+2026-09-15, which is the strongest outside evidence this phase has and is reproduced here because it
+is not in any repository we control.
+
+**What the reporter measured on his own machine**, answering the operator's question directly:
+
+```
+$ cd /Users/sean/source/SpecStory/getspecstory/specstory-cli
+$ echo "spelled: $PWD"; echo "real   : $(pwd -P)"
+spelled: /Users/sean/source/SpecStory/getspecstory/specstory-cli
+real   : /Users/sean/Source/SpecStory/getspecstory/specstory-cli
+```
+
+Lowercase `source` as typed, capital `Source` on disk. Not a symlink. A case-insensitive volume, which
+is the APFS default — **measured on the operator's machine too, where `/users/gdc/gmux` resolves** —
+so this is the ordinary configuration of both machines and not a peculiarity of the reporter's.
+
+**His four incidents, in his words, from the same codebase.** They are listed because four independent
+hits on one pattern is evidence about the PATTERN, and this phase's whole premise is that the pattern
+recurs wherever a stored spelling meets a resolved one:
+
+1. Provenance attribution silently failed — `fsnotify` echoes back whatever case was passed to `Add()`,
+   while another tool resolved the canonical spelling, so a case-sensitive suffix match never fired.
+2. Absolute paths leaked into generated markdown — a `HasPrefix` check was exact, so recorded paths
+   never relativised. An earlier wrong fix case-folded by the rendering host's OS and corrupted
+   sessions recorded on another platform.
+3. **Split sessions in the IDE — opening a folder as `~/source/...` and `~/Source/...` created two
+   workspace entries and split history between them.** This is the incident this phase is about.
+4. **Unstable workspace ids — an index hashed the path, so the casing changed the id**, and the repair
+   needed a version bump because every stored id was invalidated.
+
+**And the language difference, which matters for anyone reading their fix across.** Go's
+`filepath.EvalSymlinks` does NOT restore canonical case and returns a nil error while doing nothing,
+which is what misled them; they needed their own per-component walk. **Node's `fs/promises.realpath`
+DOES restore canonical case** — measured here, `realpath('…/rpcase/realname')` answers
+`…/rpcase/RealName`. So this repository already has the working tool. **Every defect here is a place
+that does not call it, never a place where it fails.** A later round must not import their
+component-walking fix; it would be solving a Go problem in a language that does not have it. Note the
+second trap they hit, which applies to us equally: case-folding a comparison by the host's rules is
+NOT the fix and corrupts data recorded elsewhere.
+
+### What is already measured, so no round re-derives it
+
+**The same folder, spelled two ways, becomes TWO PROJECTS.** `projects.path` is `UNIQUE`
+(`projects-repository.ts:11-16`) and SQLite's uniqueness is byte-exact, so the constraint does not see
+two spellings as one folder. Driven against `better-sqlite3` with the shipped table shape:
+
+```
+INSERT /Users/sean/Source/proj  -> ok
+INSERT /Users/sean/source/proj  -> ok
+TWO ROWS: ['/Users/sean/Source/proj', '/Users/sean/source/proj']
+```
+
+`addProject` stores `resolvePath(path)` (`sessions/core.ts:2891`), which is `path.resolve` and never
+`realpath`, so whatever spelling reached it is what is stored and what the `ON CONFLICT(path)` clause
+at `projects-repository.ts:65-66` compares. Two rows means two tabs for one folder, and the sessions
+join at `sessions-repository.ts:812` and `:847` is `WHERE project_path = ?`, so **a person's sessions
+divide between the two rows**. That is the reporter's incident 3 reproduced in our manifest by the
+same mechanism.
+
+**Phase 273 already repaired the SAVE comparison and it fixes the reporter's shape.** Measured over his
+exact spelling: at `1f311103` the lowercase spelling is REFUSED and the disk spelling SAVES; at
+`cd524701` both SAVE. This phase is what is left AFTER that, and it must not re-open the gate 273
+settled.
+
+**The four string-equality sites Phase 273's own commit body named** — it named them as the reason NOT
+to normalise at `addProject`, and left them standing, so they are this phase's starting list and not
+its finishing one: `projects.path`; `WHERE project_path = ?` at `sessions-repository.ts:812` and
+`:847`; `targetKey` (`shared/workspace-target.ts:131`), which writes the bare path as the key of the
+`gmux.splitLayouts` localStorage record; and `sameTarget` (`:99-106`), whose comparison is
+`left.machineId === right.machineId && left.path === right.path`.
+
+**The renderer surface Phase 273 deferred is the same defect and folds in here.** On a project whose
+spelling does not match disk, a file created from the tree opens no editor tab and a rename does not
+follow an open tab, because `createFile` answers an entry carrying the REAL spelling while the tree's
+own `rootPath` carries the person's. 273 measured this identical at its parent and at its HEAD and
+recorded it as a backlog entry rather than widening. This is that entry.
+
+### Mechanism
+
+**The survey comes first and the phase does not guess its own scope.** Enumerate every comparison
+between two filesystem paths in `src/` — string equality, `startsWith`, `includes`, a `Map` or `Set`
+keyed by a path, a SQL `WHERE` on a path column, a localStorage key, a `UNIQUE` constraint, a hash of a
+path — and for each say which side is a person's spelling and which is resolved, and whether they can
+differ. The reporter's four incidents are four DIFFERENT shapes of this, being a watcher, a prefix
+test, a workspace identity and a hashed id, so a survey that only looks for `===` will miss most of
+it.
+
+**Then the decision, and it is one decision the phase makes once and applies everywhere: WHICH SIDE
+NORMALISES.** Three candidates, and the phase argues rather than inherits:
+
+- **Normalise on the way in**, so the stored spelling is canonical. This is what Phase 273 REFUSED and
+  its reasons stand and must be answered rather than ignored: the stored path is a durable identity in
+  the four sites above, so re-spelling it strands session rows and persisted layouts unless two SQLite
+  columns AND a localStorage record set migrate together, and main cannot reach localStorage. Anything
+  proposing this owes the migration, the rollback, and what a half-applied migration leaves.
+- **Normalise at every comparison**, which is what 273 did for the one gate it touched. No migration,
+  no durable change, and the cost is that every future comparison is a new chance to forget.
+- **Make the identity itself case-insensitive** — a generated column, a collation, a normalised key
+  beside the display path. Keeps what the person typed for display while comparing canonically, and
+  owes the same migration questions.
+
+**What the person SEES does not change.** The tab spine shows the folder as they opened it. Phase 273
+holds this line already and this phase does not quietly break it while fixing the inside.
+
+**A stated non-goal that is really a refusal**: do not case-fold comparisons. It is the reporter's own
+recorded wrong fix, it corrupts anything recorded on a case-sensitive volume, and a repository that
+syncs a manifest or reads another machine's paths — this one does, over ssh — is exactly where it does
+damage. Ask the filesystem; never lowercase a string.
+
+### Proof, run rather than read
+
+- **Measure the parent commit.** Mandatory. Every defect this phase claims to fix is driven at
+  `cd524701` first and shown failing, then shown fixed. A claimed defect that cannot be made to fail at
+  the parent is not a defect and is struck from the phase.
+- **Method 1, the attack, over REAL data.** Open one folder twice, by two spellings, in the running
+  app. Make sessions under each. Then say what the person has: how many tabs, which sessions are where,
+  what restore does, what closing one does to the other. **If the answer is that sessions split, that
+  is the reporter's incident 3 in our product and it is the headline of the phase.** Then attack the
+  repair: after the fix, does the SECOND add find the FIRST row, does an existing split heal or stay
+  split, and what happens to a person who already has two rows today.
+- **Method 2, re-derive the survey independently.** A second pass that finds path comparisons by a
+  different method than the first — read the SQL schema for path columns and their constraints, read
+  every localStorage key that contains a path, read every `Map`/`Set` whose key type is a path — and
+  diff its list against the survey's. A site in one list and not the other is the finding.
+- **A hostile fixture, and it must include the cases that are NOT plain case.** Unicode normalisation
+  is the one this phase is most likely to miss: a name with a composed vs decomposed accent is one
+  folder on APFS and two different strings, which is the same defect wearing different clothes.
+  Trailing separators, doubled separators, `/tmp` against `/private/tmp`, and a path that is
+  case-different only ABOVE the project root all belong in the fixture.
+- **One app run drives everything**, one Electron through `build/electron-run.mjs`, scratch profile,
+  scratch HOME, its own socket, all ended in a `finally`.
+- **If a migration ships, it is driven on a REAL manifest copy** — a copy, never the operator's own —
+  with a before-and-after row count, and the interrupted case measured rather than argued.
+
+### What is NOT in this phase
+
+Phase 273's gate is not re-opened. `resolveInsideRoot`'s placing-then-resolving mechanism, its refusal
+vocabulary and `conformance:containment` all stand; if this phase needs to touch that file it says why
+and re-runs that gate's ablations. **No case-folding anywhere**, for the reason above. **No change to
+what the person sees**: the path they opened is the path the tab spine shows. No Windows work — this
+is macOS and the case-insensitive volume is the APFS default, and Linux hosts reached over ssh are
+case-sensitive and are out of scope unless the survey finds a comparison that crosses the two, in which
+case it is reported and not fixed here. Remote projects' paths are on another machine and are not
+realpathed locally; if the survey finds a remote comparison with this defect it becomes its own entry.
+And **the phase does not close issue 25** — 273 already fixed what the reporter reported, and this is
+the surface behind it.
 
 
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
@@ -28565,3 +28747,5 @@ cycle rather than only the evening it was written.
 - 2026-09-15, **PHASE 273 QUEUED, a symlinked project saves and a refusal stops naming a cause it did not measure (issue 25), Tier 3, not yet run.** It carries BOTH halves the operator asked for in one phase, because they are the same defect seen twice: the gate refuses for a reason it does not say, and the sentence says a reason it did not measure. **Half one is the symlink**, whose cause Phase 272's entry above already reproduced through the shipped functions. **The fix is smaller than it looks and the security guard already works**: twelve lines below the throw, `paths.ts:205-206` realpaths the parent and re-checks containment, and for a symlinked project THAT CHECK PASSES — the lexical test at `:193` is a cheap pre-filter throwing before the real guard can answer, so this is a pre-filter refusing what the guard would have admitted rather than a missing guard. **The discriminator is absolute versus relative and it explains why only saving breaks**: `lexical` is `resolve(trimmed)` for an absolute input but `resolve(realRoot, trimmed)` for a relative one, and a path resolved FROM realRoot is inside it by construction — the save path sends `tab.path` absolute and breaks, while `tree-ops.ts:767-770` sends `toRel(...)` for a rename and `:1175-1177` for a trash and both work, which is why belucid can browse, rename and delete in a project he cannot save one file in, and is the first thing to confirm with him. Three repairs are named with their costs and the phase picks one in its commit body rather than inheriting a choice: resolve before the lexical check, which is narrowest in lines and widest in blast radius and **carries a trap — `realpathOfAncestors` justifies its root-walk throw at `paths.ts:79-81` with "cannot happen for a path already proven to sit under an existing root", a premise the lexical check is what establishes, so relaxing it voids that comment's reasoning**; normalise at `addProject`, which fixes every caller at once and owes an answer for existing manifest rows and for a person suddenly seeing a resolved path they did not type; or hold both spellings, most faithful and most surface. **Half two is the five causes**: one `try` at `guarded-write.ts:365-371` answers `outside` for a non-absolute root, a `realpath` that threw (missing and unreadable alike), a root matching no open project, a `listProjectRoots()` that itself threw, and a path refusal — and the string that separates them is computed at `:210-219`, shipped across IPC and read by nothing, so the product knows why it refused and tells neither the person nor a log. Adding a refusal word moves `FsGuardedWriteRefusal` and the contract baseline in the same commit. **THE PROOF IS AN ATTACK RATHER THAN A DEMONSTRATION**: the phase does not test that saving works, it tests that nothing ESCAPES — a symlink pointing out of the project, one to `/`, one into another open project, a relative traversal wearing a symlinked prefix, partly-missing ancestors, and `.git` reached through a link, each proved refused BEFORE as well as after, so the phase can show it admitted exactly one new shape and not a class. **A repair that makes saving work and cannot demonstrate that is a failed phase**, and if the phase cannot separate the two it ships half two alone and says so. The blast radius is re-derived independently as a table of all 15 `resolveInsideRoot` call sites classified absolute or relative by reading the CALLERS, because a second caller sending absolute paths is broken today in the same way. **The gate does not get weaker and the save path does not get a private softer door**; issue 25 does not close on a green gate but when belucid confirms on a build.
 
 - 2026-09-15, **PHASE 273 LANDED, a symlinked project saves and a refusal says what it measured, `06264269`, version 0.106.0 unmoved, no tag, pushed.** A person who opened his project through a symbolic link can now save, and that was MEASURED IN THE RUNNING APP rather than argued: one Electron on a scratch profile and a scratch HOME, over a project the probe only ever tells the app about through the alias. At the parent `d3fb8223` the probe reports **15 findings** — the save does not write, the tab stays dirty, both ⌘S raise "Tortie did not save notes.md, because its project is not open", `.git` answers `outside` instead of `protected`, a closed project answers `outside` too, and the log holds zero refusal lines. At HEAD the same probe reports **PASS**: the typed bytes are read back OFF DISK at the REAL path (67 bytes), a second save runs the compare-and-swap through the alias, no toast and no dialog. That is belucid's shape, issue 25. His own tmux server was counted before and after on both arms: 45 sessions, unmoved. **THE REPAIR IS IN THE GATE AND NOT IN THE STORED PATH**, and the reason is durability: the spelling `addProject` stores IS a project's identity in four string equalities — `projects.path`, the `WHERE project_path = ?` join in sessions-repository, `targetKey`'s split-layout record key and `sameTarget` — so re-spelling it would strand every session row and every persisted layout of every symlinked project behind a two-column SQLite migration and a localStorage record set, and it would not even finish the job, because `session-actions.tsx:571` sets `repoPath` from a SESSION and that spelling reaches the same gate. So `resolveInsideRoot` now splits the question in two: **PLACE the path, then RESOLVE it.** A relative input, and an absolute one already under the real root, is placed by the string comparison exactly as before; anything else is placed by a new `hasAncestorInsideRoot`, which climbs by `dirname` to the first ancestor that realpaths and compares THAT to the real root **with the errno never consulted**, so a stranger and an unreadable stranger get one answer and this gate never becomes an oracle for the disk outside the project. Only a path that passed the placing step is resolved, by the same ancestor walk, the same containment check and the same `abs` composition a relative spelling has always taken. The leaf is still never resolved. **ON UPGRADE NOTHING HAPPENS**: no manifest row is read, written or migrated, no path is re-spelled, and the tab spine still shows the path he opened. **THE FIX ROUND CHANGED THE MECHANISM AND THAT IS WHY IT IS THE WALK RATHER THAN ONE `realpath`.** The first round gave an absolute input one extra realpath of its parent and threw the errno away; driven through the SHIPPING `writeGuarded` that shipped three FALSE sentences in the exact shape this phase exists for — a folder an agent removes before ⌘S answered "it is not inside the project it was opened from" through the alias where the real spelling answered "it is no longer on disk", and a mode-000 ancestor and a symlink loop split the same way. **THE OTHER HALF IS THE SENTENCE, and it is the half he asked for in the same breath.** One `try` in `guarded-write.ts` answered the single word `outside` for at least six causes and the renderer says that word as "its project is not open", so five of the six sentences a person could read were false. The word now comes from the guard that threw: `paths.ts` stamps every refusal through ONE factory and the catch reads the stamp, defaulting to `projectsUnknown` with no literal list of causes in it, because a list rots the first time a cause grows a sixth failure. Six words now, one per REMEDY — `projectClosed` keeps the old sentence BYTE FOR BYTE because for its one true cause it was already right; `outside` names no remedy because the renderer composed the path and there is none; `unreadable` says a folder on the way could not be read and check it is still there, one word for a deleted folder, an ejected disk, a permission, a TCC denial and a stalled mount because they are one remedy; `protected` says `.git` and refuses to merge into `outside` because "a file under .git is not inside your project" would be FALSE; `projectsUnknown` is the only sentence in the family that does not begin "Tortie did not save {name}", because Tortie never got as far as asking whether the project is open and saying it is not would be a lie about his world to cover a fault in Tortie's own; and `input` now takes the NUL byte, which was answered as a containment fact and is not one. **THE LOG ANSWERS THE NEXT REPORT IN ONE MESSAGE RATHER THAN SIX.** The `reason` has crossed IPC since Phase 226 and nothing read it. The `fs:writeGuarded` handler now writes ONE warn line on the `fs` scope for a REFUSED write carrying exactly `why`, `reason`, `root` and `path` — never the contents, never the `expect` digest, never a byte length, never an excerpt — and the home prefix is redacted to `~` by the writer, which the probe exercised for real (the third line's root reads back `~/notprojects`). Nothing is logged for a `wrote`, which would be a line per auto-save tick, or for a `stale`, which is the compare-and-swap working. **A SECOND, SMALLER THING A PERSON WILL MEET GOT FIXED IN PASSING**: a real top-level file whose name begins with two dots — `..notes.md` — was refused with that same wrong sentence, in an ordinary project by its real path, because the `'..'` clause asked about a PREFIX instead of a SEGMENT. Over the escape corpus that clause fired 704 times and every distinct `rel` that reached it was the real file `..hidden.txt`; it has never once caught a traversal, and it cannot, because `abs` is proved contained one line above. **THE PROOF IS AN ATTACK AND THE ESCAPE CHECKLIST IS NOW A GATE.** `npm run conformance:containment` (~5 s, no Electron) is 52 readings over a fixture holding the alias, eight symlinks, a prefix-sibling decoy, a `.git` tree, a dangling link, a loop, a mode-000 directory and a real `..notes.md`, plus 10 ablations each declaring the rows it owns, all red. Every escape shape is refused at `d3fb8223` AND at HEAD: relative traversal out in three spellings and still with no syscall spent, an absolute stranger, a string-prefix sibling, a directory symlink out of the root with an existing leaf and with missing ancestors, a symlink to `/`, a symlink into ANOTHER open project, a traversal wearing a symlinked prefix relative and absolute, `.git` at any depth and case-folded and through the alias, an unreadable ancestor outside the root answering indistinguishably from a missing one, a NUL byte, and a link inside the root pointing at the root's parent. What it admits is ONE CLASS, declared as a property rather than a list because an enumeration of the ways one directory can be spelled is a promise nobody can keep: an ABSOLUTE input whose parent chain resolves INSIDE the real root. Every member of it names a file the relative spelling already reached, because `abs` is composed from the RESOLVED parent and checked against the root twice more after that. **EACH VERIFIER DID SOMETHING THE BUILDERS DID NOT.** The escape pass re-derived the guard by a different method — an instrumented copy run BESIDE the shipped function over 17,989 distinct inputs against two `allowRoot` settings, 35,978 runs, 0 disagreements — and that is what established the lexical line is redundant for containment. The attack pass wrote its own hostile fixture of 100 rows nobody had tried (chains of aliases, `/tmp` spellings, out-and-back-in links, a self-link to the root, a leaf that is the loop), found no escape and found three admitted families the first round's wording did not name, which is why the admission is a property now. The fix round's pass drove 59 rows through the shipping function on both bases: 21 moved, 0 newly escaped, 0 strays. **WHAT IS STILL NOT TRUE, and none of it is hidden.** Issue 25 does not close on a green gate; it closes when **belucid confirms on a build**, and he has not yet. The ALIAS ROOT ITSELF is still refused with `allowRoot` and without, because `dirname` of it is outside the project — nothing reaches it, and lifting it would mean resolving the leaf. A RELATIVE path gets no second chance even where an alias could explain its climb; that is a decision about what a relative path means, measured and refused, not a claim the shape is impossible. **Three Explorer rows still fail on an alias project, identically at `d3fb8223` and at HEAD**: a file created from the tree opens no editor tab, and a rename does not follow an open tab, because `createFile` answers the REAL spelling while the tree's own `rootPath` is the alias one. That is a SECOND alias surface, in the renderer, with its own callers and its own escape questions, and it is a backlog entry rather than a widening of this phase. Open With was the other absolute caller and its failure was SILENT — the catch returned null and the submenu was simply absent — and it is fixed by the same one gate. A dangling symlink as an ancestor is still accepted, and a directory swapped for a symlink after the check is still not caught; both pre-existing, both need a second actor. Remote projects are out of scope. Gates, all foreground on the committed bytes: typecheck 0 at 1,303 production files with 0 boundary violations and 0 runtime cycles, build 0 with the contract inventory byte for byte and the Electron floor at 134 of 134, test 0 at 904 files and 14,227 tests with 1 file and 2 tests skipped, smoke:t1 0 at 6/6, smoke:t3 0 at 3/3, `conformance:containment` 0 at 52 readings and 10 of 10 ablations red, `conformance:save` 0 with three new rules and `ablation:p273` 0 with five ablations each red on the rule that owns it, `conformance:redline-write` 0 at 30 readings and 17 of 17 ablations red with its three containment rows COMING APART (`projectClosed`, `protected`, `outside` where all three read one word before), `conformance:redline` 0, `conformance:pathdoors` 0, `gate:contract` 0. The contract baseline is NOT regenerated, because `FsGuardedWriteRefusal` appears nowhere in it.
+
+- 2026-09-16, **PHASE 274 QUEUED, one folder two spellings everywhere else it is compared, Tier 3, not yet run — and PHASE 272's ENTRY WAS CORRECTED IN PLACE because a paragraph in it was wrong.** The reporter answered the operator and the cause was never symlinks: he opened `/Users/sean/source/SpecStory/getspecstory/specstory-cli` and `pwd -P` answered `/Users/sean/Source/...` with a capital S, on a case-insensitive APFS volume, **which is the DEFAULT and is what the operator's own machine runs too — `/users/gdc/gmux` resolves here.** So this was the ordinary configuration of both machines rather than anything peculiar to his. **THE CORRECTION.** Phase 272's entry said "CASE IS NOT THE CAUSE, MEASURED RATHER THAN ASSUMED" and told a later round to stop looking there. The measurement in it is right and the conclusion is backwards: `realpath` canonicalises the case of the ROOT while the PATH is never realpathed before the lexical comparison, so the canonicalisation is what CREATES the mismatch rather than what prevents it, and the false clause is "both sides of the comparison go through it" — only one side does. That paragraph is now marked wrong in place, with the reporter's reading beside it, because it is the kind of confident refutation a later round inherits. **Phase 273 fixes his shape without having known it**, because it repaired the COMPARISON rather than either cause: driven over his exact spelling, at `1f311103` the lowercase spelling is REFUSED and the disk spelling SAVES, and at `cd524701` both SAVE. The escape verifier had driven the case variant explicitly and recorded it as newly admitted; the wrong paragraph is why that reading was under-weighted when the verdicts were read. **WHAT PHASE 274 IS FOR, and it is worse than the save because it is durable.** `projects.path` is `UNIQUE` and SQLite's uniqueness is byte-exact, so the same folder spelled two ways becomes TWO PROJECT ROWS — measured against the shipped table shape, both inserts succeeded — and the sessions join at `sessions-repository.ts:812` and `:847` is `WHERE project_path = ?`, so **a person's sessions divide between the two rows**. That is the reporter's own incident 3, split workspace entries with history split between them, reproduced in our manifest by the same mechanism. The four string-equality sites Phase 273's commit body named as its reason NOT to normalise are this phase's starting list and not its finishing one, and the renderer surface 273 deferred — a file created from the tree opening no tab, a rename not following one — folds in as the same defect. **HIS FOUR INCIDENTS ARE IN THE ENTRY VERBATIM** because four independent hits on one pattern is evidence about the pattern, and they are four DIFFERENT shapes (a watcher echoing back the caller's case, an exact `HasPrefix`, a workspace identity, a hashed id), so a survey that only greps `===` misses most of it. **THE LANGUAGE DIFFERENCE IS RECORDED SO NOBODY PORTS THEIR FIX**: Go's `filepath.EvalSymlinks` does NOT restore canonical case and returns a nil error while doing nothing, which is what bit them and needed their own per-component walk, while Node's `fs/promises.realpath` DOES — measured. So this repository already has the working tool and every defect here is a place that does not call it, never a place where it fails. **The refusal that binds the phase: never case-fold a comparison.** It is the reporter's own recorded wrong fix, it corrupted sessions recorded on another platform for them, and this product reads another machine's paths over ssh. Ask the filesystem; never lowercase a string. Unicode normalisation is named in the hostile fixture as the case the phase is most likely to miss, being one folder on APFS and two different strings.
