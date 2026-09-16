@@ -28093,6 +28093,149 @@ And **the phase does not close issue 25** — 273 already fixed what the reporte
 the surface behind it.
 
 
+## Phase 275 — the keys an agent needs, set once (issue 20's follow-up, belucid, 2026-09-16)
+
+**Subject.** `feat(settings): shell variables set once, for every agent`
+
+**First body line.** `Phase 275: set the keys once`
+
+**Semver.** Minor. It adds a shared set beside the per-agent one and nothing changes for a person who
+has neither.
+
+**Tier 3, and the reason is the seal rather than the surface.** "Does it spawn a process, hold his
+credentials, or send his words anywhere?" — the names decide which of a person's shell variables are
+handed to a process Tortie starts, and **this phase widens the scope a single confirmed name covers**.
+The drawing is Tier 2 work; the seal is not, and the phase is tiered by its riskiest half.
+
+**Charter.** [Issue 20](https://github.com/gregce/tortie/issues/20), Phases 269 and 270, and the
+reporter's feedback of 2026-09-16, relayed by the operator in his words:
+
+> why do we need to set each individual key per agent? also the pop up list doesn't scroll and you
+> have to add one at a time. would it be possible to set this once and change the setting so it
+> applies to any agent session that needs keys?
+
+Three complaints, one surface, and they are fixed together because touching it twice would be silly.
+The first is a design question and the entry answers it below. The other two are our own defects.
+
+### The two defects, diagnosed from the tree before this entry was written
+
+**THE LIST IS A NATIVE `<datalist>` AND THAT IS BOTH BUGS.**
+`src/renderer/settings/LaunchDefaultsSection.tsx:304-308` renders the candidate names into a
+`<datalist>` attached to a text input. Its comment argues the choice honestly — "a datalist renders no
+box, so it costs the row no layout… a suggestion list and never a cage" — and the second half of that
+is a real property this phase must keep. But a `datalist` is a browser control we do not own: we
+cannot style it, cannot size it, and cannot control its scrolling, and Chromium caps what it shows.
+**Measured on the operator's own shell: `printenv | wc -l` is 51.** A control designed for a handful
+of suggestions is being handed fifty-one, which is why it does not scroll usefully.
+
+**AND IT IS WHY YOU ADD ONE AT A TIME.** A `datalist` attaches to ONE text input and yields ONE value
+per trip through the Add flow. The one-at-a-time complaint is not a separate defect; it is the same
+control. Replacing it with a list this product owns fixes both, and it is one change rather than two.
+
+### The design question, and the answer is that we over-scoped it
+
+**The case for per-agent, stated fairly first.** Tortie runs many agent processes at once under one
+user account, several deliberately launchable with their safeguards off. A key added for one provider
+reaching every other agent on the machine is a widening, and `envNameKey`
+(`src/shared/settings.ts:859-861`) exists precisely to stop it: the agent id is IN the seal key, with
+the comment "so a seal covering one agent's name never covers another agent's, and an agent that
+copies a sealed name into a second agent's list gets it dropped."
+
+**Why it is weaker than it looks.** The values come from the person's own login shell. Every one of
+those agents, run in Terminal, already receives all fifty-one. Tortie is currently STRICTER THAN A
+PLAIN TERMINAL, which is a defensible default and is buying less than the per-agent repetition costs.
+
+**And the cost is exactly what the reporter hit.** An API key is a property of a PROVIDER, not of an
+agent. One DeepSeek key is the same key whichever agent talks to DeepSeek. The current shape makes a
+person repeat identical work once per agent, through a control that adds one name at a time and does
+not scroll.
+
+**THE ANSWER: a shared set is the default, and per-agent narrowing stays.** Both, not either. A person
+who wants one agent to have a narrower set must still be able to say so, and a person who just wants
+their keys to work says it once.
+
+**THE SEAL IS THE LOAD-BEARING PART AND THIS ENTRY DOES NOT LEAVE IT TO A BUILDER.** A shared set
+removes one of the two layers `envNameKey` provides today. The layers are different and only one of
+them moves:
+
+- **Layer one, which does NOT move:** a name that no human confirmed is dropped. Refusal 8 in
+  CLAUDE.md — a human confirms the bytes, out of band of any agent turn, bound to a hash of the fields
+  that decide what runs. An agent writing a name into `settings.json` gets it dropped whether the set
+  is shared or not. **This phase does not touch that and any proposal that weakens it is refused.**
+- **Layer two, which DOES move:** today a confirmed name for `claude` does not reach `codex` even if
+  an agent copies it across, because the seal key carries the agent id. A shared set means one
+  confirmation covers every agent by design.
+
+So the shared set needs **its own seal key** and its own confirmation, and the confirmation's words
+must say what it means — this name goes to every agent, including ones installed later. That is a
+thing a person can agree to once, knowingly, and it is the honest trade. The phase writes the sentence
+and it goes in `env-copy.ts` with the rest. **A shared name must never be admitted on a per-agent
+seal, and a per-agent name must never be admitted on the shared one.** `conformance:agents` already
+asserts that the confirm hash moves when the name SET changes and only then; it gains the shared set,
+and an ablation proves a shared name sealed as if it were per-agent is dropped.
+
+**The merge is nearly free.** `envPassthroughFor` (`src/shared/launch-env.ts:47-53`) already unions two
+sources — the registry row and the per-agent settings — with the rule "neither shadows the other,
+because a person who has set both meant both." A third source joins that union on the same rule. That
+module imports nothing and may never import anything; it stays that way.
+
+### Mechanism
+
+- **The shared set** lives beside `envPassthrough` in settings, keyed by nothing. `envPassthroughFor`
+  takes it as a third argument and unions it, deduped, order stable. Both call sites — the local
+  create at `src/main/sessions/create-local.ts:476` and the remote carriage Phase 270 added — read the
+  same union, so **remote feels identical to local**, which is the operator's standing rule.
+- **The list becomes ours.** Replace the `datalist` with a list this product draws: scrollable, sized
+  to the window, filtered as the person types, keyboard-navigable. Keep the property its comment
+  defends — it is a suggestion list and never a cage, so a name the shell does not export YET is still
+  typed and accepted, which is the Phase 174.1 ruling and it stands.
+- **Several at once.** The list offers selection of more than one name, and Add takes them together.
+  One confirmation for the batch, not one per name — and the confirmation names every variable in it,
+  because a person agreeing to a list must be able to read the list.
+- **Where the shared set is drawn.** Settings → Launch defaults already draws a per-agent card. The
+  shared set is NOT a fourth copy of that card; it is drawn once, above the per-agent cards, and each
+  agent's card says what it inherits. Under Just enough words: short labels, one line, no paragraph on
+  the resting face.
+- **Names only, still.** `ENV_NAMES_ONLY` — "Names only. Tortie never reads a value into this window."
+  That holds for the shared set, the manifest keeps names and never values, and no value is ever
+  logged, drawn, or sent to another machine.
+
+### Proof, run rather than read
+
+- **Measure the parent commit.** Adding one key for three agents takes three trips through the Add
+  flow at the parent and one after. Count the gestures on both and put both numbers in the commit
+  body.
+- **Method 1, the attack, on the seal.** Write a shared name into `settings.json` by hand, the way any
+  agent on the machine could, and prove it is DROPPED on read and surfaces as a visible error naming
+  the field and the reason. Then prove the cross-admission both ways: a shared name sealed under an
+  agent id is not admitted as shared, and a per-agent name sealed as shared is not admitted for that
+  agent. Then attack the hash: confirm a shared set, add a name, and prove the hash moved.
+- **Method 2, drive the list over REAL data.** The operator's own shell exports 51 names. Drive the
+  new list with a probe answering at least that many and prove it scrolls, filters and selects
+  several — and drive it with ZERO names, which is the shell-probe-failed path that must still let a
+  person type a name.
+- **One app run** drives every item: the shared set, a per-agent narrowing beside it, the batch add,
+  the confirmation, and a session that actually receives the variable — read back from the pane's own
+  environment and NOT from our own record of it. One Electron, scratch profile, scratch HOME, its own
+  socket, ended in a `finally`.
+- **The gates the paths earn**: `conformance:agents` (the confirm hash and the seed list),
+  `conformance:contract` for the settings shape, and the `gate:contract` baseline regenerated in the
+  same commit with the moved lines named.
+
+### What is NOT in this phase
+
+**Layer one of the seal does not move.** A name no human confirmed is dropped, and a proposal that
+makes configuration take effect without a human confirming it is refusal 8 and is refused outright.
+Per-agent sets are NOT removed — a person who wants one agent narrower keeps that, and a phase that
+deletes it to simplify the drawing has taken away the only reason the per-agent design was defensible.
+**No value ever enters the window, the manifest, a log or an argv**; this phase moves names and
+nothing else. No change to `captureLoginShellEnv`, to the remote probe Phase 270 built, or to
+`REMOTE_ENV_ALLOWED`, which stays at exactly two names. No import of a secret from a `.env` file, a
+keychain or a vendor's config — the shell is the one source and widening that is a different phase with
+its own research. And the reporter is the judge of the first complaint: the phase does not declare the
+per-agent repetition solved until he has set a key once and seen it reach two agents.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -28792,3 +28935,5 @@ cycle rather than only the evening it was written.
 - 2026-09-15, **PHASE 273 LANDED, a symlinked project saves and a refusal says what it measured, `06264269`, version 0.106.0 unmoved, no tag, pushed.** A person who opened his project through a symbolic link can now save, and that was MEASURED IN THE RUNNING APP rather than argued: one Electron on a scratch profile and a scratch HOME, over a project the probe only ever tells the app about through the alias. At the parent `d3fb8223` the probe reports **15 findings** — the save does not write, the tab stays dirty, both ⌘S raise "Tortie did not save notes.md, because its project is not open", `.git` answers `outside` instead of `protected`, a closed project answers `outside` too, and the log holds zero refusal lines. At HEAD the same probe reports **PASS**: the typed bytes are read back OFF DISK at the REAL path (67 bytes), a second save runs the compare-and-swap through the alias, no toast and no dialog. That is belucid's shape, issue 25. His own tmux server was counted before and after on both arms: 45 sessions, unmoved. **THE REPAIR IS IN THE GATE AND NOT IN THE STORED PATH**, and the reason is durability: the spelling `addProject` stores IS a project's identity in four string equalities — `projects.path`, the `WHERE project_path = ?` join in sessions-repository, `targetKey`'s split-layout record key and `sameTarget` — so re-spelling it would strand every session row and every persisted layout of every symlinked project behind a two-column SQLite migration and a localStorage record set, and it would not even finish the job, because `session-actions.tsx:571` sets `repoPath` from a SESSION and that spelling reaches the same gate. So `resolveInsideRoot` now splits the question in two: **PLACE the path, then RESOLVE it.** A relative input, and an absolute one already under the real root, is placed by the string comparison exactly as before; anything else is placed by a new `hasAncestorInsideRoot`, which climbs by `dirname` to the first ancestor that realpaths and compares THAT to the real root **with the errno never consulted**, so a stranger and an unreadable stranger get one answer and this gate never becomes an oracle for the disk outside the project. Only a path that passed the placing step is resolved, by the same ancestor walk, the same containment check and the same `abs` composition a relative spelling has always taken. The leaf is still never resolved. **ON UPGRADE NOTHING HAPPENS**: no manifest row is read, written or migrated, no path is re-spelled, and the tab spine still shows the path he opened. **THE FIX ROUND CHANGED THE MECHANISM AND THAT IS WHY IT IS THE WALK RATHER THAN ONE `realpath`.** The first round gave an absolute input one extra realpath of its parent and threw the errno away; driven through the SHIPPING `writeGuarded` that shipped three FALSE sentences in the exact shape this phase exists for — a folder an agent removes before ⌘S answered "it is not inside the project it was opened from" through the alias where the real spelling answered "it is no longer on disk", and a mode-000 ancestor and a symlink loop split the same way. **THE OTHER HALF IS THE SENTENCE, and it is the half he asked for in the same breath.** One `try` in `guarded-write.ts` answered the single word `outside` for at least six causes and the renderer says that word as "its project is not open", so five of the six sentences a person could read were false. The word now comes from the guard that threw: `paths.ts` stamps every refusal through ONE factory and the catch reads the stamp, defaulting to `projectsUnknown` with no literal list of causes in it, because a list rots the first time a cause grows a sixth failure. Six words now, one per REMEDY — `projectClosed` keeps the old sentence BYTE FOR BYTE because for its one true cause it was already right; `outside` names no remedy because the renderer composed the path and there is none; `unreadable` says a folder on the way could not be read and check it is still there, one word for a deleted folder, an ejected disk, a permission, a TCC denial and a stalled mount because they are one remedy; `protected` says `.git` and refuses to merge into `outside` because "a file under .git is not inside your project" would be FALSE; `projectsUnknown` is the only sentence in the family that does not begin "Tortie did not save {name}", because Tortie never got as far as asking whether the project is open and saying it is not would be a lie about his world to cover a fault in Tortie's own; and `input` now takes the NUL byte, which was answered as a containment fact and is not one. **THE LOG ANSWERS THE NEXT REPORT IN ONE MESSAGE RATHER THAN SIX.** The `reason` has crossed IPC since Phase 226 and nothing read it. The `fs:writeGuarded` handler now writes ONE warn line on the `fs` scope for a REFUSED write carrying exactly `why`, `reason`, `root` and `path` — never the contents, never the `expect` digest, never a byte length, never an excerpt — and the home prefix is redacted to `~` by the writer, which the probe exercised for real (the third line's root reads back `~/notprojects`). Nothing is logged for a `wrote`, which would be a line per auto-save tick, or for a `stale`, which is the compare-and-swap working. **A SECOND, SMALLER THING A PERSON WILL MEET GOT FIXED IN PASSING**: a real top-level file whose name begins with two dots — `..notes.md` — was refused with that same wrong sentence, in an ordinary project by its real path, because the `'..'` clause asked about a PREFIX instead of a SEGMENT. Over the escape corpus that clause fired 704 times and every distinct `rel` that reached it was the real file `..hidden.txt`; it has never once caught a traversal, and it cannot, because `abs` is proved contained one line above. **THE PROOF IS AN ATTACK AND THE ESCAPE CHECKLIST IS NOW A GATE.** `npm run conformance:containment` (~5 s, no Electron) is 52 readings over a fixture holding the alias, eight symlinks, a prefix-sibling decoy, a `.git` tree, a dangling link, a loop, a mode-000 directory and a real `..notes.md`, plus 10 ablations each declaring the rows it owns, all red. Every escape shape is refused at `d3fb8223` AND at HEAD: relative traversal out in three spellings and still with no syscall spent, an absolute stranger, a string-prefix sibling, a directory symlink out of the root with an existing leaf and with missing ancestors, a symlink to `/`, a symlink into ANOTHER open project, a traversal wearing a symlinked prefix relative and absolute, `.git` at any depth and case-folded and through the alias, an unreadable ancestor outside the root answering indistinguishably from a missing one, a NUL byte, and a link inside the root pointing at the root's parent. What it admits is ONE CLASS, declared as a property rather than a list because an enumeration of the ways one directory can be spelled is a promise nobody can keep: an ABSOLUTE input whose parent chain resolves INSIDE the real root. Every member of it names a file the relative spelling already reached, because `abs` is composed from the RESOLVED parent and checked against the root twice more after that. **EACH VERIFIER DID SOMETHING THE BUILDERS DID NOT.** The escape pass re-derived the guard by a different method — an instrumented copy run BESIDE the shipped function over 17,989 distinct inputs against two `allowRoot` settings, 35,978 runs, 0 disagreements — and that is what established the lexical line is redundant for containment. The attack pass wrote its own hostile fixture of 100 rows nobody had tried (chains of aliases, `/tmp` spellings, out-and-back-in links, a self-link to the root, a leaf that is the loop), found no escape and found three admitted families the first round's wording did not name, which is why the admission is a property now. The fix round's pass drove 59 rows through the shipping function on both bases: 21 moved, 0 newly escaped, 0 strays. **WHAT IS STILL NOT TRUE, and none of it is hidden.** Issue 25 does not close on a green gate; it closes when **belucid confirms on a build**, and he has not yet. The ALIAS ROOT ITSELF is still refused with `allowRoot` and without, because `dirname` of it is outside the project — nothing reaches it, and lifting it would mean resolving the leaf. A RELATIVE path gets no second chance even where an alias could explain its climb; that is a decision about what a relative path means, measured and refused, not a claim the shape is impossible. **Three Explorer rows still fail on an alias project, identically at `d3fb8223` and at HEAD**: a file created from the tree opens no editor tab, and a rename does not follow an open tab, because `createFile` answers the REAL spelling while the tree's own `rootPath` is the alias one. That is a SECOND alias surface, in the renderer, with its own callers and its own escape questions, and it is a backlog entry rather than a widening of this phase. Open With was the other absolute caller and its failure was SILENT — the catch returned null and the submenu was simply absent — and it is fixed by the same one gate. A dangling symlink as an ancestor is still accepted, and a directory swapped for a symlink after the check is still not caught; both pre-existing, both need a second actor. Remote projects are out of scope. Gates, all foreground on the committed bytes: typecheck 0 at 1,303 production files with 0 boundary violations and 0 runtime cycles, build 0 with the contract inventory byte for byte and the Electron floor at 134 of 134, test 0 at 904 files and 14,227 tests with 1 file and 2 tests skipped, smoke:t1 0 at 6/6, smoke:t3 0 at 3/3, `conformance:containment` 0 at 52 readings and 10 of 10 ablations red, `conformance:save` 0 with three new rules and `ablation:p273` 0 with five ablations each red on the rule that owns it, `conformance:redline-write` 0 at 30 readings and 17 of 17 ablations red with its three containment rows COMING APART (`projectClosed`, `protected`, `outside` where all three read one word before), `conformance:redline` 0, `conformance:pathdoors` 0, `gate:contract` 0. The contract baseline is NOT regenerated, because `FsGuardedWriteRefusal` appears nowhere in it.
 
 - 2026-09-16, **PHASE 274 QUEUED, one folder two spellings everywhere else it is compared, Tier 3, not yet run — and PHASE 272's ENTRY WAS CORRECTED IN PLACE because a paragraph in it was wrong.** The reporter answered the operator and the cause was never symlinks: he opened `/Users/sean/source/SpecStory/getspecstory/specstory-cli` and `pwd -P` answered `/Users/sean/Source/...` with a capital S, on a case-insensitive APFS volume, **which is the DEFAULT and is what the operator's own machine runs too — `/users/gdc/gmux` resolves here.** So this was the ordinary configuration of both machines rather than anything peculiar to his. **THE CORRECTION.** Phase 272's entry said "CASE IS NOT THE CAUSE, MEASURED RATHER THAN ASSUMED" and told a later round to stop looking there. The measurement in it is right and the conclusion is backwards: `realpath` canonicalises the case of the ROOT while the PATH is never realpathed before the lexical comparison, so the canonicalisation is what CREATES the mismatch rather than what prevents it, and the false clause is "both sides of the comparison go through it" — only one side does. That paragraph is now marked wrong in place, with the reporter's reading beside it, because it is the kind of confident refutation a later round inherits. **Phase 273 fixes his shape without having known it**, because it repaired the COMPARISON rather than either cause: driven over his exact spelling, at `1f311103` the lowercase spelling is REFUSED and the disk spelling SAVES, and at `cd524701` both SAVE. The escape verifier had driven the case variant explicitly and recorded it as newly admitted; the wrong paragraph is why that reading was under-weighted when the verdicts were read. **WHAT PHASE 274 IS FOR, and it is worse than the save because it is durable.** `projects.path` is `UNIQUE` and SQLite's uniqueness is byte-exact, so the same folder spelled two ways becomes TWO PROJECT ROWS — measured against the shipped table shape, both inserts succeeded — and the sessions join at `sessions-repository.ts:812` and `:847` is `WHERE project_path = ?`, so **a person's sessions divide between the two rows**. That is the reporter's own incident 3, split workspace entries with history split between them, reproduced in our manifest by the same mechanism. The four string-equality sites Phase 273's commit body named as its reason NOT to normalise are this phase's starting list and not its finishing one, and the renderer surface 273 deferred — a file created from the tree opening no tab, a rename not following one — folds in as the same defect. **HIS FOUR INCIDENTS ARE IN THE ENTRY VERBATIM** because four independent hits on one pattern is evidence about the pattern, and they are four DIFFERENT shapes (a watcher echoing back the caller's case, an exact `HasPrefix`, a workspace identity, a hashed id), so a survey that only greps `===` misses most of it. **THE LANGUAGE DIFFERENCE IS RECORDED SO NOBODY PORTS THEIR FIX**: Go's `filepath.EvalSymlinks` does NOT restore canonical case and returns a nil error while doing nothing, which is what bit them and needed their own per-component walk, while Node's `fs/promises.realpath` DOES — measured. So this repository already has the working tool and every defect here is a place that does not call it, never a place where it fails. **The refusal that binds the phase: never case-fold a comparison.** It is the reporter's own recorded wrong fix, it corrupted sessions recorded on another platform for them, and this product reads another machine's paths over ssh. Ask the filesystem; never lowercase a string. Unicode normalisation is named in the hostile fixture as the case the phase is most likely to miss, being one folder on APFS and two different strings.
+
+- 2026-09-16, **PHASE 275 QUEUED, the keys an agent needs set once (issue 20's follow-up, belucid), Tier 3, not yet run.** His three complaints in his words: "why do we need to set each individual key per agent? also the pop up list doesn't scroll and you have to add one at a time." One surface, fixed together. **TWO OF THE THREE ARE ONE DEFECT AND IT IS OUR CHOICE OF CONTROL.** `LaunchDefaultsSection.tsx:304-308` renders the candidates into a native `<datalist>`, which is a browser control we do not own — we cannot style it, size it or control its scrolling, and Chromium caps what it shows. **Measured on the operator's own shell, `printenv | wc -l` is 51**, so a control designed for a handful of suggestions is being handed fifty-one. And a datalist attaches to ONE input and yields ONE value per trip, so the one-at-a-time complaint is not a second defect, it is the same control. Replacing it with a list this product draws fixes both in one change, and it must keep the property its comment defends: a suggestion list and never a cage, so a name the shell does not export YET is still typed and accepted (the Phase 174.1 ruling, unchanged). **ON THE PER-AGENT QUESTION, HE IS RIGHT AND WE OVER-SCOPED IT.** The case for per-agent is stated fairly in the entry, being that many agents run at once under one account with some deliberately unsafeguarded, and `envNameKey` (`settings.ts:859-861`) puts the agent id IN the seal key so a name copied into a second agent's list is dropped. It is weaker than it looks: the VALUES come from the person's own login shell, and every one of those agents run in Terminal already receives all 51, so Tortie is currently STRICTER THAN A PLAIN TERMINAL while charging per-agent repetition for it. And a key is a property of a PROVIDER rather than an agent — one DeepSeek key is the same key whichever agent talks to DeepSeek. **The answer is a shared set as the DEFAULT with per-agent narrowing KEPT, both and not either.** **THE SEAL IS THE LOAD-BEARING PART AND THE ENTRY DOES NOT LEAVE IT TO A BUILDER**, because a shared set removes one of the two layers `envNameKey` provides and only one of them may move: layer one, that a name no human confirmed is DROPPED, is refusal 8 and does not move and a proposal weakening it is refused outright; layer two, that a confirmed name for claude cannot reach codex, does move by design, so the shared set needs its OWN seal key and its own confirmation whose words say what it means — this name goes to every agent, including ones installed later. A shared name must never be admitted on a per-agent seal and the reverse, with an ablation each, and `conformance:agents` already asserts the confirm hash moves when the name SET changes and only then, so it gains the shared set. The merge is nearly free because `envPassthroughFor` (`shared/launch-env.ts:47-53`) already unions two sources on the rule that neither shadows the other; a third joins on the same rule, and that module imports nothing and may never import anything. Both call sites read the same union so **remote feels identical to local**. The proof counts GESTURES at the parent and after (three trips to add one key for three agents, against one), attacks the seal by hand-writing a shared name into settings.json the way any agent could, and drives the list over 51 real names AND over zero, which is the probe-failed path that must still let a person type. **Per-agent sets are NOT removed** — deleting them to simplify the drawing would take away the only reason the per-agent design was defensible — no value ever enters the window, the manifest, a log or an argv, `REMOTE_ENV_ALLOWED` stays at exactly two names, and importing a secret from a `.env` file, a keychain or a vendor config is a different phase with its own research. He is the judge of the first complaint and it is not declared solved until he has set a key once and seen it reach two agents.
