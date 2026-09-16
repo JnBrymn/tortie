@@ -27979,6 +27979,49 @@ follow an open tab, because `createFile` answers an entry carrying the REAL spel
 own `rootPath` carries the person's. 273 measured this identical at its parent and at its HEAD and
 recorded it as a backlog entry rather than widening. This is that entry.
 
+### THE VOLUME CAN BE ASKED, MEASURED 2026-09-16, AND IT CHANGES THE CENTRAL DECISION
+
+The operator asked whether a filesystem's case sensitivity can be detected and used. It can, cheaply,
+without writing anything, and **this phase is built on that rather than on a global assumption.**
+
+The method: take a path that already exists, flip the case of its last component, and `stat` both
+spellings. Same `dev` and `ino` means the volume folds case. A different inode, or `ENOENT`, means it
+does not. Two `stat` calls, no temp file, no `diskutil` spawn, no write.
+
+Measured on real volumes on this machine, including a case-sensitive APFS disk image created with
+`hdiutil create -size 20m -fs "Case-sensitive APFS"` (no sudo), mounted and detached in a `finally`:
+
+```
+SENSITIVE      268us   the flipped spelling does not exist   <- the case-sensitive image
+INSENSITIVE    204us   both spellings are the same inode     <- /Users/gdc/gmux
+INSENSITIVE     66us   both spellings are the same inode     <- /private/tmp
+```
+
+Both branches answer correctly, and the sensitive image was created ON the insensitive machine, which
+is the point: **case sensitivity is a property of the VOLUME, not of the machine.** A Mac can hold an
+insensitive boot disk and a sensitive external one at the same time, and this product reads paths on
+other machines over ssh, where the far side may be Linux and is then always sensitive.
+
+**WHY THIS IS THE DECISION AND NOT A DETAIL.** The reverse danger is the one that costs a person data:
+on a case-sensitive volume `Source` and `source` are two genuinely different folders, and a repair that
+treats spellings as interchangeable would merge two real projects into one identity. Asking the volume
+removes the guess entirely — two spellings are one folder only where the volume says they are one
+folder. **A repair that cannot answer that question per volume is not admissible in this phase**, and
+any proposal that applies one rule everywhere must argue against this measurement rather than ignore
+it.
+
+Three consequences the phase must carry:
+
+- The answer is **per path** rather than per process, because a person can have a project on each kind
+  of volume at once. Cache it per volume if the cost matters, and say what invalidates the cache — a
+  volume can be unmounted and a different one mounted at the same point.
+- **It is still not case-folding.** The refusal below stands unchanged: the probe asks the filesystem
+  what it does, and the comparison then uses the filesystem's own answer, being `realpath`. Nothing in
+  this phase lowercases a string.
+- It composes with the shape survey rather than replacing it. Unicode normalisation is a SEPARATE
+  property from case folding, and a volume that folds case may or may not fold normalisation, so the
+  probe answers one question and the fixture list must still answer the other.
+
 ### Mechanism
 
 **The survey comes first and the phase does not guess its own scope.** Enumerate every comparison
