@@ -28374,6 +28374,142 @@ no more.
 new surface.
 
 
+## Phase 276 — the shell is asked once, not once per session (Phase 275's measured cost, 2026-09-16)
+
+**Subject.** `perf(launch): the login shell is asked once, not once per session`
+
+**First body line.** `Phase 276: ask the shell once`
+
+**Semver.** Patch. It makes a shipped feature cheaper and adds no capability. **If the refresh becomes
+a visible control it is minor**, and the phase says which it built.
+
+**Tier 3, and the reason is the invalidation rather than the cache.** A cache that misses a change to
+a person's shell config silently hands an agent a STALE API KEY, and the session it launches then
+fails against the provider with an error that has nothing to do with Tortie — which is issue 20's
+original symptom, re-created by our own optimisation. "Does it spawn a process, hold his credentials,
+or send his words anywhere?" — it spawns the probe and holds the resolved values in memory, so it is
+Tier 3 by that clause too.
+
+**Charter.** This entry, Phase 275's recorded limit, and the operator's question of 2026-09-16 — why
+it takes 1.1 seconds and whether it can be optimised. He then asked for the recommendation below to be
+queued.
+
+### What is already measured, so no round re-derives it
+
+**THE COST IS ONE FLAG, NOT THE SHELL.** `captureLoginShellEnv` spawns `zsh -lic` — login AND
+INTERACTIVE (`src/main/tmux/resolve.ts`, around `:502`). Measured on the operator's machine, three runs
+each, doing the same trivial work:
+
+```
+zsh -lic 'printenv PATH >/dev/null'   1160 ms   970 ms   980 ms
+zsh -lc  'printenv PATH >/dev/null'     10 ms    10 ms    10 ms
+```
+
+**A hundredfold, and all of it is the `i`.** His `~/.zshrc` sources oh-my-zsh (`:75`), nvm (`:108-110`)
+and `rbenv init` (`:120`), and those load for an interactive shell only. A login shell alone starts in
+10 to 20 ms.
+
+**THE `-i` IS LOAD-BEARING AND MUST NOT BE REMOVED.** `.zshrc` is read by interactive shells and by
+nothing else, and a provider key exported there is exactly what issue 20 was about. Dropping the `i`
+would make the probe fast and the feature useless for most people, and it is the same mistake PR #21
+made. **Any round tempted to drop it stops here.**
+
+**IT IS NOT CACHED, AND THE PRECEDENT IS TWELVE LINES AWAY.** `create-local.ts:624` calls
+`captureLoginShellEnv` on every create with a non-empty name list. In the same module,
+`getUserPath()` (`resolve.ts:755-762`) caches its promise for the life of the process, concurrent
+callers share the one capture, and `userPathEpoch()` (`:766-772`) exists so anything computed AGAINST
+that PATH can key on it and be dropped when the PATH is replaced. `src/main/agents/health.ts` already
+does exactly that. **The env probe never got the same treatment**, so a person with one shared name
+pays the full second on every session they start.
+
+**AND PHASE 275 MADE IT WORSE ON PURPOSE.** A shared name applies to EVERY agent, so the probe that
+used to fire for the one agent somebody had configured now fires for all of them. The feature that
+removed 51 gestures added a second to every create. Both are true and this phase is the second half of
+275's own bill.
+
+### The recommendation the operator queued
+
+Three things, and the third is what makes the first safe.
+
+1. **Cache it, the way PATH already is.** One promise for the process, shared by concurrent callers,
+   so the cost is once per app launch rather than once per session.
+2. **Warm it at startup, off the boot path.** The work does not shrink; it moves off the moment a
+   person is waiting. It must not block the window, the control client, or a restore — Phase 274's
+   duplicate log line was moved off the boot path for exactly this reason and its argument applies
+   here: a `statSync` or a spawn against a stalled mount BLOCKS IN THE KERNEL and a try/catch cannot
+   catch a block.
+3. **Invalidate when the person's shell config changes on disk.** This is the half that keeps Phase
+   269's promise, and that promise is quotable: *"rotating a key takes effect on the next session you
+   start, with nothing to restart."* A cache with no invalidation breaks it silently, which is worse
+   than the second it saves.
+
+**WHICH FILES, AND THE PHASE MEASURES RATHER THAN ASSUMES.** On the operator's machine `~/.zshrc`,
+`~/.zprofile`, `~/.zshenv`, `~/.bashrc` and `~/.profile` all exist; `~/.zlogin` and `~/.bash_profile`
+do not. The set depends on `$SHELL`, so the phase derives it from the shell the probe actually spawns
+rather than watching a hardcoded list. **A file that does not exist yet must still be watched**, because
+a person creating `~/.zshrc` for the first time is the case where a key first appears — which is why
+`src/main/credentials/watch.ts` holds `fs.watch` on the DIRECTORY rather than the file, and that
+precedent is the one to follow.
+
+**WHAT INVALIDATION CANNOT CATCH, and the phase states it rather than pretending.** A key exported by
+a file the rc sources indirectly, a key read from a vault at shell start, a `.env` a plugin loads —
+none of those move when the watched files move. So the invalidation is a convenience and **there must
+also be a deliberate way to refresh**, which is the question the phase answers with a measurement
+rather than a preference: is it a visible control, or is it implicit in something a person already
+does? A visible control makes this minor rather than patch, and the phase says which it chose and why.
+
+### Mechanism
+
+- One cached promise in the same shape `getUserPath` uses, and an epoch counter beside it so anything
+  computed against the values can be dropped when they are replaced. Do not invent a second caching
+  idiom in a module that already has one twelve lines away.
+- **The cache key is the NAME SET.** A shared name added after the first probe means the cached answer
+  does not cover it. Either the key includes the set, or adding a name invalidates. Say which, and
+  prove the case a person will actually hit: add a second key in Settings, start a session, and get the
+  new one.
+- **The values are held in memory and never written.** No value in the manifest, in settings, in a log,
+  in an argv, or in any file this phase adds. That rule is Phase 269's and it does not move because the
+  answer is now kept longer.
+- The remote probe (`src/main/machines/remote-env-probe.ts`) is a DIFFERENT probe against a different
+  machine's shell. Say explicitly whether it caches too, and per what — a cache keyed without the
+  machine would hand one machine's values to another, which is the worst defect available in this phase.
+- The warm-up runs after the window is up, is cancellable, and never delays a create that arrives while
+  it is in flight — that create shares the in-flight promise rather than starting a second probe.
+
+### Proof, run rather than read
+
+- **Measure the parent commit.** The number is the point. Time N session creates with one shared name
+  at the parent and at HEAD, on the operator's own shell shape (oh-my-zsh, nvm, rbenv), and put both
+  in the commit body. A phase claiming a speed-up without a before-and-after has not earned it.
+- **Method 1, the attack, and it is on the invalidation rather than the cache.** Rotate a key the way
+  a person does: edit `~/.zshrc` (a scratch HOME, never his), then start a session WITHOUT restarting
+  Tortie, and prove the new value arrives. Then attack it: edit through a symlinked path; replace the
+  file with `mv` rather than writing in place, which is what most editors do and what `fs.watch` most
+  often misses; edit a file that did not exist when the watch was set; touch without changing content;
+  change a file the rc SOURCES rather than the rc itself, which must be shown NOT to invalidate and
+  must therefore be covered by the deliberate refresh. **A stale key delivered silently is the
+  blocking finding of this phase.**
+- **Method 2, re-derive the cost independently.** Time it by a different method than the phase's own
+  instrumentation — wall-clock around the create from outside the app — and say whether the two agree.
+- **One app run** drives all of it: cold create, warm create, a second agent, a rotation, and a
+  refresh. One Electron, scratch profile, scratch HOME with a realistic slow rc, its own socket, ended
+  in a `finally`.
+- **Prove the warm-up does not delay the boot.** Measure time to the first drawn window with the
+  warm-up on and off. If it moves, it is on the boot path and the phase has the wrong design.
+
+### What is NOT in this phase
+
+**The `-i` stays.** It is what reads `.zshrc` and it is the whole reason the feature works; a fast
+probe that misses a person's keys has fixed nothing. **No value is ever persisted** — the answer lives
+in memory for the life of the process and nowhere else, so a cache is never a place a key can be read
+out of later. No change to Phase 275's shared set, its seal, its confirmation or its list. No change to
+`REMOTE_ENV_ALLOWED`, which stays at exactly two names, and no value is ever sent from this Mac. No
+watching of a directory outside the person's own home, and nothing recursive: this is a small named set
+of files in one or two directories. And the phase does not remove the per-create probe as a FALLBACK —
+if the cache is cold, empty or invalidated, the create probes, because a session that starts without a
+key a person set is worse than a session that takes a second.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29083,3 +29219,5 @@ cycle rather than only the evening it was written.
 - 2026-09-16, **PHASE 274 LANDED, one folder is one project however it is spelled, `25801fc9`, version 0.106.0 unmoved, no tag, pushed.** Opening one folder under two spellings no longer makes two tabs for it, and MEASURED IN THE RUNNING APP rather than argued: one Electron at a time on a scratch profile and a scratch HOME, over a project at `<s>/Source/proj` also opened as `<s>/source/proj`, which is belucid's exact shape from issue 25 — a case-insensitive APFS volume, the DEFAULT, and never a symlink. At the parent `30f4bd8d` the probe reports **14 findings**: two tabs, two rows in `projects` read both through the shipped bridge and by `/usr/bin/sqlite3` off a copy of the table, two distinct `project_path` values for the two sessions so his sessions divide, the create verb answering under the resolved root rather than the caller's, and restore drawing the split back. At HEAD the same probe reports **PASS at zero findings**: one tab, one row by both readings, one `project_path`, both sessions in one strip, and a second launch drew every session back. The 23-step tree battery in the same window went from **6 of 23 to 23 of 23** on the mis-spelled project against a control that read 23 of 23 at both commits, and all 17 failures were SILENT — a created file opened no tab, a rename did not follow one, a move that would have clobbered raised no confirmation, a `.git` drop was not refused, one folder was drawn twice, and ⌘S went out of the compare-and-swap door, which is the shape issue 16 exists to prevent. `probe:p273` re-ran and its alias project now reads 23 of 23 where Phase 273 measured 20 of 23, so the three rows that phase declared and left standing are fixed and are now asserted by name; his own tmux server was 47 sessions before and 47 after. **THE DECISION: ASK THE FILESYSTEM WHAT A FOLDER IS, NEVER WHAT IT IS CALLED.** Two paths name one folder when the filesystem hands back the same `st.dev` and the same `st.ino`, which is the definition `sameEntry` in `fs/file-ops.ts` and `archRepoKey` in `arch/db.ts` already used in this repository for this reason, and `addProject` now asks it: is there a row that NAMES this folder, rather than is there a row whose path column equals this string. The row that answers comes back unchanged — its uuid, its spelling, its sessions, its layouts, its tab — so nothing is written, nothing is re-spelled, and the tab spine still shows the folder the way the person opened it. The entry's three candidate repairs were each refused with a reason: normalising on the way in strands two SQLite columns, a tombstone payload and nine localStorage record sets main cannot reach and changes what a person SEES; normalising at every comparison leaves the split, because the split is made at the ADD before anything compares; and a case-insensitive collation is case-folding wearing a schema, since SQLite's NOCASE is ASCII-only and knows nothing about the volume. **NOTHING LOWERCASES A STRING AND NOTHING CALLS `.normalize()` ON A PATH**, which is rule 23 with a gate and a floor behind it, because folding is the reporter's own recorded wrong fix and it corrupted sessions their tool had recorded on another platform. **TWO FOLDERS THAT DIFFER ONLY BY CASE ON A CASE-SENSITIVE VOLUME ARE STILL TWO, AND THAT WAS DRIVEN RATHER THAN PROMISED.** The probe mounts a case-sensitive APFS image with `hdiutil` (no sudo, detached and the `.dmg` deleted in a `finally`), builds two REAL projects on it named `Alpha` and `alpha`, opens BOTH in one window and reads TWO tabs, TWO rows, two different ids, each tree answering its own file — and the reading is IDENTICAL at the parent, which is the point: nothing was merged and nothing could be, because dev+ino never compares two spellings for anything but byte equality. `measure:p274-volumes` re-reads that on every run, attacks it from both directions, and demonstrated rather than asserted that macOS refuses `EPERM` to hard link a DIRECTORY, which is why `sameFolder` is asked about directories only — two hard links to one FILE do share dev+ino. **NO MIGRATION SHIPS AND SOMEBODY WHO ALREADY HAS A SPLIT KEEPS IT.** A merge spans a boundary main cannot cross, being four manifest columns beside nine localStorage record sets in the renderer, and a half-applied one leaves a manifest saying `Source` while the split layout, tree expansion, editor width, recents, history scope, Context agent choice and eight SCM collapse keys all still say `source`, each silently defaulting; and the population is ZERO, read read-only from a COPY of his live manifest — nine project rows, zero folders holding more than one row, zero of the 34 distinct `sessions.project_path` spellings resolving to an open project under another spelling. So their two tabs stay two and their sessions stay divided; what gets better without a write is that every spelling now lands on the SAME one of the two rows, so the second tab stops being re-created. **THEY MUST NOT JUST CLOSE THE DUPLICATE TAB**: the live reproduction measured that closing it removes its project row and leaves its sessions in the manifest at the other spelling, still running in tmux, still resumable, and DRAWN NOWHERE — restore reproduced the amputation rather than healing it. The detector ships even though the heal does not, as one log line at manifest open naming the folder, both spellings and the volume's answer, silent when there are none, and it runs OFF the boot path asynchronously because the fix round caught it doing one `statSync` per row before the control client started, and a `statSync` against a disconnected SMB or NFS mount does not throw, it BLOCKS, which no `try`/`catch` can catch. **AND A REALPATH THAT DID NOTHING WAS THE OTHER HALF.** Node has two functions spelled `realpath` and only one canonicalises: `fs.realpathSync` is Node's own JavaScript walk, rewrites only the components that are symlinks and hands back the case it was given, measured on node v22.23.1. Six sites called it FOR its canonical answer, two of them under a comment saying they needed one, and got nothing — the harvest watcher and store, `reconstruct.ts`, the repo watcher, the shell arrival door and the overview resolver — and all now go through the one `canonicalPathSync`, which is `realpathSync.native`. Beside them `entry()` in `fs/file-ops.ts` answers at all fifteen call sites in the spelling its CALLER asked with while every guard still reads the resolved root, the terminal path link gains an additive `underBase` so a click opens the file where the pane is standing rather than at the canonical spelling and unguarded, the overview reader's prefix test asks the stored root FIRST and then its canonical form byte-exactly on each (at the parent a relative token was DROPPED by a `continue` with no error anywhere), and `open-detail.ts` stops putting an ABSOLUTE path in `relPath` — which REMOVES ONE NATIVE MENU ROW, conditionally: `Copy Relative Path` is absent from the tab-strip and editor right-click menus on a tab whose file is outside its project, a Context detail tab on `~/.claude/CLAUDE.md` being the shipped shape, and `Copy Path` still gives the whole path. **THE COMMITTER'S OWN FINDING, and it is the phase's headline defect arriving through a different door**: the fix round sent the ROW's spelling as a Finder open's `repoPath` and the ARRIVAL's as its `path`, and `fileInRepo` is a plain prefix test that `projectHolding` asks of `req.path` too, so both read false, the tab landed in whatever project was active and ⌘S took the PLAIN door; all three values are now spelled under the row, with the tail sliced off the ARRIVAL because the two spellings can be different LENGTHS (`/tmp` against `/private/tmp`). **WHAT IS STILL NOT TRUE.** An existing split is detected and logged, never healed. A row whose folder cannot be stat'd answers `unknown` and takes the branch `different` took, so it is never merged on a guess. The volume probe answers CASE only — over his nine real project paths the case question is answered 9 of 9 and the normalisation question 0 of 9, every name being plain ASCII with nothing to flip — and identity needs no probe for normalisation, because a case-SENSITIVE APFS volume still folds NFC against NFD and dev+ino folds whatever the volume folds without being told which. Reachability of the APFS firmlink prefix is UNMEASURED, so covering it is a property of the design rather than a claimed fix. Remote is untouched and byte-exact on purpose, since a far path cannot be stat'd from here and a far side may be Linux. The shim's `pwd`, the `~/.claude.json` local scope that reads a mis-spelled project's MCP servers and approval state as EMPTY, and an invisible character in a quoted path are written down in full house shape as **Phases 274.1, 274.2 and 274.3** rather than taken here. And the phase does NOT close issue 25 — it closes when belucid confirms on a build. Gates: typecheck, build with the contract inventory byte for byte, 14,286 tests, smoke:t1, smoke:t3, `conformance:samefolder` on both kinds of volume with 9 of 9 module ablations and rule 23 over 100 files at a floor of 100, `ablation:p274` 13 of 13 with all 8 files restored by sha256, `conformance:save`, `conformance:containment` 52 readings and 10 of 10, `conformance:redline-write` 30 readings and 17 of 17, `conformance:pathdoors`, `conformance:derived` 14 of 14, `conformance:watcher`, `conformance:overview`, `conformance:remoteclose`, and `HELPER_USER_FLOOR` 134 to 135.
 
 - 2026-09-16, **PHASE 275 LANDED, the keys an agent needs are set once, `b34122fa`, version 0.106.0 unmoved, no tag, pushed.** Issue 20's reporter asked why a key has to be set per agent, said the popup list does not scroll, and said you add one name at a time. There is now a card called **Every agent** at the top of Launch defaults: a name on it reaches every agent Tortie launches, and every agent card below says what it inherits in one line that points up rather than repeating the names. **PER-AGENT NARROWING STAYS** — a name on one agent's own card still works and a launch reads the union of the three routes, with the shared list joined ON THE END so a person who never touches it gets the identical list in the identical order they got at the parent. MEASURED IN THE RUNNING SETTINGS WINDOW on both commits: at the parent one name on one agent is **7 gestures**, the same name on three agents is **19 with three confirmations**, and the same name on every agent that machine draws is **at least 57 with 11 confirmations**; at HEAD one name on every agent is **6 gestures and 1 confirmation** and three names on every agent is **8 and 1**. **THE POPUP WAS NOT OURS AND THAT WAS BOTH BUGS.** The old field wrote its candidates into a native `<datalist>`, whose own rect measured `[0,0,0,0]`, whose every option box measured `[0,0,0,0]`, and on which a real click added **0 nodes** to the document — it is Electron's own autofill view, with no scroll view, no mouse wheel and a single selected line, so it could not scroll and could only ever yield one name. It is replaced by a list this product owns, assembled from the shortcuts overlay, the SCM changes list, the Context enable dialog and the app's one filter field. With a shell exporting 52 invented names the sheet drew **102 rows**, the box measured 308px over 2,456px of rows and was driven from scrollTop 0 to 2,150, and a filter read `4 of 102`; with a shell exporting **nothing** it still typed and accepted a name. **THE CONFIRMATION NOW SAYS WHAT IT IS ASKING FOR**, verbatim: *Pass this shell variable to every agent?*, then *Every agent Tortie launches gets these, including agents you install later.* — that sentence is layer two of the seal moving, said out loud at the last place a person can decline it, and a batch confirms once and names every variable in it as chips. **LAYER ONE DID NOT MOVE.** A shared name written straight into `settings.json`, which is what any agent on his machine can do, is still dropped on read, named in `app.log` as `* NAME`, and now drawn on the card that lost it. The shared list has its OWN sealed field holding BARE names, and the two key spaces are provably disjoint: every per-agent key holds exactly one space and every bare shared name holds none. Driven against the shipping seal: a shared name sealed as if it were per-agent comes back **empty**, and a per-agent name sealed as if it were shared comes back **empty** too. **ONE SETTING, THREE PANES, READ FROM EACH PANE'S OWN ENVIRON** — the probe's three agents are stand-ins that report which NAMES they received and never a value: the shared name came back present in claude's, codex's and gemini's own environ, the per-agent name in gemini's alone. The sentinel value is in **no** file the app wrote: 55 profile files, the manifest, 2 logs, `settings.json`, 6 pane reports, the reading and the harness stdout, **0 hits each**. **WHAT IS STILL NOT TRUE.** Sixteen junk names at the FRONT of a hand-edited settings file still push a real name out, because the cap counts in file order — the card now says so with the right sentence, but the order is not repaired, since a sanitizer that reorders admits a list nobody wrote. One shared name makes **every** agent's create pay for the login-shell probe, measured on his own shell at 52 names, **median 1,110 ms over five runs**. The seal is still a bearer token keyed to the login keychain rather than to the file, so a blob copied between profiles on one machine opens — not created here, but one blob now buys more. And the per-agent card has no shape-layer half, because Phase 269's per-agent sanitizer is documented silent and that contract was not edited. **THE REPORTER IS THE JUDGE OF THE FIRST COMPLAINT** and it is not declared solved until he has set a key once and seen it reach two agents. Gates green: `typecheck`, `build`, `test` (909 files, 14,391 tests), `smoke:t1`, `smoke:t3`, `package`, `conformance:agents` with its new section 9, `conformance:installs`, `conformance:machines`, `conformance:remoteclose`, `conformance:samefolder`, `conformance:save`, `conformance:resume:capture`, `gate:contract` regenerated for one added read-only channel (232 to 233), `ablation:p275` at **31 ablations in two lanes, every one red on the rule that owns it**, and `HELPER_USER_FLOOR` 135 to 137.
+
+- 2026-09-16, **PHASE 276 QUEUED, the shell is asked once rather than once per session, Tier 3, not yet run.** It is the second half of Phase 275's own bill: a shared name applies to EVERY agent, so the probe that used to fire for the one agent somebody had configured now fires for all of them, and 275 recorded the cost as a limit rather than fixing it. **THE COST IS ONE FLAG AND NOT THE SHELL, measured on the operator's machine three runs each doing identical trivial work: `zsh -lic` read 1160, 970 and 980 ms while `zsh -lc` read 10, 10 and 10 ms.** A hundredfold, all of it the `i`, because his `~/.zshrc` sources oh-my-zsh at `:75`, nvm at `:108-110` and `rbenv init` at `:120` and those load for an interactive shell alone; a login shell by itself starts in 10 to 20 ms. **THE `-i` IS LOAD-BEARING AND THE ENTRY FORBIDS REMOVING IT**: `.zshrc` is read by interactive shells and nothing else, a provider key exported there is exactly what issue 20 was about, and dropping the `i` is the same mistake PR #21 made — fast and useless. **THE PRECEDENT IS TWELVE LINES AWAY**: `create-local.ts:624` probes on every create, while `getUserPath()` at `resolve.ts:755-762` in the same module caches its promise for the life of the process with `userPathEpoch()` beside it so anything computed against it is dropped when it is replaced, which `agents/health.ts` already keys on. The env probe never got the same treatment. **The queued recommendation is three things and the third is what makes the first safe**: cache it in the shape `getUserPath` already uses; warm it at startup OFF the boot path, with Phase 274's own argument carried over that a spawn or a `statSync` against a stalled mount BLOCKS IN THE KERNEL where a try/catch cannot catch it; and invalidate when the person's shell config changes on disk, which is what keeps Phase 269's quotable promise that "rotating a key takes effect on the next session you start, with nothing to restart" — a cache with no invalidation breaks that silently, which is worse than the second it saves. The watched set is DERIVED from the shell the probe spawns rather than hardcoded (on this machine `.zshrc`, `.zprofile`, `.zshenv`, `.bashrc` and `.profile` exist and `.zlogin` and `.bash_profile` do not), and a file that does not exist YET must still be watched because creating `.zshrc` is exactly when a key first appears — which is why `credentials/watch.ts` holds `fs.watch` on the DIRECTORY, and that is the precedent to follow. **What invalidation cannot catch is stated rather than pretended**: a key exported by a file the rc sources indirectly, or read from a vault at shell start, moves nothing we watch, so a deliberate refresh must exist too and the phase decides by measurement whether it is a visible control (which makes this minor rather than patch). **The attack is on the INVALIDATION rather than the cache** — rotate a key by `mv` rather than an in-place write, which is what most editors do and what `fs.watch` most often misses; edit through a symlink; edit a file that did not exist when the watch was set; change a file the rc SOURCES, which must be shown NOT to invalidate and therefore to need the refresh. **A stale key delivered silently is the blocking finding.** The remote probe is a different probe against a different machine's shell and the entry demands it say whether it caches and per what, because a cache keyed without the machine would hand one machine's values to another. Values live in memory for the life of the process and are never written to the manifest, settings, a log or an argv, the per-create probe stays as the FALLBACK when the cache is cold or invalidated, and the phase proves the warm-up did not move time-to-first-window.
