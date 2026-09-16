@@ -35,6 +35,20 @@ let projects: { id: string; name: string; path: string }[] = [];
 /** When true, addProjectPath "fails": it toasts (silently here) and adds nothing. */
 let addFails = false;
 /**
+ * PHASE 274 FIX ROUND. The spelling the STORED ROW carries, when it differs
+ * from the spelling the pull asked for.
+ *
+ * This is not a hypothetical. `addProject` answers the row that already NAMES
+ * the folder, so a person who first opened `~/source/proj` and then
+ * double-clicks a file in it in Finder — where the path is spelled the way the
+ * disk holds it, `~/Source/proj` — gets a row back at the FIRST spelling. A
+ * mock that always answered a row at the path it was passed could not see that,
+ * and the version of this file before this round could not: it pushed
+ * `{ path }` and the delivery re-scanned for `{ path }`, so the two agreed by
+ * construction while the shipping pair had stopped agreeing.
+ */
+let storedSpelling: string | null = null;
+/**
  * Per-call gates for addProjectPath, one shift per call. A promise entry
  * holds that call open until the test resolves it, which is how the tests
  * stage a slow first project open. A missing entry means no gate.
@@ -50,9 +64,11 @@ const addProjectPath = vi.fn(async (path: string) => {
   if (addRejects.shift() === true) {
     throw new Error('addProjectPath failed hard');
   }
-  if (!addFails) {
-    projects = [...projects, { id: `id-${path}`, name: path, path }];
-  }
+  if (addFails) return null;
+  const stored = storedSpelling ?? path;
+  const row = { id: `id-${stored}`, name: stored, path: stored };
+  projects = [...projects, row];
+  return row;
 });
 
 vi.mock('../store', () => ({
@@ -113,6 +129,7 @@ beforeEach(() => {
   journal.length = 0;
   projects = [];
   addFails = false;
+  storedSpelling = null;
   addGates = [];
   addRejects = [];
   pullRejects = false;
@@ -183,6 +200,70 @@ describe('nothing to deliver', () => {
     pullRejects = true;
     await expect(pullPendingShellOpen()).resolves.toBeUndefined();
     expect(addProjectPath).not.toHaveBeenCalled();
+  });
+});
+
+describe('the row main answered, not the string that was asked for (Phase 274)', () => {
+  it('opens the file against the STORED spelling when they differ', async () => {
+    // One folder, two spellings, on a case-folding volume. The person opened
+    // it as `/tmp/source/proj` first, so that is the row; Finder hands over the
+    // disk's spelling. Before this fix the delivery re-scanned the project list
+    // for `/tmp/Source/proj`, read false, and abandoned the file with no toast
+    // and no log — the tab focused and the file never opened.
+    storedSpelling = '/tmp/source/proj';
+    takeResults = [
+      { folder: '/tmp/Source/proj', file: '/tmp/Source/proj/sub/readme.md' }
+    ];
+    await pullPendingShellOpen();
+    expect(requestOpenFile).toHaveBeenCalledWith({
+      // ALL THREE UNDER THE ROW. `fileInRepo` is a plain prefix test of
+      // `tab.path` against `tab.repoPath`, and `projectHolding` asks the same
+      // test of every open row, so a `path` spelled `/tmp/Source/...` beside a
+      // `repoPath` spelled `/tmp/source/...` reads false twice: the tab lands
+      // in the active project and ⌘S takes the plain door.
+      repoPath: '/tmp/source/proj',
+      // Sliced off the spelling `file` arrived in, then re-attached to the
+      // row's. The tail is byte for byte what the disk called it.
+      relPath: 'sub/readme.md',
+      path: '/tmp/source/proj/sub/readme.md',
+      mode: 'file',
+      source: 'tree',
+      preview: false
+    });
+  });
+
+  it('slices the relative path off the ARRIVAL, whose length can differ', async () => {
+    // The symlink half of the same defect: Phase 273 already resolved symlinks
+    // at this door, so `/tmp/x` is stored and `/private/tmp/x` arrives. The two
+    // spellings are different LENGTHS, so slicing by the row's would cut the
+    // name in the wrong place.
+    storedSpelling = '/tmp/x';
+    takeResults = [{ folder: '/private/tmp/x', file: '/private/tmp/x/a.md' }];
+    await pullPendingShellOpen();
+    expect(requestOpenFile).toHaveBeenCalledWith({
+      repoPath: '/tmp/x',
+      relPath: 'a.md',
+      // Under the row again, and `/tmp/x/a.md` is a real spelling of the same
+      // file: Phase 273 made the symlinked form admissible at the save gate.
+      path: '/tmp/x/a.md',
+      mode: 'file',
+      source: 'tree',
+      preview: false
+    });
+  });
+
+  it('abandons the file half when the row is on another machine', async () => {
+    // PHASE 90.3's rule, kept: a tab for a folder of the same path on another
+    // machine is not proof that a folder on THIS Mac opened.
+    takeResults = [{ folder: '/tmp/far', file: '/tmp/far/a.md' }];
+    const remote = vi.fn(async (path: string) => {
+      journal.push(`addProjectPath:${path}`);
+      return { id: 'r1', name: 'far', path, machineId: 'macpro' };
+    });
+    addProjectPath.mockImplementationOnce(remote);
+    await pullPendingShellOpen();
+    expect(requestOpenFile).not.toHaveBeenCalled();
+    expect(editorInit).not.toHaveBeenCalled();
   });
 });
 

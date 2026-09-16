@@ -120,7 +120,12 @@ function labelsOf(
   writable = true
 ): string[] {
   const items = buildEditorMenu(
-    { reshapes: reshapesFor(editor, writable), writable, historyAvailable: true },
+    {
+      reshapes: reshapesFor(editor, writable),
+      writable,
+      historyAvailable: true,
+      relativeAvailable: true
+    },
     NO_ACTIONS
   );
   return items.map((i) => (i === 'sep' ? '—' : i.label));
@@ -243,7 +248,7 @@ describe('the groups, and what is absent on purpose', () => {
 
   it('drops History for a file on another machine and keeps the two copies', () => {
     const items = buildEditorMenu(
-      { reshapes: [], writable: true, historyAvailable: false },
+      { reshapes: [], writable: true, historyAvailable: false, relativeAvailable: true },
       NO_ACTIONS
     );
     const labels = items.map((i) => (i === 'sep' ? '—' : i.label));
@@ -252,10 +257,34 @@ describe('the groups, and what is absent on purpose', () => {
     expect(labels).toContain('Copy Relative Path');
   });
 
+  it('drops Copy Relative Path on a tab with no repo-relative path', () => {
+    // PHASE 274 FIX ROUND. A Context detail tab on `~/.claude/CLAUDE.md` is
+    // the shipped shape: its file is outside the project, so `relPath` is ''.
+    // The row used to be pushed anyway, copy an empty string, and toast that
+    // it had copied a path.
+    const items = buildEditorMenu(
+      {
+        reshapes: [],
+        writable: true,
+        historyAvailable: false,
+        relativeAvailable: false
+      },
+      NO_ACTIONS
+    );
+    const labels = items.map((i) => (i === 'sep' ? '—' : i.label));
+    expect(labels).toContain('Copy Path');
+    expect(labels).not.toContain('Copy Relative Path');
+  });
+
   it('runs the action the row names, and no other', () => {
     const pressed: string[] = [];
     const items = buildEditorMenu(
-      { reshapes: ['table'], writable: true, historyAvailable: true },
+      {
+        reshapes: ['table'],
+        writable: true,
+        historyAvailable: true,
+        relativeAvailable: true
+      },
       { ...NO_ACTIONS, reshape: (id) => pressed.push(id), trigger: (a) => pressed.push(a) }
     );
     for (const item of items) if (item !== 'sep') item.run();

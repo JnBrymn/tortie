@@ -72,12 +72,77 @@ export function requestOpenContext(req: OpenContextRequest): void {
 }
 
 /**
+ * PHASE 274. WHY A PATH OUTSIDE THE PROJECT HAS NO `relPath`, AND WHY SAYING
+ * SO IS THE FIX.
+ *
+ * `OpenFileRequest.relPath` is documented at `../state/open-file.ts:115` as
+ * *"Path relative to repoPath"*, and until this phase this module put an
+ * ABSOLUTE path there whenever the prefix test missed. That is not a relative
+ * path; it is a different kind of value wearing the same field's name, and
+ * every reader downstream is entitled to believe the contract. `Copy Relative
+ * Path` pasted an absolute one, and `use-editor-menu.ts:265` offered the
+ * History row — which asks git about `tab.relPath` — for a file git has never
+ * heard of.
+ *
+ * THE PHASE 274 HALF, and it is the reason this is a defect and not a wart.
+ * The prefix test misses for TWO different reasons and the absolute fallback
+ * made them look identical:
+ *
+ *   - the file really is outside the project (`~/.claude/skills/…`, which this
+ *     module's header calls the common case rather than the edge one), and
+ *   - the file IS inside the project and the two strings merely SPELL the
+ *     folder differently — `~/source/proj` as a person opened it against
+ *     `~/Source/proj` as the disk holds it, one folder on a case-insensitive
+ *     volume, which is the APFS default. Issue 25.
+ *
+ * The second one is a bug, it is silent, and an absolute string in the
+ * relative field is how it stayed silent. Rules 13 to 17 of this phase are
+ * what stop it happening — main now answers in the spelling its caller asked
+ * with, so a file inside the project passes the prefix test again — and this
+ * is the net underneath them: when the test still misses, the relative form is
+ * REFUSED with a word rather than faked with an absolute path.
+ *
+ * WHAT THE REFUSAL DOES AND DELIBERATELY DOES NOT DO. It refuses the relative
+ * SPELLING, never the open. A Context detail tab on a global `~/.claude/
+ * CLAUDE.md` is a shipped capability that `../editor/tab-io.ts:1367-1372` and
+ * `../editor/p268-auto-save-drive.ts:141` both reason about by name; refusing
+ * to open it would break a gesture rather than fix a spelling, and this phase
+ * may not change what a person sees. So the request carries `relPath: ''`,
+ * which is the value this renderer ALREADY means "this tab has no repo-relative
+ * path" by: `../editor/use-editor-menu.ts:265` gates the History row on
+ * `tab.relPath !== ''`, and `../editor/tab-menu.ts:157-160` leaves Copy
+ * Relative Path off a tab where a relative path would be nothing.
+ *
+ * It is the same prefix rule as `fileInRepo` in `../editor/tab-identity.ts`,
+ * written once here rather than imported, for the reason in this module's own
+ * header: the Context stream and the editor stream do not import each other,
+ * and a request crosses between them as an event. Importing the editor's tab
+ * module for four lines would pull its graph — `machines/review`,
+ * `editor/save-sentences` — into this one.
+ */
+export type RelPathRefusal = 'outside-project';
+
+export type RelPathUnderRoot =
+  | { relPath: string }
+  | { refusal: RelPathRefusal };
+
+export function relPathUnder(
+  repoPath: string,
+  path: string
+): RelPathUnderRoot {
+  if (repoPath.length === 0) return { refusal: 'outside-project' };
+  const root = repoPath.endsWith('/') ? repoPath : `${repoPath}/`;
+  if (!path.startsWith(root)) return { refusal: 'outside-project' };
+  return { relPath: path.slice(root.length) };
+}
+
+/**
  * Open one absolute path in the editor, landing on `line` when there is one.
  *
  * Most context files live OUTSIDE the project — `~/.claude/skills/…` is the
  * common case here, not the edge one — so `relPath` is only relative when it
- * actually is. That is the same rule the markdown preview applies to a link
- * that escapes its document's root, and it is stated once, here.
+ * actually is, and is empty rather than absolute when it is not. That rule and
+ * its reasons are `relPathUnder` above, and it is stated once, here.
  *
  * PHASE 26 item 1: every open from this module is a PLAIN open (`mode:
  * 'file'`), and the editor guarantees the rest at tab creation — a file
@@ -91,11 +156,10 @@ export function openFileAt(
   repoPath: string,
   opts: { preview?: boolean; line?: number; contextEntry?: unknown } = {}
 ): void {
+  const under = relPathUnder(repoPath, path);
   requestOpenFile({
     repoPath,
-    relPath: path.startsWith(`${repoPath}/`)
-      ? path.slice(repoPath.length + 1)
-      : path,
+    relPath: 'relPath' in under ? under.relPath : '',
     path,
     mode: 'file',
     source: 'tree',

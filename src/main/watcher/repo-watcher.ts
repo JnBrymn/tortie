@@ -65,11 +65,15 @@
 
 import watcher from '@parcel/watcher';
 import type { AsyncSubscription, Event } from '@parcel/watcher';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { planWorktreeIgnore, readIgnoredRoots } from './ignored-roots';
 import { trackWatcherClose } from './teardown';
 import { getLog } from '../log';
+// PHASE 274. The ONE canonicalising realpath. `fs.realpathSync` is Node's own
+// JavaScript walk and returns the case it was handed, which is not the
+// canonical form the two comments below say this file needs.
+import { canonicalPathSync } from '../fs/folder-identity';
 
 /**
  * Scope "watcher" (Phase 35). Every error and warning from this
@@ -169,6 +173,11 @@ export class RepoWatcher {
    * realpath of repoPath — FSEvents reports canonical paths (e.g.
    * /private/var/… for a /var/… symlink), so subscriptions and path
    * filters must use the canonical form or the relevance filter breaks.
+   *
+   * PHASE 274: it is now the canonical form in CASE too. `fs.realpathSync`
+   * resolved the symlink half of that promise and kept whatever case the caller
+   * typed, so a project opened at a spelling the disk does not use watched a
+   * root whose string never matched the events FSEvents delivered.
    */
   private readonly watchRoot: string;
 
@@ -205,7 +214,7 @@ export class RepoWatcher {
 
   private constructor(repoPath: string, options: RepoWatcherOptions) {
     this.repoPath = repoPath;
-    this.watchRoot = realpathSync(repoPath);
+    this.watchRoot = canonicalPathSync(repoPath);
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.onChange = options.onChange;
     this.onError =
@@ -463,14 +472,14 @@ export class RepoWatcher {
     const dotGit = join(this.watchRoot, '.git');
     try {
       const st = statSync(dotGit);
-      if (st.isDirectory()) return realpathSync(dotGit);
+      if (st.isDirectory()) return canonicalPathSync(dotGit);
       if (st.isFile()) {
         const target = readGitdirPointer(
           dotGit,
           readFileSync(dotGit, 'utf8')
         );
         if (target !== null && statSync(target).isDirectory()) {
-          return realpathSync(target);
+          return canonicalPathSync(target);
         }
       }
     } catch {

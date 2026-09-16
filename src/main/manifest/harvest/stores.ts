@@ -46,7 +46,6 @@
  * Ownership: src/main/manifest/**. Pure Node (no Electron import).
  */
 
-import { realpathSync } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
@@ -80,6 +79,11 @@ import {
 // until Phase 42 stage 8; moving them out removed the stores <-> agy-owner
 // import cycle.
 import { isDescendantOf, UUID_RE } from './process-table';
+// PHASE 274. The ONE canonicalising realpath. `fs.realpathSync` rewrites only
+// the components that are symlinks and keeps the case it was handed, so a
+// project opened at a spelling the disk does not use keyed on the wrong store
+// directory and the watcher read a directory the agent never writes to.
+import { canonicalPathSync } from '../../fs/folder-identity';
 
 // ---------------------------------------------------------------------------
 // Public shapes
@@ -355,7 +359,7 @@ export function sanitizePiCwd(cwd: string): string {
 export function sanitizeOmpCwd(cwd: string, home: string, tmpdir: string): string {
   const real = (p: string): string => {
     try {
-      return realpathSync(p);
+      return canonicalPathSync(p);
     } catch {
       return p;
     }

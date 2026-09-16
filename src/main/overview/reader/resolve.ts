@@ -25,6 +25,11 @@ import {
   sanitizePiCwd,
   sanitizeQwenCwd
 } from '../../manifest/harvest/stores';
+// PHASE 274. The ONE canonicalising realpath. `fs.realpathSync` is Node's own
+// JavaScript walk and returns the case it was handed, so a row whose cwd is
+// spelled differently from the disk keyed on a store directory the agent never
+// wrote to, and the session resolved to `no-file` with no error anywhere.
+import { canonicalPathSync } from '../../fs/folder-identity';
 
 export type OverviewProvider = AgentRegistryId;
 
@@ -65,7 +70,7 @@ const PATH_ARITHMETIC_PROVIDERS = new Set<string>([
 
 function realCwdOf(cwd: string): string {
   try {
-    return fs.realpathSync(cwd);
+    return canonicalPathSync(cwd);
   } catch {
     return cwd;
   }

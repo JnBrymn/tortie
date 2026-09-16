@@ -44,6 +44,7 @@ import type { PathDoorAnswer, PathFacts } from '@shared/path-doors';
 import {
   decidePathDoor,
   hasControlCharacter,
+  insideBase,
   onRefusedMount,
   usableBase
 } from '@shared/path-doors';
@@ -217,6 +218,74 @@ async function resolveAgainstBase(
 }
 
 /**
+ * PHASE 274. THE ANSWER, RE-SPELLED UNDER THE BASE THE CALLER NAMED.
+ *
+ * WHAT IT FIXES, measured at `30f4bd8d` in the running app: a terminal path
+ * link into the pane's own project opened at the CANONICAL spelling and
+ * unguarded. `path` is the realpath, which is what makes every clause of
+ * `decidePathDoor` honest, but it is not what the file is called from where
+ * the click came from. A pane whose project is spelled `~/source/proj` while
+ * the disk says `~/Source/proj` — one folder on a case-insensitive volume,
+ * which is the APFS default — got a tab whose path shared no prefix with its
+ * project, so `fileInRepo` said false, `projectHolding` did not find the
+ * project, and ⌘S took the plain door instead of the compare-and-swap one.
+ * `/tmp` against `/private/tmp` is the same shape through a symlink.
+ *
+ * THE THREE CONDITIONS, and it answers `undefined` unless all three hold:
+ *
+ *  1. There is a base and it is usable. `fs:openExternalPath` passes none, so
+ *     that caller is untouched.
+ *  2. The realpath is INSIDE the real base, asked through the shared
+ *     `insideBase` — the same predicate the containment clause uses, so a
+ *     `..` climb and a symlink out of the tree are refused here for the same
+ *     reason they are refused there. A path outside the base has no spelling
+ *     under it and inventing one would name a different file.
+ *  3. The tail beneath the real base is kept BYTE FOR BYTE and only the root
+ *     part is replaced. Nothing here compares two spellings, lowercases
+ *     anything or normalises anything; it is one slice at a known offset.
+ *
+ * So it names the SAME file, it is absent whenever that cannot be shown, and
+ * `path` is untouched either way.
+ *
+ * AND THE LITERAL BASE IS KEPT VERBATIM — never `resolve`d, never trimmed
+ * beyond a trailing separator. That is load bearing for the one shape where a
+ * lexical tidy-up and the disk's own walk disagree: `resolve` applies a `..`
+ * LEXICALLY while `realpath` applies it PHYSICALLY, so a base spelled
+ * `/a/link/../b` lexically tidies to `/a/b` and physically walks to `/x/b`.
+ * Because the literal string is kept, `/a/link/../b` + `/f.txt` still walks to
+ * the same file the sequence judged. A later round that "normalises" this
+ * argument breaks that silently.
+ */
+function underCallerBase(
+  real: string,
+  literalBase: string | undefined,
+  realBase: string
+): string | undefined {
+  if (literalBase === undefined || !usableBase(literalBase)) return undefined;
+  if (!insideBase(real, realBase)) return undefined;
+  const root = realBase.endsWith('/') ? realBase.slice(0, -1) : realBase;
+  const literal = literalBase.endsWith('/')
+    ? literalBase.slice(0, -1)
+    : literalBase;
+  return literal + real.slice(root.length);
+}
+
+/**
+ * The real base, or the literal one when it cannot be taken.
+ *
+ * Same fallback as `resolveAgainstBase` above and for the same reason: a file
+ * under a base that is not there cannot exist either, so the sequence has
+ * already answered `missing` by the time it would matter.
+ */
+async function realBaseOf(base: string): Promise<string> {
+  try {
+    return await realpath(base);
+  } catch {
+    return base;
+  }
+}
+
+/**
  * The whole sequence: expand, join a relative spelling to the base when there
  * is one, read the facts, decide.
  *
@@ -225,6 +294,13 @@ async function resolveAgainstBase(
  * relative one that was joined arrives absolute, and one that could not be
  * joined is still refused by the first clause. **That clause is untouched and
  * stays the backstop**: nothing reaches a door without an absolute spelling.
+ *
+ * PHASE 274 adds `underBase` to an answer that HAS a door and nothing else.
+ * It is composed after the decision rather than before it, which is what keeps
+ * the extra `realpath` of the base off the hover path: research 114 measured
+ * that most spans are refused, and a refused span now costs exactly what it
+ * cost before. The relative arm needs no extra call at all, because
+ * `resolveAgainstBase` has already taken the base's realpath and hands it back.
  */
 export async function answerPathDoor(
   raw: string,
@@ -235,13 +311,21 @@ export async function answerPathDoor(
     const joined = await resolveAgainstBase(spelling, base);
     if (joined !== null) {
       const facts = await factsForPath(joined.path);
-      return decidePathDoor({
+      const answer = decidePathDoor({
         ...facts,
         spelling: joined.path,
         resolvedFrom: joined.base
       });
+      if (answer.door === null) return answer;
+      const under = underCallerBase(answer.path, base, joined.base);
+      return under === undefined ? answer : { ...answer, underBase: under };
     }
   }
   const facts = await factsForPath(spelling);
-  return decidePathDoor({ ...facts, spelling, resolvedFrom: null });
+  const answer = decidePathDoor({ ...facts, spelling, resolvedFrom: null });
+  if (answer.door === null || base === undefined || !usableBase(base)) {
+    return answer;
+  }
+  const under = underCallerBase(answer.path, base, await realBaseOf(base));
+  return under === undefined ? answer : { ...answer, underBase: under };
 }

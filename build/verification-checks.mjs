@@ -289,6 +289,21 @@ export const CHECKS = [
   // guard, one clause each, each naming the rows it owns. It launches no
   // Electron and reads nothing under the person's home.
   pure('conformance:containment'),
+  // Phase 274. The identity question this phase added: do these two paths name
+  // ONE folder. build/p274/conformance-samefolder.mjs drives the SHIPPING
+  // src/main/fs/folder-identity.ts under node over a fixture it builds in a
+  // mkdtemp under /private/tmp, and AGAIN over a case-sensitive APFS disk image
+  // it creates with hdiutil (no sudo) and detaches and deletes in a finally —
+  // because a gate that only ever sees the operator's case-insensitive boot
+  // disk cannot catch the merge danger. Then it reads the identity door, the
+  // answer spelling and the no-case-folding refusal out of the shipping source,
+  // and drives nine ablated copies of the module, one clause each. It launches no
+  // Electron, spawns no agent and reads nothing under the person's home.
+  adapter(
+    'conformance:samefolder',
+    'macOS hdiutil, to create and attach a case-sensitive APFS disk image with no sudo, detached and deleted in a finally; and a mkdtemp under /private/tmp so the /tmp row has its own twin spelling',
+    'never skips; on a host with no hdiutil it says in ONE LINE which column is therefore not covered rather than passing quietly, and P274_REQUIRE_IMAGE=1 turns that degradation into a failure'
+  ),
   pure('conformance:filehistory'),
   pure('conformance:historysearch'),
   // Phase 202. The logins domain: it runs build/conformance-logins.mjs, which
@@ -1032,6 +1047,21 @@ export const CHECKS = [
   // that owns it, then restores all three source files in a finally block. It
   // launches no Electron and starts no process but node.
   pure('ablation:p273'),
+  // PHASE 274's attack on its own gate. conformance:samefolder ablates
+  // src/main/fs/folder-identity.ts by COPYING it; its other rules are read out
+  // of the shipping source at its real path, where there is no copy to break.
+  // So this script breaks the real file thirteen ways, one clause each — the
+  // identity lookup, the order of its two questions, the tombstone it clears,
+  // the ON CONFLICT clause, the local-only guard, the volume word in the
+  // duplicate line, a write API reaching the identity module, the one
+  // canonicalisation door, entry()'s composed path, the absolute fallback in
+  // relPath, a line of code in workspace-target.ts, a case-folded path and a
+  // normalised one — runs the gate in its source-only mode, asserts the rule
+  // that OWNS each edit is the one that went red, and puts all eight files
+  // back byte for byte in a finally,
+  // checked by sha256 after every ablation and again at the end. It launches no
+  // Electron and starts no process but node.
+  pure('ablation:p274'),
   // PHASE 273's app run, and the reading the phase exists for. ONE Electron on
   // a scratch profile and a scratch HOME, over a project the probe builds and
   // then opens THROUGH A REAL SYMLINK — belucid's shape, issue 25. Seven arms:
@@ -1046,6 +1076,23 @@ export const CHECKS = [
   // expectations never flip, so the findings ARE the parent reading. It spawns
   // no agent and spends no token.
   electron('probe:p273'),
+  // PHASE 274's app run, and the reading the phase exists for. TWO Electrons on
+  // one scratch profile with a scratch HOME, ONE AT A TIME AND NEVER AT ONCE,
+  // over a project the probe builds at <scratch>/Source/proj and also opens as
+  // <scratch>/source/proj — belucid's exact shape, issue 25, a case-insensitive
+  // volume rather than a symlink. Seven arms: the volume is proved to fold case
+  // before anything launches and the run refuses otherwise; two spellings make
+  // ONE tab and ONE row in `projects`, read both through the shipped bridge and
+  // by /usr/bin/sqlite3 off a copy of the manifest; a session created under each
+  // spelling lands in one strip with one project_path; fs:createFile answers a
+  // path under the root the CALLER named; ⌘S writes and the bytes are read back
+  // off disk at the REAL path; the 23-step tree battery runs against a control
+  // and the three rows Phase 273 declared come back green; a second launch
+  // restores every session; and the operator's own tmux server is counted before
+  // and after. P274_PARENT_BUILD points it at a build of the parent commit for
+  // the before-and-after; the expectations never flip, so the findings ARE the
+  // parent reading. It spawns no agent and spends no token.
+  electron('probe:p274'),
   // PHASE 261 item 1. The harness socket refusal, DRIVEN. ONE Electron at a
   // time, never two, on a scratch profile with a scratch HOME under its own
   // GMUX_HARNESS_DIR and the socket gmux-p261-<pid>. Five arms: the real app
@@ -1222,6 +1269,21 @@ export const CHECKS = [
   // run: it drives the same chain and reads the refusal back, spawning no
   // agent and spending nothing. `--self-test` launches nothing at all.
   electron('measure:semantic'),
+  // Phase 274's measurement and its ATTACK, not in the commit battery for the
+  // same reason conformance:watcher:cap is not. It creates and attaches a
+  // case-sensitive APFS image with hdiutil (no sudo), prints the §8 table's two
+  // columns side by side with the per-volume timings, and then attacks this
+  // phase's own central ruling from both directions: it tries to make
+  // sameFolder answer 'same' for two genuinely different folders and
+  // 'different' for one folder reached through a symlink chain, a firmlink,
+  // /tmp, an NFD spelling and a '..' climb. It demonstrates that macOS refuses
+  // to hard link a DIRECTORY rather than claiming it. The image is detached and
+  // the .dmg deleted in a finally. No Electron, no agent, no token.
+  adapter(
+    'measure:p274-volumes',
+    'macOS hdiutil, to create and attach a case-sensitive APFS disk image with no sudo, detached and deleted in a finally',
+    'never skips; on a host with no hdiutil it reports the missing column as a finding'
+  ),
   // PHASE 259 FIX ROUND. The APP RUN the phase shipped without. One Electron
   // on a scratch profile with a scratch HOME, over a repository it builds
   // itself, drives the deterministic pass, the `arch:enrich` channel under a

@@ -14,14 +14,23 @@
  * worktrees and submodules all resolve. No git process is spawned.
  *
  * THE CAP (research 48 section 9.3): nothing here can start an agent,
- * select an agent or run a command. This module imports the filesystem and
- * the two shared extension lists, and nothing else.
+ * select an agent or run a command. This module imports the filesystem, the
+ * two shared extension lists and — since Phase 274 — the one canonicalising
+ * realpath in main's owned path domain, which itself imports node:fs and
+ * node:path and nothing else. The cap is unchanged: none of them can start a
+ * process.
  */
 
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isImagePath } from '@shared/image-types';
 import { isOpenablePath } from '@shared/openable';
+// PHASE 274. `fs.realpathSync` is Node's own JavaScript walk and hands back
+// the case it was given, so a folder dropped on the Dock at a spelling the
+// disk does not use arrived here at that spelling and `addProject` minted a
+// SECOND project row for a folder that already had one. This is
+// `realpathSync.native`, which asks the volume.
+import { canonicalPathSync } from '../fs/folder-identity';
 
 export type ShellArrival =
   | { kind: 'folder'; folder: string }
@@ -67,7 +76,7 @@ export function resolveShellArrival(
   let real: string;
   let isDirectory: boolean;
   try {
-    real = realpathSync(rawPath);
+    real = canonicalPathSync(rawPath);
     isDirectory = statSync(real).isDirectory();
   } catch {
     return { kind: 'refused', reason: 'does not exist' };
@@ -77,7 +86,7 @@ export function resolveShellArrival(
   // matches. When home itself cannot resolve, compare the raw spelling.
   let realHome: string;
   try {
-    realHome = realpathSync(home);
+    realHome = canonicalPathSync(home);
   } catch {
     realHome = home;
   }

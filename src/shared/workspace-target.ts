@@ -87,6 +87,54 @@ export function isLocalTarget(
   );
 }
 
+// ---------------------------------------------------------------------------
+// PHASE 274. WHY `sameTarget` AND `targetKey` BELOW COMPARE TWO STRINGS, AND
+// WHY THAT IS RIGHT RATHER THAN UNFINISHED
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT SOMEBODY WILL COME HERE HOLDING. One folder spelled two ways —
+// `~/source/proj` as a person typed it, `~/Source/proj` as the disk holds it —
+// is one folder on a case-insensitive volume, which is the APFS DEFAULT and is
+// what both the reporter's machine and the operator's run. Phase 273's own
+// commit body named `sameTarget` at :99-106 and `targetKey` at :131 as two of
+// the four places a stored spelling meets a resolved one, and left them
+// standing. Issue 25 is the report behind that.
+//
+// PHASE 274 RULED THAT NEITHER CHANGES, and the reason is that the defect was
+// never here. It was one layer up, in `addProject`: `projects.path` is UNIQUE
+// and SQLite's uniqueness is byte-exact, so a folder opened under two spellings
+// became TWO PROJECT ROWS — two tabs with the same name, and the person's
+// sessions divided between them by `WHERE project_path = ?`. Phase 274 moved
+// the identity question ABOVE the string, to `src/main/fs/folder-identity.ts`,
+// which asks the filesystem for `st.dev` and `st.ino` and merges nothing on a
+// guess. With one row per folder there is exactly ONE stored spelling to
+// compare, so both sides of every comparison below are the same stored string,
+// which is a comparison that has always worked.
+//
+// SO THE TWO THINGS A LATER ROUND MUST NOT DO HERE:
+//
+//   1. **Never case-fold.** No `toLowerCase`, no `localeCompare`, no
+//      case-insensitive regex. It is the reporter's own recorded wrong fix and
+//      it corrupted sessions recorded on another platform, where `Source` and
+//      `source` really are two folders. `.normalize()` is the Unicode twin of
+//      the same mistake and is refused for the same reason: a canonicalising
+//      `realpath` returns whichever normalisation form is ON DISK, so
+//      normalising its output re-creates the mismatch it just removed.
+//   2. **Never make a syscall from this file.** The header above says it
+//      imports nothing, exactly like the rest of src/shared, and that is not an
+//      accident of history. Asking the filesystem whether two paths are one
+//      folder is a main-process question with a module of its own; a pure
+//      comparison that a render loop runs on every frame is not the place for
+//      it, and `targetKey`'s answer is a localStorage key that main cannot even
+//      reach.
+//
+// `targetKey` has one more reason of its own. Its value is the key of the
+// `gmux.splitLayouts` record and of eight other per-target record sets. Every
+// key a person already has in storage is the bare path, so re-spelling what
+// this returns would strand all of them — silently, each one defaulting, with
+// no error — which is the half-applied-migration state Phase 274 refused to
+// ship.
+
 /**
  * Equal by VALUE, so a freshly composed but equal target still counts as the
  * same target.

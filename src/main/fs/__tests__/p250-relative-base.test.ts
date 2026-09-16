@@ -50,9 +50,14 @@ afterAll(async () => {
 describe('a relative spelling and its base', () => {
   it('opens the file under the base — his second and third screenshots', async () => {
     const real = await file('docs/reviews/decision.md', '# hi');
+    // PHASE 274 added `underBase`, the answer re-spelled under the base the
+    // caller literally named. Here the base IS its own realpath, so the two
+    // strings are equal and the field says so rather than being absent; the
+    // test below, where the base is a symlink, is where they differ.
     expect(await answerPathDoor('docs/reviews/decision.md', base)).toEqual({
       door: 'editor',
-      path: real
+      path: real,
+      underBase: real
     });
   });
 
@@ -87,9 +92,16 @@ describe('a relative spelling and its base', () => {
     const real = await file('docs/linked.md', '# hi');
     const spelled = join(root, 'via-a-link');
     await symlink(base, spelled);
+    // PHASE 274, AND THIS IS THE ROW THE FIELD EXISTS FOR. `path` is the
+    // realpath, which is what keeps every clause of the sequence honest, and
+    // it shares no prefix with the base this pane actually has. Opening it
+    // handed the editor a tab that `fileInRepo` said was outside its own
+    // project, so a save took the plain door instead of the compare-and-swap
+    // one. `underBase` is the same file spelled where the caller is standing.
     expect(await answerPathDoor('docs/linked.md', spelled)).toEqual({
       door: 'editor',
-      path: real
+      path: real,
+      underBase: join(spelled, 'docs/linked.md')
     });
   });
 
@@ -259,7 +271,8 @@ describe('the Mac door and a spelling that was relative', () => {
     const real = await file('assets/real.png');
     expect(await answerPathDoor('assets/real.png', base)).toEqual({
       door: 'image',
-      path: real
+      path: real,
+      underBase: real
     });
   });
 });

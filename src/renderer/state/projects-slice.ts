@@ -81,7 +81,23 @@ export interface ProjectsSlice {
   moveProjectToIndex(projectId: string, toIndex: number): void;
 
   openProject(): Promise<void>;
-  addProjectPath(path: string): Promise<void>;
+  /**
+   * Open a folder on this Mac as a project tab, and answer WHICH ROW that was.
+   *
+   * PHASE 274 FIX ROUND — THE ROW, NOT THE STRING. It used to resolve with
+   * nothing, and its one caller that needed to know whether it had worked
+   * re-scanned `projects` for a row whose `path` equalled the string it had
+   * passed. That scan was correct only while main stored whatever spelling it
+   * was given. Since Phase 274 main answers the row that already NAMES that
+   * folder — one folder is one project however it is spelled — so the row it
+   * returns can carry a different spelling of the same folder, and the
+   * byte-exact re-scan started missing. ../state/shell-open.ts is the caller
+   * and the measurement is in its header.
+   *
+   * `null` means it did not work. This action toasts its own failures rather
+   * than throwing, exactly as before, so `null` is the whole of the report.
+   */
+  addProjectPath(path: string): Promise<Project | null>;
   /**
    * PHASE 90.3. Whether the "Open a folder on a machine" sheet is on screen.
    *
@@ -210,15 +226,21 @@ export const createProjectsSlice: StateCreator<
     },
 
     async addProjectPath(path) {
-      if (!gmux) return;
+      if (!gmux) return null;
       try {
         const project = await gmux.projects.add(path);
         const projects = await gmux.projects.list();
         set({ projects });
         // Idempotent open: adding an already-open project focuses its tab.
         get().setActiveProject(project.id);
+        // PHASE 274 FIX ROUND. The ROW main answered, not the string that was
+        // asked for. They are the same string on every add of a folder spelled
+        // the way it was first opened, and they differ exactly when this phase
+        // did its work.
+        return project;
       } catch (err) {
         get().toast('error', errorText(err), { sticky: true });
+        return null;
       }
     },
 

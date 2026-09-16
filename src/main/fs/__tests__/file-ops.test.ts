@@ -70,7 +70,16 @@ describe('the project-root gate', () => {
     await symlink(root, alias);
     const created = await ops.createFile({ root: alias, path: 'via-alias.txt' });
     expect(created.relPath).toBe('via-alias.txt');
-    expect(created.path).toBe(join(root, 'via-alias.txt'));
+    // PHASE 274 TURNED THIS ASSERTION ROUND ON PURPOSE. It read
+    // `join(root, …)` — the answer spelled under main's RESOLVED root — and
+    // that is the defect the phase exists for. `fs:readDir` echoes the
+    // caller's spelling, so a tree rooted at `alias` asked about a file at one
+    // spelling and was handed it at another: 6 of 23 tree steps passed, all 17
+    // failures silent. The answer is now spelled under the root the caller
+    // named. Containment is unchanged — the gate still resolved `alias` to
+    // `root` and proved it is an open project before a byte was written, which
+    // is what the two lines above this one still measure.
+    expect(created.path).toBe(join(alias, 'via-alias.txt'));
   });
 });
 

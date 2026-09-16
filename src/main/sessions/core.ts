@@ -217,6 +217,21 @@ import { getLog } from '../log';
 // LEAF import: the ../projects barrel re-exports the clone spawner and the
 // folder creator, and addProject below needs one pure name rule.
 import { projectNameForPath } from '../projects/name';
+// PHASE 274. The one module that answers whether two paths name ONE folder, by
+// asking the filesystem for dev+ino rather than comparing two strings.
+// `addProject` is its caller, and the reason is in that method's header: one
+// folder spelled two ways used to mint two project rows and divide a person's
+// sessions between them. LEAF — it imports node:fs and node:path and nothing
+// else, and it writes nothing.
+import {
+  duplicateFolderGroupsAsync,
+  sameFolder,
+  volumeFoldsCase
+} from '../fs/folder-identity';
+// PHASE 274. Rule 6's guard: `sameFolder` stats a path on THIS Mac, so a row on
+// another machine must never reach it. These are the same two helpers every
+// other main-side reader of a project row uses.
+import { isLocalTarget, targetOfProject } from '@shared/workspace-target';
 
 /**
  * Scope "sessions" (Phase 35). Every error and warning from this
@@ -225,6 +240,149 @@ import { projectNameForPath } from '../projects/name';
  * build keeps it.
  */
 const sessionsLog = getLog('sessions');
+
+/**
+ * The manifest reads {@link projectNamingFolder} and
+ * {@link logDuplicateProjectFolders} need, and nothing else.
+ *
+ * THEY ARE FREE FUNCTIONS AND NOT METHODS, ON PURPOSE. `addProject`'s body is
+ * BORROWED off `GmuxCore.prototype` and called against a small host object in
+ * `./__tests__/p93-remove-project.test.ts`, which is deliberate — booting a core
+ * there would need a tmux server, an attach host and a control client, and would
+ * prove the mocks rather than the method. A second method on `this` is invisible
+ * to that host and breaks it at run time with a TypeError, which is exactly what
+ * happened while Phase 274 was being built. Taking the two reads as a parameter
+ * keeps the borrowed body honest and keeps the host object small.
+ *
+ * The members are written as PROPERTIES rather than as methods because
+ * `./__tests__/p125-core-split.test.ts` reads this file as TEXT and treats any
+ * two-space-indented `name(` as a new public method of `GmuxCore`. A method
+ * signature here would be read as one, and the list that test pins is a
+ * deliberate record of what `../ipc.ts` and `../capabilities.ts` call by name.
+ */
+interface ProjectRowReader {
+  readonly getProjectByPath: (path: string) => Project | undefined;
+  readonly listProjects: () => Project[];
+}
+
+/**
+ * The local project row that already names this folder, or undefined.
+ *
+ * TWO QUESTIONS IN ORDER, AND THE ORDER IS THE COST MODEL. The byte-exact
+ * `SELECT` first, because a folder spelled the way it was first opened is the
+ * overwhelmingly common add and it must not pay for a walk. Only a miss asks
+ * the disk.
+ *
+ * REMOTE ROWS ARE NEVER ASKED. `sameFolder` stats a path on THIS Mac, and a
+ * remote row's path is on another machine: ../manifest/codecs.ts:163-165
+ * already states the rule that no local `existsSync` may run against a far
+ * path. `remote_projects` keeps `UNIQUE(machine_id, path)` byte-exact and
+ * nothing in Phase 274 touches it. That is the conservative answer rather
+ * than the lazy one — a far side may be Linux, and Linux is always
+ * case-sensitive, so byte-exact never merges two folders that might genuinely
+ * be different. A person who opens the same far folder under two spellings
+ * still gets two tabs, which is today's behaviour, so nobody regresses.
+ *
+ * WHEN MORE THAN ONE ROW ANSWERS `'same'` — which is what a person who
+ * already has a split manifest has — the FIRST in `listProjects()` order
+ * wins, DETERMINISTICALLY, and the fix round narrowed what that sentence is
+ * allowed to claim. That order is `ORDER BY name ASC`
+ * (../manifest/projects-repository.ts:153-157) with SQLite's default BINARY
+ * collation, so it is an ALPHABET and not an age:
+ *
+ *   - the reporter's shape, where the case difference is ABOVE the leaf
+ *     (`~/source/proj` against `~/Source/proj`): both rows are named `proj`,
+ *     the name comparison is a tie, and SQLite returns them in rowid order,
+ *     which is insertion order, which is the older row. Driven: two rows
+ *     sharing the basename `proj` came back oldest first.
+ *   - the case difference IN the leaf (`<b>/split` against `<b>/Split`): the
+ *     names are `split` and `Split`, which do not tie, and `'S'` is 0x53 while
+ *     `'s'` is 0x73, so the CAPITALISED spelling sorts first whatever the ages
+ *     are. Driven through the shipped repository: the row inserted SECOND came
+ *     back first.
+ *
+ * An earlier version of this comment said "which is the older row" without the
+ * second bullet, and the CHANGELOG promised a person "the one you opened
+ * first". Both were true for the shape the phase was written about and false
+ * one folder over, so both now say what actually happens. NOTHING TURNS ON IT:
+ * every row in the group names the SAME folder, so whichever one wins, the
+ * person lands on one tab, the same tab every time, and no second row is
+ * minted. Which of two tabs they already had is the winner is the only thing
+ * the order decides.
+ *
+ * It does NOT heal the split: their two tabs stay two tabs and their sessions
+ * stay divided. See the log line in {@link logDuplicateProjectFolders}.
+ *
+ * `'unknown'` is not acted on. A row whose folder could not be stat'd — an
+ * unmounted volume, an unreadable one — takes the same branch `'different'`
+ * takes, which is exactly the behaviour before this phase, so an unreadable
+ * row cannot regress anybody.
+ */
+function projectNamingFolder(
+  manifest: ProjectRowReader,
+  abs: string
+): Project | undefined {
+  const exact = manifest.getProjectByPath(abs);
+  if (exact !== undefined) return exact;
+  for (const row of manifest.listProjects()) {
+    if (!isLocalTarget(targetOfProject(row))) continue;
+    if (sameFolder(row.path, abs) === 'same') return row;
+  }
+  return undefined;
+}
+
+/**
+ * One log line per folder that already has more than one project row, written
+ * once, at manifest open, and NOTHING AT ALL when there are none.
+ *
+ * WHY A LOG LINE AND NOT A SURFACE. Phase 274 stops a second row being minted
+ * and deliberately ships no heal: a merge has to move four manifest columns
+ * and nine localStorage record sets together, main cannot reach localStorage,
+ * and a half-applied merge leaves a person whose manifest says `Source` and
+ * whose split layout, tree expansion, editor width, recents, history scope,
+ * Context agent choice and eight SCM collapse keys all still say `source` —
+ * every one of them silently defaulting. The measured population is zero: read
+ * from a COPY of the operator's live manifest and never from his own, nine local
+ * project rows, ZERO folders holding more than one row, every stored spelling
+ * already equal to its canonical one, every one of the nine on a case-folding
+ * volume, and zero of the 34 distinct `sessions.project_path` spellings
+ * resolving to an open project under a different spelling. The defect is LATENT
+ * on that manifest rather than active. Shipping an irreversible durable write
+ * over a person's manifest, at app open, without asking, for a population of
+ * zero, is the shape this repository's rules exist to prevent. A new
+ * user-visible surface would earn a native-menu obligation and a design pass,
+ * which a durability phase does not pay for on a population of zero.
+ *
+ * THE VOLUME'S ANSWER IS PART OF THE LINE because "these two strings are one
+ * folder" is otherwise an unfalsifiable claim in a log, and because it is what
+ * tells a reader whether they are looking at a case-folding volume or at a
+ * symlink.
+ *
+ * It can throw nothing a boot would notice: every syscall inside
+ * `duplicateFolderGroups` and `volumeFoldsCase` is already wrapped, and the
+ * whole call sits in a catch at the one place it is made.
+ */
+async function logDuplicateProjectFolders(
+  manifest: ProjectRowReader
+): Promise<void> {
+  const paths = manifest
+    .listProjects()
+    .filter((row) => isLocalTarget(targetOfProject(row)))
+    .map((row) => row.path);
+  const groups = await duplicateFolderGroupsAsync(paths);
+  for (const group of groups) {
+    const folder = group[0] as string;
+    sessionsLog.warn(
+      `one folder has ${String(group.length)} project rows ` +
+        // `volumeFoldsCase` is synchronous and that is deliberate here: it is
+        // reached ONLY when a group exists, which is the anomaly this line is
+        // about, and only for a path the walk above has just proved reachable.
+        // The per-row cost, which is the part that had to come off the main
+        // thread, is the grouping.
+        `(volume case: ${volumeFoldsCase(folder)}): ${group.join(' | ')}`
+    );
+  }
+}
 
 /**
  * PHASE 90.3. One session on another machine, drawn against the folder it is
@@ -1000,6 +1158,30 @@ export class GmuxCore {
       );
     }
     await assertServerOptions();
+    // PHASE 274, MOVED AND MADE ASYNCHRONOUS BY THE FIX ROUND. One log line per
+    // folder that already has more than one project row, and silence when there
+    // are none. It reads the projects table and stats each local row once; it
+    // writes nothing, to the manifest or to disk.
+    //
+    // IT IS NOT AWAITED AND IT IS NOT ON THE CRITICAL PATH, for one reason that
+    // was argued rather than assumed. It used to run synchronously, one
+    // `statSync` per row, immediately after the manifest opened and BEFORE the
+    // control client started. A `statSync` against a disconnected SMB or NFS
+    // mount does not throw — it blocks in the kernel until that mount times out
+    // — and the `try`/`catch` around it caught a throw and could not catch a
+    // block. The population this diagnostic serves was measured at ZERO on a
+    // real manifest, so the trade was an unbounded stall at app open for a line
+    // nobody's manifest produces. ../recents/store.ts:344-355 is the in-repo
+    // precedent and it says the same thing about the same kind of row.
+    //
+    // The catch stays, for the one thing the async walk cannot answer for,
+    // which is a bug in it: a diagnostic must never be the reason a person
+    // cannot open their sessions.
+    void logDuplicateProjectFolders(core.manifest).catch((err: unknown) => {
+      sessionsLog.warn(
+        `scanning for duplicate project folders failed: ${(err as Error).message}`
+      );
+    });
     await core.startHookChannel();
     // Same catch-and-warn every OTHER reconcile caller gets via
     // scheduleRefresh(). Unguarded, a transient manifest lock at launch does
@@ -2884,6 +3066,60 @@ export class GmuxCore {
   // Projects API
   // -------------------------------------------------------------------------
 
+  /**
+   * Open a folder on this Mac as a project tab.
+   *
+   * PHASE 274 — ONE FOLDER IS ONE PROJECT HOWEVER IT IS SPELLED.
+   *
+   * THE DEFECT. `projects.path` is UNIQUE (../manifest/schema.ts:49) and
+   * SQLite's uniqueness is byte-exact, while the line below stores
+   * `resolvePath(path)`, which is `node:path.resolve` and never a `realpath`.
+   * So whatever spelling reached this method was what got stored and what
+   * `ON CONFLICT(path)` compared. On a case-insensitive volume — the APFS
+   * DEFAULT, and what the operator's machine and the reporter's both run — one
+   * folder opened as `~/source/proj` and again as `~/Source/proj` minted TWO
+   * ROWS. Two rows is two tabs with one name, and the two `WHERE project_path`
+   * updates at ../manifest/sessions-repository.ts:812 and :847 are byte-exact
+   * too, so the person's sessions divided between them. issue 25, belucid.
+   *
+   * MEASURED, through the SHIPPED `ProjectsRepository` over a scratch database
+   * carrying the shipped table shape, with the disk spelling `<s>/Source/proj`
+   * and the typed spelling `<s>/source/proj` naming one inode:
+   *
+   *   before: two `upsertProject` calls -> listProjects() answers 2 rows
+   *   after:  two adds through the identity question -> 1 row, and the SAME
+   *           row id is returned for both spellings
+   *   and a genuinely different folder added afterwards still makes its own row
+   *
+   * THE REPAIR, and it is a question moved rather than a string rewritten. This
+   * method stops asking "is there a row whose `path` column equals this string"
+   * and starts asking "is there a row that names this FOLDER", which the
+   * filesystem answers by dev+ino in ../fs/folder-identity.ts. If one does, that
+   * row is returned unchanged — its uuid, its spelling, its sessions, its
+   * layouts, its tab — nothing is written and nothing is re-spelled.
+   *
+   * WHAT IT DELIBERATELY DOES NOT DO, because Phase 273's commit refused
+   * normalising at this call site for reasons that still stand. The stored path
+   * is a durable identity in four places: `projects.path` itself, the two
+   * `WHERE project_path = ?` joins, `targetKey` in @shared/workspace-target,
+   * which writes the bare path as the `gmux.splitLayouts` key, and `sameTarget`
+   * beside it. Re-spelling a stored row would strand every one of them, and
+   * nine of the record sets involved live in localStorage, which main cannot
+   * reach (../recents/store.ts:13-14 is that wall). So the four sites keep
+   * comparing a stored spelling against the same stored spelling — a comparison
+   * that has always worked — and the only thing that changes is that there is
+   * now exactly one stored spelling per folder to compare. It also means the
+   * tab spine still shows the folder with the spelling the person opened it
+   * with, which is the line this phase is not allowed to cross.
+   *
+   * THE COST, measured rather than estimated. One `SELECT` and zero syscalls on
+   * the fast path, which is every add of a folder spelled the way it was first
+   * opened. A miss walks the local rows at two `statSync` each; 100 misses took
+   * 835 µs on this machine, so about 8 µs a row, and the operator's live
+   * manifest holds nine local project rows. That is under 100 µs, once per
+   * project add, on a gesture that already stats the folder on the line above
+   * and already has SQLite open.
+   */
   addProject(path: string): Project {
     // Phase 116: a durable write, refused once shutdown starts. It completes
     // inside one tick, so it needs refusal but not admission.
@@ -2895,6 +3131,13 @@ export class GmuxCore {
         'That folder does not exist.',
         abs
       );
+    }
+    const existing = projectNamingFolder(this.manifest, abs);
+    if (existing !== undefined) {
+      // PHASE 93, and the tombstone cleared is the FOUND row's own. Clearing it
+      // for `abs` would stamp a spelling no row carries.
+      this.manifest.clearProjectTabClosed({ path: existing.path });
+      return existing;
     }
     const project = this.manifest.upsertProject({
       id: randomUUID(),

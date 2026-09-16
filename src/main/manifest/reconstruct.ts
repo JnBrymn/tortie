@@ -80,7 +80,7 @@
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { tableDigests } from '../db/digest';
 import { writeDurable } from '../durable';
@@ -99,6 +99,10 @@ import {
   type ManifestSessionRecord
 } from './store';
 import type { Project } from '@shared/types';
+// PHASE 274. The ONE canonicalising realpath in main's owned path domain.
+// `fs.realpathSync` is Node's JavaScript walk and returns the case it was
+// given, which is not what `resolved()` below is asking for.
+import { canonicalPathSync } from '../fs/folder-identity';
 
 // ---------------------------------------------------------------------------
 // The surface a caller has to satisfy before anything is written
@@ -823,10 +827,18 @@ function prepareOutput(root: string): {
  * refuses a safe run or, far worse, fails to recognise the live directory. A
  * path that cannot be resolved is returned unchanged and still faces the same
  * comparison.
+ *
+ * PHASE 274. It used to call `fs.realpathSync`, which is Node's own JavaScript
+ * walk: it rewrites only the components that are symlinks and hands back the
+ * case it was given. So the `/var` against `/private/var` pair above was
+ * answered and a project spelled `~/source/proj` against a disk that says
+ * `~/Source/proj` was not — the two sides stayed two strings and the compare
+ * failed silently. `canonicalPathSync` is `realpathSync.native`, which goes
+ * through libuv to realpath(3) and answers both.
  */
 function resolved(path: string): string {
   try {
-    return realpathSync(path);
+    return canonicalPathSync(path);
   } catch {
     return path;
   }

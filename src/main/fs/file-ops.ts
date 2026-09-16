@@ -21,14 +21,54 @@
  *    through the same unchanged guard, collisions are found before a byte is
  *    written, and a confirmed overwrite trashes the displaced entry first. It
  *    COPIES, so the original stays where it was.
+ *  - PHASE 274. **An answer is spelled under the root the CALLER named.** See
+ *    the section below; it is the one rule in this list that is about the
+ *    reply rather than about the disk.
  *
  * Nothing here writes file CONTENT — created files are empty, which is what
  * the tree's inline-rename-on-create flow wants.
+ *
+ * ## PHASE 274 — WHICH SPELLING THIS MODULE ANSWERS IN
+ *
+ * THE DEFECT, MEASURED IN THE RUNNING APP. Two kinds of channel serve one
+ * file tree and they did not agree about what a file is called. `fs:readDir`
+ * ECHOES the caller's spelling — it resolves `dirPath` and composes each child
+ * onto the string it was handed (`./ipc.ts:208`) — while every mutation verb
+ * in this module composed its answer from `realRoot`, which is `realpath`'d.
+ * On a project whose stored spelling is not the disk's, those are two
+ * different strings for one file, and on a case-insensitive volume (the APFS
+ * default, which both the reporter's Mac and the operator's run) that happens
+ * to anybody who opens `~/source/proj` while the disk says `~/Source/proj`.
+ *
+ * What it cost, driven over a real case-mismatched folder: **6 of 23 tree
+ * steps passed on the person's spelling against 23 of 23 on the disk's, and
+ * all 17 failures were silent** — no toast, no console error. A file created
+ * from the tree opened no tab, a rename did not follow an open tab, a move
+ * that would have clobbered raised no confirmation, a `.git` drop was not
+ * refused, and one folder was drawn twice. The same split sent ⌘S out of the
+ * compare-and-swap door, because `fileInRepo` is a prefix test of the tab's
+ * path against the project's and the two no longer shared a prefix — which is
+ * the shape issue 16 exists to prevent.
+ *
+ * THE RULE. `entry()` composes `path` from the root the caller named and
+ * `relPath` from `realRoot`. Nothing else moves. Containment is unchanged:
+ * `resolveOpenProjectRoot` and `resolveInsideRoot` are called in the same
+ * order with the same arguments, `realRoot` is still the value every guard is
+ * asked about, and the string this hands back is re-proved by both of them the
+ * next time it is used — Phase 273 already made the caller-spelled absolute
+ * form admissible on re-entry. So this is a decision about the REPLY and not a
+ * weakening of the gate.
+ *
+ * AND THE DESTRUCTIVE ACTS STILL USE THE RESOLVED PATH. A confirmed overwrite
+ * trashes the displaced entry by `destAbs`, the value `resolveInsideRoot`
+ * proved, rather than by the re-spelled `path` on the answer beside it. On a
+ * folding volume the two name one file and it would not matter; the rule is
+ * that what acts is what the guard measured, and it costs nothing to keep.
  */
 
 import { cp, lstat, mkdir, open, rename } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
-import { basename, dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type {
   FsCreateInput,
   FsDuplicateInput,
@@ -85,12 +125,111 @@ export interface FileOpsService {
 // Small shared helpers
 // ---------------------------------------------------------------------------
 
-function entry(
-  realRoot: string,
-  abs: string,
-  kind: FsOpEntry['kind']
-): FsOpEntry {
-  return { path: abs, relPath: relative(realRoot, abs), kind };
+/**
+ * PHASE 274. The two spellings of one project root, carried together so the
+ * answer can be composed under one and every guard asked about the other.
+ *
+ * They are the same string for every project whose stored spelling matches the
+ * disk, which is nine of the operator's nine today, so `underCallerRoot` below
+ * short-circuits on identity and this costs those callers nothing at all.
+ */
+interface OpRoot {
+  /**
+   * The root every guard is asked about: absolute, existing, symlinks
+   * collapsed, and proved to be a folder Tortie has open. `resolveInsideRoot`,
+   * `relative()` and the containment refusals all read THIS and only this.
+   */
+  readonly real: string;
+  /**
+   * The root the CALLER named, `path.resolve`d and never `realpath`ed, so a
+   * trailing separator, a `.` and a `..` are gone and the case, the Unicode
+   * normalisation form and any symlinked ancestor are exactly as the caller
+   * spelled them.
+   */
+  readonly asAsked: string;
+}
+
+/**
+ * The caller's own spelling of a root, or the resolved one when it cannot be
+ * used.
+ *
+ * `path.resolve` is pure string arithmetic and makes no call, so it removes a
+ * trailing separator, a doubled one, a `.` and a `..` without ever touching the
+ * disk. That is what we want for every shape except ONE.
+ *
+ * **A `..` SEGMENT IS REFUSED, and it is the only shape where the caller's
+ * spelling and the disk's walk do not describe the same folder.** `resolve`
+ * applies `..` LEXICALLY and `realpath` applies it PHYSICALLY, so for a root
+ * spelled `/a/link/../b`, with `link` a symlink to `/x/y`, `resolve` answers
+ * `/a/b` while `realpath` answers `/x/b`. Those are two different directories,
+ * and re-spelling an answer from one under the other would name a file that is
+ * not the file the verb just acted on. Every other shape is safe by
+ * construction: a symlinked ancestor, a case difference and a normalisation
+ * difference are all spellings the walk really passes through, which is why
+ * `/a/link/b/f.txt` IS a spelling of the file at `/x/y/b/f.txt`.
+ *
+ * The fallback is the resolved root, which is exactly what this module
+ * answered in before Phase 274, so a caller that spells a root this way is
+ * left where it already was rather than given a wrong answer.
+ *
+ * **AND IT CANNOT FIRE TODAY, which was measured rather than assumed.**
+ * `resolveProjectRoot` (`./paths.ts:381`) is `realpath(resolve(root))` — it
+ * resolves the `..` LEXICALLY first and hands `realpath` the already-resolved
+ * string — so `real` is by construction the canonical form of the very
+ * spelling this composes under, and the `/a/link/../b` shape is refused by
+ * that gate before it reaches here. `p274-caller-spelling.test.ts` pins that
+ * refusal. The clause stays because the ordering it depends on lives in
+ * ANOTHER module: a later round that realpathed the raw string instead would
+ * make `underCallerRoot` silently wrong, and one `split` is a cheap thing to
+ * be wrong about.
+ */
+function spellingAsAsked(input: unknown, real: string): string {
+  if (typeof input !== 'string') return real;
+  if (input.split('/').includes('..')) return real;
+  return resolve(input);
+}
+
+/**
+ * One absolute path, re-spelled under the root the caller named.
+ *
+ * THREE ANSWERS AND WHY EACH IS RIGHT.
+ *
+ *  1. The two roots are the same string — the overwhelmingly common case —
+ *     so there is nothing to re-spell and `abs` is handed back untouched.
+ *  2. `abs` is not under `real` at all. That is `importPaths`, whose SOURCE is
+ *     deliberately outside the project (Phase 154), and a path outside the
+ *     root has no spelling under it. It is handed back untouched too.
+ *  3. Otherwise the tail beneath `real` is kept BYTE FOR BYTE and only the
+ *     root part is replaced. The tail is what the disk itself just told us the
+ *     file is called, through `resolveInsideRoot` and `readdir`; only the root
+ *     is the part the caller and the disk disagree about. Nothing here compares
+ *     two spellings for equality, lowercases anything or normalises anything —
+ *     it is one slice at a known offset.
+ */
+function underCallerRoot(root: OpRoot, abs: string): string {
+  if (root.asAsked === root.real) return abs;
+  if (!isAtOrUnder(root.real, abs)) return abs;
+  return root.asAsked + abs.slice(root.real.length);
+}
+
+/**
+ * PHASE 274. `path` is spelled under the root the caller named; `relPath` is
+ * measured from `realRoot`.
+ *
+ * `relPath` does NOT move, and that is deliberate rather than an omission. It
+ * was already right in every verb — measured `sub/new.md` on the mis-spelled
+ * root before this phase — because it is the tail beneath the root and the
+ * tail is the half both spellings agree about. Keeping it measured from the
+ * resolved root is also what keeps it honest when a caller names the project
+ * through a symlink: the relative path is a fact about the tree, and it is the
+ * absolute one a person's tab, project membership and save door are keyed by.
+ */
+function entry(root: OpRoot, abs: string, kind: FsOpEntry['kind']): FsOpEntry {
+  return {
+    path: underCallerRoot(root, abs),
+    relPath: relative(root.real, abs),
+    kind
+  };
 }
 
 /** lstat without following the leaf; null when the entry is not there. */
@@ -144,16 +283,27 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
    * Resolve + authorize a project root before any path is interpreted. The
    * gate itself lives in paths.ts since Phase 39, so Open With runs the same
    * one rather than a second copy.
+   *
+   * PHASE 274 made it answer BOTH spellings. The gate call is byte for byte
+   * the one that already shipped — same function, same arguments, same order,
+   * same thrown refusals — and `asAsked` is read off the input it just proved,
+   * by `spellingAsAsked`, which carries the one shape it refuses and why.
    */
-  function root(input: unknown): Promise<string> {
-    return resolveOpenProjectRoot(input, () => deps.listProjectRoots());
+  async function root(input: unknown): Promise<OpRoot> {
+    const real = await resolveOpenProjectRoot(input, () =>
+      deps.listProjectRoots()
+    );
+    return { real, asAsked: spellingAsAsked(input, real) };
   }
 
   async function createEntry(
     input: FsCreateInput,
     kind: FsOpEntry['kind']
   ): Promise<FsOpEntry> {
-    const realRoot = await root(input.root);
+    const roots = await root(input.root);
+    // PHASE 274. Every guard below reads this, unchanged and under its old
+    // name; only `entry()` is handed the pair.
+    const realRoot = roots.real;
     const target = await resolveInsideRoot(realRoot, input.path);
     // The leaf is validated on its own so "New File" cannot smuggle in a
     // name like ".git" or ".." through the path string.
@@ -172,7 +322,7 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
     } catch (err) {
       throw fsOpError(err, 'create', basename(target.abs));
     }
-    return entry(realRoot, target.abs, kind);
+    return entry(roots, target.abs, kind);
   }
 
   return {
@@ -181,7 +331,10 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
     createFolder: (input) => createEntry(input, 'dir'),
 
     async rename(input: FsRenameInput): Promise<FsRenameResult> {
-      const realRoot = await root(input.root);
+      const roots = await root(input.root);
+      // PHASE 274. Every guard below reads this, unchanged and under its old
+      // name; only `entry()` is handed the pair.
+      const realRoot = roots.real;
       const from = await resolveInsideRoot(realRoot, input.path);
       const name = assertBasename(input.name);
       const to = await resolveInsideRoot(
@@ -199,7 +352,7 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
       }
       const kind = kindOf(fromStats);
       if (from.abs === to.abs) {
-        const unchanged = entry(realRoot, from.abs, kind);
+        const unchanged = entry(roots, from.abs, kind);
         return { from: unchanged, to: unchanged };
       }
 
@@ -221,13 +374,16 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
         throw fsOpError(err, 'rename', basename(from.abs));
       }
       return {
-        from: entry(realRoot, from.abs, kind),
-        to: entry(realRoot, to.abs, kind)
+        from: entry(roots, from.abs, kind),
+        to: entry(roots, to.abs, kind)
       };
     },
 
     async duplicate(input: FsDuplicateInput): Promise<FsOpEntry> {
-      const realRoot = await root(input.root);
+      const roots = await root(input.root);
+      // PHASE 274. Every guard below reads this, unchanged and under its old
+      // name; only `entry()` is handed the pair.
+      const realRoot = roots.real;
       const source = await resolveInsideRoot(realRoot, input.path);
       const sourceStats = await statLeaf(source.abs);
       if (sourceStats === null) {
@@ -277,11 +433,14 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
       } catch (err) {
         throw fsOpError(err, 'duplicate', name);
       }
-      return entry(realRoot, destAbs, kind);
+      return entry(roots, destAbs, kind);
     },
 
     async move(input: FsMoveInput): Promise<FsMoveResult> {
-      const realRoot = await root(input.root);
+      const roots = await root(input.root);
+      // PHASE 274. Every guard below reads this, unchanged and under its old
+      // name; only `entry()` is handed the pair.
+      const realRoot = roots.real;
       const destDir = await resolveInsideRoot(realRoot, input.destDir, {
         allowRoot: true
       });
@@ -329,7 +488,7 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
           );
         }
         if (dirname(source.abs) === destDir.abs) {
-          skipped.push(entry(realRoot, source.abs, kind));
+          skipped.push(entry(roots, source.abs, kind));
           continue;
         }
 
@@ -339,11 +498,11 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
         const destLeaf = await statLeaf(destAbs);
         const displaced =
           destLeaf !== null && !sameEntry(sourceStats, destLeaf)
-            ? entry(realRoot, destAbs, kindOf(destLeaf))
+            ? entry(roots, destAbs, kindOf(destLeaf))
             : null;
         if (displaced !== null) {
           conflicts.push({
-            from: entry(realRoot, source.abs, kind),
+            from: entry(roots, source.abs, kind),
             to: displaced
           });
         }
@@ -360,15 +519,20 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
         try {
           if (item.displaced !== null) {
             // Even a confirmed overwrite goes to the Trash, never away.
-            await deps.trashItem(item.displaced.path);
+            // PHASE 274. By `destAbs`, which is the value `resolveInsideRoot`
+            // proved, and NOT by `item.displaced.path`, which is now spelled
+            // under the root the caller named. On a case-folding volume the
+            // two name one file either way; the rule is that what acts is
+            // what the guard measured, and here it costs one word.
+            await deps.trashItem(item.destAbs);
           }
           await rename(item.source.abs, item.destAbs);
         } catch (err) {
           throw fsOpError(err, 'move', basename(item.source.abs));
         }
         moved.push({
-          from: entry(realRoot, item.source.abs, item.kind),
-          to: entry(realRoot, item.destAbs, item.kind)
+          from: entry(roots, item.source.abs, item.kind),
+          to: entry(roots, item.destAbs, item.kind)
         });
       }
       return { status: 'moved', moved, skipped };
@@ -392,7 +556,10 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
      * comment is long.
      */
     async importPaths(input: FsImportInput): Promise<FsImportResult> {
-      const realRoot = await root(input.root);
+      const roots = await root(input.root);
+      // PHASE 274. Every guard below reads this, unchanged and under its old
+      // name; only `entry()` is handed the pair.
+      const realRoot = roots.real;
       const destDir = await resolveInsideRoot(realRoot, input.destDir, {
         allowRoot: true
       });
@@ -454,7 +621,7 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
         // ALREADY HERE. See the comment above this function: this is the
         // drag-out-and-back-in case and copying would destroy the file.
         if (dirname(sourceAbs) === destDir.abs) {
-          skipped.push(entry(realRoot, sourceAbs, kind));
+          skipped.push(entry(roots, sourceAbs, kind));
           continue;
         }
 
@@ -470,11 +637,11 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
         // The destination IS the source under another spelling — a
         // case-insensitive volume, or a link resolved to the same inode.
         if (sameEntry(sourceStats, destLeaf)) {
-          skipped.push(entry(realRoot, sourceAbs, kind));
+          skipped.push(entry(roots, sourceAbs, kind));
           continue;
         }
         const displaced =
-          destLeaf !== null ? entry(realRoot, dest.abs, kindOf(destLeaf)) : null;
+          destLeaf !== null ? entry(roots, dest.abs, kindOf(destLeaf)) : null;
         if (displaced !== null) conflicts.push({ name, to: displaced });
         planned.push({ sourceAbs, kind, destAbs: dest.abs, displaced });
       }
@@ -489,7 +656,12 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
         try {
           if (item.displaced !== null) {
             // Even a confirmed overwrite goes to the Trash, never away.
-            await deps.trashItem(item.displaced.path);
+            // PHASE 274. By `destAbs`, which is the value `resolveInsideRoot`
+            // proved, and NOT by `item.displaced.path`, which is now spelled
+            // under the root the caller named. On a case-folding volume the
+            // two name one file either way; the rule is that what acts is
+            // what the guard measured, and here it costs one word.
+            await deps.trashItem(item.destAbs);
           }
           // `errorOnExist` stays true even on a confirmed overwrite: the
           // displaced entry went to the Trash a line ago, so the name is
@@ -507,14 +679,17 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
         }
         imported.push({
           source: item.sourceAbs,
-          to: entry(realRoot, item.destAbs, item.kind)
+          to: entry(roots, item.destAbs, item.kind)
         });
       }
       return { status: 'imported', imported, skipped };
     },
 
     async trash(input: FsTrashInput): Promise<FsTrashResult> {
-      const realRoot = await root(input.root);
+      const roots = await root(input.root);
+      // PHASE 274. Every guard below reads this, unchanged and under its old
+      // name; only `entry()` is handed the pair.
+      const realRoot = roots.real;
       if (!Array.isArray(input.paths) || input.paths.length === 0) {
         throw gmuxError('INVALID_INPUT', 'Nothing was selected to delete.');
       }
@@ -532,7 +707,7 @@ export function createFileOps(deps: FileOpsDeps): FileOpsService {
           }
           const kind = kindOf(stats);
           await deps.trashItem(resolved.abs);
-          trashed.push(entry(realRoot, resolved.abs, kind));
+          trashed.push(entry(roots, resolved.abs, kind));
         } catch (err) {
           // Per-entry, never all-or-nothing: a trash cannot be rolled back,
           // so the UI has to be told exactly what did and did not go.

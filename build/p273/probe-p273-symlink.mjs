@@ -38,10 +38,12 @@
  *      gate this phase changed. The control is the whole point: `driveTreeOps`
  *      records 23 steps and a bare failure count says nothing about the alias,
  *      so the DIFFERENCE between the two runs is the only reading about this
- *      phase. It is three rows, all about an editor TAB opened for a file the
- *      tree created or renamed, it reads identically at d3fb8223 and at HEAD,
- *      and it is declared in the run rather than fixed here. See the comment
- *      beside PRE_EXISTING_ALIAS_TAB_ROWS.
+ *      phase. It was three rows at Phase 273, all about an editor TAB opened
+ *      for a file the tree created or renamed, reading identically at d3fb8223
+ *      and at that HEAD, declared in the run rather than fixed there. PHASE 274
+ *      FIXED THEM — `entry()` answers in the spelling its caller asked with —
+ *      so the difference is now EMPTY and the three rows are asked for by name
+ *      as well. See the comment beside PHASE_274_FIXED_ALIAS_TAB_ROWS.
  *   E. THE REFUSAL IS STILL A REFUSAL, and it now says what it measured. A
  *      path that escapes the root and a path under `.git` are sent through the
  *      SHIPPING `fs:writeGuarded` channel from the renderer's own bridge, and
@@ -616,12 +618,26 @@ await withElectron(
       // given `absOf(ctx.rootPath, …)`, which is the alias spelling, and the
       // tab it is looking for is under the real one.
       //
-      // It is left alone deliberately. It is a SECOND alias surface, in the
-      // renderer, with its own callers and its own escape questions, and
-      // widening this phase to take it without a checklist is the thing the
-      // phase's own refusals forbid. It is a finding for the backlog and it is
-      // written here so it is not lost.
-      const PRE_EXISTING_ALIAS_TAB_ROWS = [
+      // It was left alone deliberately by Phase 273. It is a SECOND alias
+      // surface, in the renderer, with its own callers and its own escape
+      // questions, and widening that phase to take it without a checklist is
+      // the thing its own refusals forbid. It was a finding for the backlog and
+      // it was written here so it would not be lost.
+      //
+      // PHASE 274 FIXED IT, AND THIS ARM IS WHERE THAT IS READ RATHER THAN
+      // CLAIMED. `entry()` in src/main/fs/file-ops.ts now composes `path` from
+      // the root the CALLER named and `relPath` from the resolved one, so the
+      // answer comes back in the spelling the tree asked with and `entry.path`
+      // and `ctx.rootPath` share a prefix again. The list below is KEPT rather
+      // than deleted, because the three rows are the record of what was wrong
+      // and the assertion is now that NONE of them fails — which is a stronger
+      // reading than an empty difference on its own, and which would go red
+      // again the moment somebody put `path: abs` back.
+      //
+      // Measured by this probe on 2026-09-16, one Electron, same window, same
+      // session: the alias project answers 23 of 23 and the control answers 23
+      // of 23. At Phase 273's HEAD it was 20 of 23 against 23 of 23.
+      const PHASE_274_FIXED_ALIAS_TAB_ROWS = [
         'P37: a valid Enter clears the reason, creates, selects and opens',
         'a created file opens in the editor',
         'the open editor tab follows the rename'
@@ -680,6 +696,12 @@ await withElectron(
           (name) => (aliasOps?.steps ?? []).find((s) => s.name === name)?.ok !== true
         ),
         aliasOnlyFailures: aliasFailures.filter((n) => !controlFailures.includes(n)).sort(),
+        // PHASE 274. The three rows Phase 273 declared, asked by NAME rather
+        // than as a difference, so a run cannot go green by the control failing
+        // in the same way.
+        phase274RowsStillFailing: PHASE_274_FIXED_ALIAS_TAB_ROWS.filter((n) =>
+          aliasFailures.includes(n)
+        ),
         // Read off disk at the REAL path, never through the app. The probe
         // trashes its own scratch folder last, so gone is the right answer and
         // it is the proof the trash reached the real disk.
@@ -690,9 +712,14 @@ await withElectron(
         ...grade([
           ['D every verb that goes through the changed gate is green on the alias', findings.D.gateVerbsGreenOnAlias, []],
           [
-            'D the alias project fails exactly the three DECLARED pre-existing tab rows and no more',
+            'D the alias project fails nothing the control does not',
             findings.D.aliasOnlyFailures,
-            PRE_EXISTING_ALIAS_TAB_ROWS
+            []
+          ],
+          [
+            'D the three tab rows Phase 273 declared and Phase 274 fixed are green',
+            findings.D.phase274RowsStillFailing,
+            []
           ],
           ['D the trash reached the real disk', findings.D.scratchGoneAtRealPath, true]
         ])

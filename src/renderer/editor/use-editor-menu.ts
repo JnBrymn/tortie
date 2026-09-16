@@ -262,7 +262,11 @@ export function useEditorMenu({
           // Phase 198's walk runs git on THIS Mac against a repository that is
           // not there for a remote tab, and a draft has no path in it at all.
           historyAvailable:
-            tab.remote === undefined && tab.draft === null && tab.relPath !== ''
+            tab.remote === undefined && tab.draft === null && tab.relPath !== '',
+          // PHASE 274 FIX ROUND. The same field the History row above is gated
+          // on, and the same one ./tab-menu.ts asks. A tab with no repo-relative
+          // path used to copy an empty string out of this row and toast success.
+          relativeAvailable: tab.relPath !== ''
         },
         {
           reshape: (id) => runReshape(id),

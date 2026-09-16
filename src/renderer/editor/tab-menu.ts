@@ -157,7 +157,17 @@ export function buildTabMenu(
   // Phase 160: the map tab's path IS the repository root, so Copy Path already
   // says everything and a relative path of nothing would copy an empty string.
   // Phase 163: the report tab's path is a project root for the same reason.
-  if (tab.archMap === undefined && tab.diagnostics === undefined) {
+  // Phase 274: and now a tab on a file OUTSIDE its project reaches the same
+  // state by the same reasoning. `../context/open-detail.ts` used to put the
+  // absolute path in `relPath` when the prefix test missed, which pasted an
+  // absolute path out of a row labelled Relative; it now refuses the relative
+  // spelling and leaves the field empty. This asks the one question all three
+  // cases really share instead of naming a fourth tab kind.
+  if (
+    tab.archMap === undefined &&
+    tab.diagnostics === undefined &&
+    tab.relPath !== ''
+  ) {
     items.push({
       label: 'Copy Relative Path',
       ...menuGlyph('copy'),

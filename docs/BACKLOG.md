@@ -28236,6 +28236,140 @@ its own research. And the reporter is the judge of the first complaint: the phas
 per-agent repetition solved until he has set a key once and seen it reach two agents.
 
 
+## Phase 274.1 — `tortie .` from a shell that spells the folder its own way (deferred out of 274, 2026-09-16)
+
+**Subject.** `fix(shell): the shim hands main the folder the disk has`
+
+**First body line.** `Phase 274.1: the shim's pwd is the logical path`
+
+**Semver.** Patch. It changes which spelling a FIRST open stores, and nothing else.
+
+**Tier 2.** It is a rendered surface with no new state — the tab spine's label and tooltip — plus one
+app run that drives the gesture. It is not Tier 3 because Phase 274 already made it impossible for
+this to mint a second row, so no durable state divides whichever way it is decided.
+
+**Charter.** Phase 274's §10.3, which refused it with a reason and named this entry. The reporter's
+own reproduction in issue 25 is literally this pair:
+
+```
+$ echo "spelled: $PWD"; echo "real   : $(pwd -P)"
+spelled: /Users/sean/source/SpecStory/getspecstory/specstory-cli
+real   : /Users/sean/Source/SpecStory/getspecstory/specstory-cli
+```
+
+**The mechanism, read from the tree.** `src/main/shell/shim.ts:102` composes the argument the shim
+hands `/usr/bin/open` as `abs=$(cd "$dir" 2>/dev/null && pwd)`. `pwd` is the shell's LOGICAL path,
+which keeps whatever spelling the person's own `cd` history put there; `pwd -P` is the physical one,
+which is what the disk says. That string becomes argv, and argv reaches `addProject`
+(`src/main/sessions/core.ts:3083`), which stores `resolvePath(path)` and never a `realpath`. So the
+spelling a person's shell happens to hold is the spelling the tab spine shows for ever after.
+
+**Why it is not urgent any more, and why it is still an entry.** Phase 274 moved the identity
+question above the string, so a `tortie .` from a wrong-case shell now lands on the row that already
+exists and the second tab is never minted. What is left is the FIRST open of a folder nobody has
+opened before: it stores the shell's spelling rather than the disk's. That is a decision about what a
+person SEES, which Phase 274's refusal 0.3 forbade it from taking, so it is taken here or not at all.
+
+**The two answers, and the phase argues rather than inherits.** Either the shim sends `pwd -P` and
+the tab always shows the disk's spelling, or it sends `pwd` and the tab shows what the person typed
+and Tortie says nothing about it. The measurement that decides it is not taken yet: how often a real
+shell's `$PWD` differs from `pwd -P` on the operator's own machine, over his own shell history.
+
+**Proof, run rather than read.** One app run. `tortie .` from a directory reached by a wrong-case
+`cd`, the tab's label and tooltip read out of the running app, and the stored row read off the
+manifest by `sqlite3`. Measured at the parent first. The `cd` itself is what makes the fixture, so
+the probe needs a real shell and no agent.
+
+**What is NOT in this phase.** No change to `addProject`, which Phase 274 settled. No canonicalising
+of a path anywhere else. No Windows work. Nothing about a folder dropped on the Dock or opened from
+Finder, which arrives through `src/main/shell/arrival.ts`.
+
+**AND THE OTHER DOOR IS ALREADY DECIDED, which this entry has to say plainly, because it was written
+believing otherwise.** Phase 274 changed `src/main/shell/arrival.ts:79` from `fs.realpathSync` —
+Node's own JavaScript walk, which hands back the case it was given — to `canonicalPathSync`, which is
+`realpathSync.native` and asks the volume. So a Finder, Dock or "Open With" arrival now reaches
+`addProject` in the DISK's spelling, and a FIRST open through that door stores the disk's spelling.
+Phase 274's fix round found this and left it as built rather than reverting it: Finder supplies a
+canonical path already, so for the gesture that dominates that door nothing moved, and rule 1
+protects every SECOND open whatever the spelling. What it means for THIS phase is that the two doors
+would answer differently until this one is decided, and that the answer "the tab shows what the
+person typed" now has to argue against a sibling door that already shows the disk's. It does not
+decide this phase — a shell's `$PWD` is a person's own history in a way Finder's path never is — but
+it is evidence and the phase may not pretend it is not there.
+
+## Phase 274.2 — a mis-spelled project reads its agent context as empty (deferred out of 274, 2026-09-16)
+
+**Subject.** `fix(context): the local scope is found however the folder is spelled`
+
+**First body line.** `Phase 274.2: the claude.json key is a spelling`
+
+**Semver.** Patch.
+
+**Tier 3.** It reads a person's approval state, and an approval state read as empty is a person being
+told nothing is approved when things are. "Does it spawn a process, hold his credentials, or send his
+words anywhere?" — it reads the file that records which MCP servers a person has approved, so it is
+judged at the tier that domain is judged at.
+
+**Charter.** Phase 274's §10.4, which refused it with a reason and named the measurement to take
+first. It is the reporter's own **incident 1** in our product: a mis-spelled project reads its
+local-scope MCP servers and the whole approval state as empty, silently.
+
+**The mechanism, read from the tree.** `src/main/context/read/mcp.ts:280-281` looks up
+`root.projects[ctx.projectRoot]` in `~/.claude.json`, byte-exactly. `ctx.projectRoot` is
+`resolvePath(input.cwd)` (`src/main/context/scan.ts:151`), which is `node:path.resolve` and never a
+`realpath`. `readClaudeLocal` answers `{ candidates: [], approvals: { known: false } }` when the key
+misses (`:282`), which is the same answer it gives for a project Claude Code has genuinely never seen.
+So a project opened at a spelling the key does not use reads as a project with no local servers and
+no approvals, and nothing anywhere says a lookup missed.
+
+**THE MEASUREMENT THAT COMES FIRST, and the phase does not start without it.** Claude Code writes
+that key from the cwd we launched it WITH, which is `sessions.cwd`, which is the person's spelling.
+So canonicalising our lookup could break a lookup that works today. Read the key shapes in a real
+`~/.claude.json` — 2,038 project entries on this machine, per that file's own header at `:268` —
+against the cwds Tortie launched with, and say how many of each shape there are. Only then choose
+between asking the canonical spelling as a SECOND key (never a replacement), and leaving it alone.
+
+**Proof, run rather than read.** A hostile fixture over a `~/.claude.json` the phase builds, with a
+key in the disk spelling and a project opened in the person's, both ways round, plus the population
+count above over a COPY of the operator's own file and never his own. Then one app run reading the
+Context panel's local scope for a mis-spelled project.
+
+**What is NOT in this phase.** No case-folding and no `.normalize()`, for Phase 274's reasons. No
+change to `agent-context.ts`'s precedence matrix or to `conformance:context`. No write to
+`~/.claude.json`, ever — it is another program's file.
+
+## Phase 274.3 — an invisible character in a quoted path (deferred out of 274, 2026-09-16)
+
+**Subject.** `fix(fs): a refusal that quotes a path escapes what cannot be seen`
+
+**First body line.** `Phase 274.3: invisible characters in a quoted path`
+
+**Semver.** Patch.
+
+**Tier 1.** It is copy. Nothing durable moves and no process starts.
+
+**Charter.** Phase 274's §10.6 and §3, which refused the two shapes entry with a reason. A zero-width
+space (U+200B) and a non-breaking space (U+00A0) in a name give `ENOENT` on BOTH kinds of volume —
+measured over the §8 fixture table, rows 16 to 18, on a folding volume and on a case-sensitive APFS
+image. There is no one-folder-two-spellings there: there are two names, one of which names nothing,
+and what a person sees is a refusal rather than a silent split. It is a display and paste-hygiene
+problem, which is why it is its own entry and a small one.
+
+**The mechanism.** A refusal sentence that quotes a path can print two strings that are visually
+identical and mean different files, and a person reading it learns nothing. The fix is to escape
+characters with no glyph when a path is put into a sentence a person reads.
+
+**Where.** The refusal vocabulary of `src/main/fs/paths.ts:120-126` and whatever composes the
+sentences around it; the phase surveys the actual quoting sites rather than assuming this one.
+
+**Proof.** The gates, plus one photograph if the change reaches a drawn surface. Tier 1's budget and
+no more.
+
+**What is NOT in this phase.** No change to what is REFUSED — rows 16 to 18 are refused today by
+`isDirectory` and stay refused. No normalisation of any path, ever, which is Phase 274's rule 2. No
+new surface.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -28937,3 +29071,7 @@ cycle rather than only the evening it was written.
 - 2026-09-16, **PHASE 274 QUEUED, one folder two spellings everywhere else it is compared, Tier 3, not yet run — and PHASE 272's ENTRY WAS CORRECTED IN PLACE because a paragraph in it was wrong.** The reporter answered the operator and the cause was never symlinks: he opened `/Users/sean/source/SpecStory/getspecstory/specstory-cli` and `pwd -P` answered `/Users/sean/Source/...` with a capital S, on a case-insensitive APFS volume, **which is the DEFAULT and is what the operator's own machine runs too — `/users/gdc/gmux` resolves here.** So this was the ordinary configuration of both machines rather than anything peculiar to his. **THE CORRECTION.** Phase 272's entry said "CASE IS NOT THE CAUSE, MEASURED RATHER THAN ASSUMED" and told a later round to stop looking there. The measurement in it is right and the conclusion is backwards: `realpath` canonicalises the case of the ROOT while the PATH is never realpathed before the lexical comparison, so the canonicalisation is what CREATES the mismatch rather than what prevents it, and the false clause is "both sides of the comparison go through it" — only one side does. That paragraph is now marked wrong in place, with the reporter's reading beside it, because it is the kind of confident refutation a later round inherits. **Phase 273 fixes his shape without having known it**, because it repaired the COMPARISON rather than either cause: driven over his exact spelling, at `1f311103` the lowercase spelling is REFUSED and the disk spelling SAVES, and at `cd524701` both SAVE. The escape verifier had driven the case variant explicitly and recorded it as newly admitted; the wrong paragraph is why that reading was under-weighted when the verdicts were read. **WHAT PHASE 274 IS FOR, and it is worse than the save because it is durable.** `projects.path` is `UNIQUE` and SQLite's uniqueness is byte-exact, so the same folder spelled two ways becomes TWO PROJECT ROWS — measured against the shipped table shape, both inserts succeeded — and the sessions join at `sessions-repository.ts:812` and `:847` is `WHERE project_path = ?`, so **a person's sessions divide between the two rows**. That is the reporter's own incident 3, split workspace entries with history split between them, reproduced in our manifest by the same mechanism. The four string-equality sites Phase 273's commit body named as its reason NOT to normalise are this phase's starting list and not its finishing one, and the renderer surface 273 deferred — a file created from the tree opening no tab, a rename not following one — folds in as the same defect. **HIS FOUR INCIDENTS ARE IN THE ENTRY VERBATIM** because four independent hits on one pattern is evidence about the pattern, and they are four DIFFERENT shapes (a watcher echoing back the caller's case, an exact `HasPrefix`, a workspace identity, a hashed id), so a survey that only greps `===` misses most of it. **THE LANGUAGE DIFFERENCE IS RECORDED SO NOBODY PORTS THEIR FIX**: Go's `filepath.EvalSymlinks` does NOT restore canonical case and returns a nil error while doing nothing, which is what bit them and needed their own per-component walk, while Node's `fs/promises.realpath` DOES — measured. So this repository already has the working tool and every defect here is a place that does not call it, never a place where it fails. **The refusal that binds the phase: never case-fold a comparison.** It is the reporter's own recorded wrong fix, it corrupted sessions recorded on another platform for them, and this product reads another machine's paths over ssh. Ask the filesystem; never lowercase a string. Unicode normalisation is named in the hostile fixture as the case the phase is most likely to miss, being one folder on APFS and two different strings.
 
 - 2026-09-16, **PHASE 275 QUEUED, the keys an agent needs set once (issue 20's follow-up, belucid), Tier 3, not yet run.** His three complaints in his words: "why do we need to set each individual key per agent? also the pop up list doesn't scroll and you have to add one at a time." One surface, fixed together. **TWO OF THE THREE ARE ONE DEFECT AND IT IS OUR CHOICE OF CONTROL.** `LaunchDefaultsSection.tsx:304-308` renders the candidates into a native `<datalist>`, which is a browser control we do not own — we cannot style it, size it or control its scrolling, and Chromium caps what it shows. **Measured on the operator's own shell, `printenv | wc -l` is 51**, so a control designed for a handful of suggestions is being handed fifty-one. And a datalist attaches to ONE input and yields ONE value per trip, so the one-at-a-time complaint is not a second defect, it is the same control. Replacing it with a list this product draws fixes both in one change, and it must keep the property its comment defends: a suggestion list and never a cage, so a name the shell does not export YET is still typed and accepted (the Phase 174.1 ruling, unchanged). **ON THE PER-AGENT QUESTION, HE IS RIGHT AND WE OVER-SCOPED IT.** The case for per-agent is stated fairly in the entry, being that many agents run at once under one account with some deliberately unsafeguarded, and `envNameKey` (`settings.ts:859-861`) puts the agent id IN the seal key so a name copied into a second agent's list is dropped. It is weaker than it looks: the VALUES come from the person's own login shell, and every one of those agents run in Terminal already receives all 51, so Tortie is currently STRICTER THAN A PLAIN TERMINAL while charging per-agent repetition for it. And a key is a property of a PROVIDER rather than an agent — one DeepSeek key is the same key whichever agent talks to DeepSeek. **The answer is a shared set as the DEFAULT with per-agent narrowing KEPT, both and not either.** **THE SEAL IS THE LOAD-BEARING PART AND THE ENTRY DOES NOT LEAVE IT TO A BUILDER**, because a shared set removes one of the two layers `envNameKey` provides and only one of them may move: layer one, that a name no human confirmed is DROPPED, is refusal 8 and does not move and a proposal weakening it is refused outright; layer two, that a confirmed name for claude cannot reach codex, does move by design, so the shared set needs its OWN seal key and its own confirmation whose words say what it means — this name goes to every agent, including ones installed later. A shared name must never be admitted on a per-agent seal and the reverse, with an ablation each, and `conformance:agents` already asserts the confirm hash moves when the name SET changes and only then, so it gains the shared set. The merge is nearly free because `envPassthroughFor` (`shared/launch-env.ts:47-53`) already unions two sources on the rule that neither shadows the other; a third joins on the same rule, and that module imports nothing and may never import anything. Both call sites read the same union so **remote feels identical to local**. The proof counts GESTURES at the parent and after (three trips to add one key for three agents, against one), attacks the seal by hand-writing a shared name into settings.json the way any agent could, and drives the list over 51 real names AND over zero, which is the probe-failed path that must still let a person type. **Per-agent sets are NOT removed** — deleting them to simplify the drawing would take away the only reason the per-agent design was defensible — no value ever enters the window, the manifest, a log or an argv, `REMOTE_ENV_ALLOWED` stays at exactly two names, and importing a secret from a `.env` file, a keychain or a vendor config is a different phase with its own research. He is the judge of the first complaint and it is not declared solved until he has set a key once and seen it reach two agents.
+
+- 2026-09-16, **PHASES 274.1, 274.2 and 274.3 QUEUED, the three refusals Phase 274 wrote down rather than took, none of them run yet.** They are appended in full house shape immediately above this log, because a refusal that is not recorded is a refusal a later round will undo, and Phase 274's spec made writing them an obligation of its own commit. **274.1, the shim's `pwd`** (`src/main/shell/shim.ts:102`) is the LOGICAL path and `pwd -P` is the physical one, which is literally the pair the reporter printed in issue 25; Phase 274 made it unable to split anything, so what is left is which spelling a FIRST open stores, and changing that changes what a person SEES, which 274's refusal 0.3 forbade it from deciding. Tier 2, and the measurement it needs is how often a real shell's `$PWD` differs from `pwd -P`. **274.2, the `~/.claude.json` local scope** (`src/main/context/read/mcp.ts:280-281` keyed byte-exactly on `ctx.projectRoot`, which is `resolvePath` and never a realpath at `src/main/context/scan.ts:151`) reads a mis-spelled project's MCP servers AND its whole approval state as empty and says nothing, which is the reporter's incident 1 in our product. Tier 3 because it is a person's approval state, and it is deliberately NOT a one-line fix: the far side writes that key from the cwd WE launched with, which is the person's spelling, so canonicalising our lookup could break a lookup that works today, and the first thing the phase does is count the key shapes in a real file of 2,038 entries. **274.3, an invisible character in a quoted path** — U+200B and U+00A0 give `ENOENT` on BOTH kinds of volume, measured over §8 rows 16 to 18 on a folding volume and on a case-sensitive APFS image, so there is no one-folder-two-spellings there and it is a display problem: a refusal that quotes a path should escape what has no glyph, because two visually identical strings in one sentence help nobody. Tier 1, it is copy.
+
+- 2026-09-16, **PHASE 274's FIX ROUND: one silent regression, two wrong answers from the volume probe, a blocking stat at app open, an overclaimed ordering and a missed menu row — all fixed, not yet committed.** Two independent verifiers came back `needs_work` and every finding below was re-derived by driving before anything was changed. **THE HEADLINE PASSED and is recorded first, because it is the one that could have lost a person a project**: on a real case-sensitive APFS image, driven through the shipping `ProjectsRepository` and `addProject`'s identity block, `<mnt>/Source/proj` and `<mnt>/source/proj` both minted rows with distinct ids and `duplicateFolderGroups` over all four rows answered `[]` — two genuinely different folders are never merged, and `measure:p274-volumes` re-reads that on every run. **THE REGRESSION, high, and it was in exactly the population this phase serves.** `src/renderer/state/shell-open.ts` asked `projects.some((p) => p.path === pair.folder)` byte-exactly and abandoned the FILE half of a Finder double-click, a Dock drop or an Open With when it missed — no toast, no log, no console error, the tab focused and the file simply never opened. Phase 274 put both sides of that comparison on opposite sides for the first time: `addProject` now answers the row that already NAMES the folder, so the row can carry a different spelling. DRIVEN through the shipped `resolveShellArrival` plus `GmuxCore.prototype.addProject` against a real `ManifestStore`: the case shape (`<s>/Source/proj` arriving, `<s>/source/proj` stored) and the SYMLINK shape (`<s>/real/proj` arriving, `<s>/link/proj` stored, which was already broken at the parent's arrival call too) both read false. At the parent the same gesture minted a SECOND row at the arrival spelling, which made the comparison true — the bug this phase removes was the only reason it held. Fixed by having `addProjectPath` resolve with the row main answered rather than with nothing; `repoPath` is now the ROW's spelling and `relPath` is still sliced off the ARRIVAL, because the two can differ in LENGTH (`/tmp` against `/private/tmp`). Two new tests, both red on the parent shape. **THE VOLUME PROBE ANSWERED WRONGLY IN TWO WAYS, both measured on a real image mounted at a directory the attack named.** First, a directory's NAME is an entry in its PARENT's directory, so flipping the name of a MOUNT POINT asks the parent volume: a deep path on a case-sensitive image read `separates` and the mount point itself read `folds`, and an all-digit chain that climbed to it read `folds` too. The header had declared "the climb may cross a mount point" as a limit, and the climb was never the problem. `volumeFoldsCase` now proves `dirname(at)` shares `at`'s device before it asks that component or climbs past it, and answers `unknown` at a boundary. Second, **§2.5's caching argument was falsified by measurement**: macOS hands a freshly attached image the `dev` a detached one had — three images in a row all received dev `16777241` — so the cached answer survived onto a volume with the opposite behaviour, and the wrong mount-point answer was then handed to every later question about that volume. **The cache is deleted rather than repaired**; there is no cheap reliable key for "still the same volume" (an APFS root inode is 2 on every one of them) and the probe's only product caller runs once per duplicate group, a population measured at zero. `conformance:samefolder` gained the boundary clause WITH ITS OWN ABLATION, driven inside the image's block because the boot volume has no device boundary anywhere on it (`/`, `/System/Volumes/Data`, `/Users`, `/private` and `/Volumes` all read dev 16777231 — an APFS firmlink shares the device), and rule 9's `'/'` clause now demands exactly `unknown` instead of accepting all three words off a cache hit. **THE DIAGNOSTIC CAME OFF THE BOOT PATH.** `logDuplicateProjectFolders` ran one `statSync` per local project row immediately after the manifest opened and BEFORE `control.start()`; a `statSync` against a disconnected SMB or NFS mount does not throw, it blocks in the kernel until that mount times out, and the try/catch caught a throw and could not catch a block — for a population of zero. It is now `duplicateFolderGroupsAsync` off the critical path, which is what `src/main/recents/store.ts:344-355` already does for the same question about the same kind of row. **RULE 2 CLAIMED AGE AND DELIVERED ALPHABET.** `listProjects()` is `ORDER BY name ASC` with BINARY collation: two rows named `split` and `Split` come back capital-first whatever their ages are, driven through the shipped repository, while the reporter's shape (both rows named `proj`) does tie and does come back oldest-first. The behaviour is deterministic and both rows name one folder, so nothing turns on it — the words moved, in `core.ts`, in the spec and in a CHANGELOG line that had promised a person "the one you opened first". **AND ONE MISSED MENU ROW**: rule 18's `relPath: ''` was honoured by `tab-menu.ts` and not by `editor-menu.ts`, so the editor's own right-click `Copy Relative Path` copied an empty string and toasted that it had copied a path. Also recorded rather than fixed: `arrival.ts` DID change which spelling a first Finder open stores, which §10.3 had deferred, so Phase 274.1's entry now says so; and `reconstruct.ts:980` is a SECOND producer of `projects.path` rows that rule 4's wording did not admit, bounded because it can only reproduce a split that already exists. Gates: typecheck, build (contract byte for byte), 14,283 tests, `conformance:samefolder` on both volumes with 9 module ablations plus the new boundary one, `ablation:p274` 13 of 13, `measure:p274-volumes` on both volumes.

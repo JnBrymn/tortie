@@ -8,7 +8,10 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 ### Fixed
 
-- A project you opened through a symbolic link now saves. Every file in one used to refuse every save with a message saying the project was not open, when it was; creating or renaming a file in such a project still does not open or follow its editor tab.
+- A project you opened through a symbolic link now saves. Every file in one used to refuse every save with a message saying the project was not open, when it was.
+- Opening one folder twice, spelled two different ways, no longer makes two tabs for it. It used to make a second tab with the same name and divide your sessions between the two, so each tab hid the other's work; if you already have two tabs for one folder they stay two for now, and every spelling of it lands on the same one of them from now on.
+- Creating, renaming, duplicating, moving and deleting files now work in a project you opened under a spelling the disk does not use — a lower-case folder name, say, or a folder reached through a symbolic link. A created file opens its tab, a rename takes its open tab with it, and a move that would overwrite something asks first; all of that used to do nothing at all, without saying so.
+- Copy Relative Path no longer appears on a tab whose file sits outside your project, where it used to copy the file's whole path out of a row labelled Relative. Copy Path still gives you that path.
 - A save that is refused now says what actually happened — the project was closed, a folder on the way to the file could not be read, the file is inside a .git folder — instead of saying your project is not open whatever the cause, and the cause is written to Tortie's own log so a report of one can be answered.
 - A file at the top of a project whose name begins with two dots now saves. It used to be refused with that same wrong message.
 

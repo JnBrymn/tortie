@@ -263,7 +263,14 @@ export interface OpenRecentInput {
     machineId: string,
     path: string
   ): Promise<AddRemoteProjectResult>;
-  addProjectPath(path: string): Promise<void> | void;
+  /**
+   * PHASE 274 FIX ROUND. The store's action now resolves with the project row
+   * main answered rather than with nothing. This row does not read it — a
+   * recents click wants the tab focused and nothing else — so the type says
+   * "resolves with something I am not looking at" rather than naming `Project`
+   * and pulling the shared type in for a value nobody here uses.
+   */
+  addProjectPath(path: string): Promise<unknown> | void;
   openProject(): Promise<void> | void;
   toast(kind: 'error', text: string): void;
 }

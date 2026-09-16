@@ -74,9 +74,36 @@ export type PathDoorRefusal =
  * The answer. `door: null` means the span is never underlined and a click on
  * it never happens, so the refusal word exists for gates and probes and is
  * never shown to a person.
+ *
+ * ## `underBase` — the same file, spelled under the base the caller named
+ *
+ * PHASE 274, and it is ADDITIVE: `path` keeps the value it has always had,
+ * byte for byte, so every `conformance:pathdoors` ruling about `path` stays
+ * true and every reader that has never heard of this field is unchanged.
+ *
+ * WHY IT EXISTS. `path` is the REALPATH, which is what makes the whole
+ * sequence above honest — a symlink spelled `.md` whose leaf is a `.pem` is a
+ * `.pem` here. But the realpath is not always what the file is CALLED from
+ * where the click came from. A pane's project may be spelled `~/source/proj`
+ * while the disk says `~/Source/proj`, which is one folder on a
+ * case-insensitive volume and is the APFS default; or the base may be reached
+ * through a symlink, which on this Mac is every path under `/tmp`. Opening the
+ * realpath then lands a tab whose path shares no prefix with the project it is
+ * in, so `fileInRepo` says false, the tab is treated as a file outside the
+ * repository and ⌘S takes the PLAIN door instead of the compare-and-swap one.
+ * Measured at `30f4bd8d`: a terminal path link into the project opened at the
+ * canonical spelling and unguarded.
+ *
+ * WHAT IT IS AND IS NOT. It is the realpath's tail re-attached to the literal
+ * base the caller handed in, and `src/main/fs/path-door.ts` fills it in ONLY
+ * when the realpath is inside the real base — so it names the same file, and
+ * it is absent whenever that cannot be shown. It is not a second answer and it
+ * is not a bypass: every clause above was already asked of the realpath before
+ * this field is composed, and a caller that ignores it behaves exactly as it
+ * did before this phase.
  */
 export type PathDoorAnswer =
-  | { door: PathDoor; path: string }
+  | { door: PathDoor; path: string; underBase?: string }
   | { door: null; refusal: PathDoorRefusal };
 
 /**

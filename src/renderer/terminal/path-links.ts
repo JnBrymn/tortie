@@ -85,6 +85,20 @@
  * and of the links it does draw **39 of 41 open the file the text names**. The
  * two that do not are one shape, and it is written down in
  * `src/main/fs/path-door.ts` beside the join rather than left to be found.
+ *
+ * ## Which SPELLING the click opens at (Phase 274)
+ *
+ * The door sequence decides about the REALPATH, which is what keeps it honest
+ * about a symlink whose leaf is something else. But the realpath is not always
+ * what the file is called from this pane: a project spelled `~/source/proj`
+ * while the disk says `~/Source/proj` is one folder on a case-insensitive
+ * volume, and `/tmp` against `/private/tmp` is the same shape through a link.
+ * Opening the realpath handed the editor a tab whose path shared no prefix
+ * with its own project, so `fileInRepo` said false and ⌘S took the plain door
+ * instead of the compare-and-swap one — measured at `30f4bd8d`. So the click
+ * opens `underBase`, main's re-spelling of the same file under the base this
+ * pane asked with, and falls back to `path` when there is none. Nothing about
+ * the DECISION moved, and nothing here compares or folds two spellings.
  */
 
 import type { ILink, ILinkProvider, Terminal } from '@xterm/xterm';
@@ -321,14 +335,34 @@ export class PathLinkProvider implements ILinkProvider {
     this.cache.delete(this.keyFor(span.target, base));
     const answer = await this.doorFor(span.target, base);
     if (answer.door === null) return;
+    // PHASE 274. THE FILE IS OPENED AT THE SPELLING THIS PANE ASKED WITH.
+    //
+    // `answer.path` is the REALPATH, and that is what makes every clause of
+    // the door sequence honest. It is not what the file is CALLED from here.
+    // A pane whose project is spelled `~/source/proj` while the disk says
+    // `~/Source/proj` is one folder on a case-insensitive volume — the APFS
+    // default, and what the reporter's Mac and the operator's both run — and
+    // `/tmp` against `/private/tmp` is the same shape through a symlink.
+    // Opening the realpath handed the editor a tab whose path shared no prefix
+    // with the project it is in, so `fileInRepo` said false, `projectHolding`
+    // could not find the project, and ⌘S took the PLAIN door instead of the
+    // compare-and-swap one. Measured at `30f4bd8d`: the link opened at the
+    // canonical spelling, unguarded.
+    //
+    // `underBase` is main's own re-spelling and it is present only when the
+    // realpath is inside the real base, so it names the same file or it is not
+    // there. `?? answer.path` is exactly this call's behaviour before the
+    // phase, which is what a span outside the base, a span with no base and an
+    // older main all still get.
+    const opened = answer.underBase ?? answer.path;
     if (answer.door === 'mac') {
-      await this.deps.openOnMac(answer.path);
+      await this.deps.openOnMac(opened);
       return;
     }
     // 'editor' and 'image' are one call: the editor store already sends an
     // image path to the image surface and opens markdown in preview, so image,
     // markdown and text are three destinations that already work.
-    this.deps.openInTortie(answer.path, base, span.line);
+    this.deps.openInTortie(opened, base, span.line);
   }
 }
 

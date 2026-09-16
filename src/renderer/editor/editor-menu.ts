@@ -152,6 +152,22 @@ export interface EditorMenuTarget {
   writable: boolean;
   /** Phase 198's walk runs git on THIS Mac, so a remote file has no History. */
   historyAvailable: boolean;
+  /**
+   * The tab HAS a repo-relative path. False drops Copy Relative Path.
+   *
+   * PHASE 274 FIX ROUND. `relPath: ''` is what this renderer already means by
+   * "this tab has no repo-relative path" — ./tab-menu.ts leaves the row off a
+   * map tab, a report tab and, since Phase 274, a tab on a file outside its
+   * project, and `historyAvailable` above is already gated on the same field.
+   * The in-editor menu was the one consumer that was missed: it pushed the row
+   * unconditionally, so a right click on a Context detail tab for
+   * `~/.claude/CLAUDE.md` composed the clipboard text from `['']`, copied an
+   * empty string, and then toasted that it had copied a path. Before Phase 274
+   * the same row pasted an ABSOLUTE path out of a row labelled Relative, which
+   * is the wart that phase set out to remove; leaving this door open turned the
+   * wart into a silent success.
+   */
+  relativeAvailable: boolean;
 }
 
 export interface EditorMenuActions {
@@ -198,10 +214,15 @@ export function buildEditorMenu(
   if (target.historyAvailable) {
     tortie.push({ label: 'History', run: () => actions.history() });
   }
-  tortie.push(
-    { label: 'Copy Path', run: () => actions.copyPath(false) },
-    { label: 'Copy Relative Path', run: () => actions.copyPath(true) }
-  );
+  tortie.push({ label: 'Copy Path', run: () => actions.copyPath(false) });
+  // Copy Path always applies — every tab this menu can open on has an absolute
+  // path. The relative one is asked for, for the reason on `relativeAvailable`.
+  if (target.relativeAvailable) {
+    tortie.push({
+      label: 'Copy Relative Path',
+      run: () => actions.copyPath(true)
+    });
+  }
   if (target.writable) {
     tortie.push({
       label: 'Save',

@@ -194,12 +194,16 @@ const HELPER = 'electron-run.mjs';
  * probe left the tree or a probe stopped routing its launch through the helper,
  * and the second one is the 2026-08-22 crash coming back.
  *
+ * PHASE 274 RAISED IT FROM 134 TO 135, for build/p274/probe-p274.mjs, the app
+ * run that opens one folder under two spellings and reads ONE tab, ONE project
+ * row and one session strip back.
+ *
  * RAISE IT WHEN YOU ADD ONE, in the same commit, and that is not optional
  * bookkeeping. Adding a probe cannot turn this gate red, so a floor left where
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-const HELPER_USER_FLOOR = 134;
+const HELPER_USER_FLOOR = 135;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

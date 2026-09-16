@@ -79,7 +79,23 @@ export type FsOpErrno =
 
 /** One entry, in both spellings the UI needs. */
 export interface FsOpEntry {
-  /** Absolute path on disk (symlink-safe: parents resolved, leaf not). */
+  /**
+   * Absolute path, SPELLED UNDER THE ROOT THE CALLER NAMED (Phase 274).
+   *
+   * It used to be spelled under main's resolved root, and that is what broke:
+   * `fs:readDir` echoes the caller's spelling while every mutation verb
+   * answered in `realpath`'s, so on a project whose stored spelling is not the
+   * disk's the tree asked about a file at one spelling and was handed it at
+   * another. Every `===`, every `startsWith` and every `entriesByDir` key in
+   * the renderer then disagreed with itself, silently — 6 of 23 tree steps
+   * passed, with no toast and no console error.
+   *
+   * Main still RESOLVES internally and still proves containment against the
+   * resolved root; only the reply moved. The leaf is still not resolved, the
+   * parents of the tail are still the disk's own answer, and the string is
+   * re-proved by `resolveOpenProjectRoot` + `resolveInsideRoot` the next time
+   * it is used.
+   */
   path: string;
   /** Path relative to the project root — '/'-separated, no leading slash. */
   relPath: string;

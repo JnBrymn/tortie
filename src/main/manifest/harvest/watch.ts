@@ -34,7 +34,7 @@
  * Ownership: src/main/manifest/**. Pure Node (no Electron import).
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -61,6 +61,12 @@ import {
   type SessionIdWatch
 } from './stores';
 import { getLog } from '../../log';
+// PHASE 274. `fs.realpathSync` is Node's own JavaScript walk: it rewrites
+// only the components that are symlinks and hands back the case it was
+// given, so it did not give this compare the canonical spelling the comment
+// on `resolveClaimCwd` below says it needs. `canonicalPathSync` is
+// `realpathSync.native`, which goes through libuv to realpath(3).
+import { canonicalPathSync } from '../../fs/folder-identity';
 
 /**
  * Scope "manifest" (Phase 35). Every error and warning from this
@@ -133,10 +139,19 @@ interface ConversationClaim {
  * It is exported because `sessions/id-harvest.ts` resolves the same way
  * before it builds a `HarvestContext`, and one implementation is what keeps
  * the two from drifting.
+ *
+ * PHASE 274 — IT WAS ONLY HALF DOING THIS. `fs.realpathSync` is Node's own
+ * JavaScript walk: it `lstat`s each component and rewrites only the ones that
+ * are symlinks, so it answered the `/tmp` against `/private/tmp` pair above and
+ * left the case of every other component exactly as the caller typed it. A pane
+ * launched in `~/source/proj` on a case-insensitive volume — the APFS default —
+ * therefore still did not compare equal to one launched in `~/Source/proj`, and
+ * the folder steal this rule exists to refuse came back wearing a different
+ * spelling. `canonicalPathSync` is `realpathSync.native`, which asks the volume.
  */
 export function resolveClaimCwd(cwd: string): string {
   try {
-    return realpathSync(cwd);
+    return canonicalPathSync(cwd);
   } catch {
     return cwd;
   }
