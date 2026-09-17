@@ -369,6 +369,19 @@ export const OVERLAY_LIMITS = {
   maxEnvKeys: 16,
   maxEnvKeyLength: 64,
   maxEnvValueLength: 1024,
+  // PHASE 278 CHANGED WHAT THIS NUMBER MEANS AND NOT THE NUMBER. It is still
+  // sixteen, still declared exactly once, still not raised, not removed and not
+  // split into two budgets — and it still bounds every list that reaches a
+  // login-shell probe, a far machine's command line, a drawn card and a log
+  // line. What moved is WHICH sixteen entries spend it. Until Phase 278 the
+  // shape layer spent the budget on the first sixteen entries of the FILE, so
+  // sixteen junk names appended by anything with write access to the home
+  // directory could push out the seventeenth — the one a person had confirmed
+  // in the Settings window. Since Phase 278 the read path counts names that
+  // SURVIVE the seal (see `confirmedEnvNames` in @shared/settings), so the Add
+  // sheet's own sentence two hundred lines below — "Sixteen names is the most
+  // Tortie will read for one agent" — is now true of what Tortie READS rather
+  // than of what it parses. No check in this file moved.
   maxEnvPassthroughNames: 16,
   maxTemplate: 16,
   maxProbeArgs: 8,

@@ -181,13 +181,25 @@ function harness(over: Partial<EditorTab> = {}): Harness {
 const ID = `${ROOT}/notes.md`;
 
 /**
- * Let the in-flight save settle.
+ * Let an unresolved save settle.
  *
- * `run` marks a tab in flight and clears it in a `finally` after the await, so
- * a test that fires a timer and then asks for a SECOND save in the same
- * synchronous turn is asking while the first is still marked in flight. That
- * guard is deliberate — it is what stops two writes racing on one file — so
- * the test yields rather than the controller dropping it.
+ * `deps.save` answers a promise, so a test that fires a timer and then asserts
+ * on what the save did is asserting before the answer has come back. Three
+ * microtask turns is what this harness's `save` needs to patch the tab and
+ * resolve.
+ *
+ * PHASE 277 REWROTE THIS PARAGRAPH, because it described a mark that no longer
+ * exists. It said `run` marks a tab in flight and clears it in a `finally`, and
+ * that a second save asked for in the same synchronous turn was refused by that
+ * guard, so the test yields rather than the controller dropping it. That set is
+ * gone. It was a SECOND TRUTH about one fact, kept in the module a person's ⌘S
+ * cannot see, and it cost work twice: a ⌘S and a timer could still both be in
+ * flight on one file, and a second timer falling due during a held save was
+ * DROPPED rather than deferred — one save, no pending timer, and the newer
+ * typing never written. One save at a time per tab is `withSaveSlot` in
+ * ../tab-io now, which is the one place that knows about every save of every
+ * kind, so the controller asks freely and the yield here is only about the
+ * promise.
  */
 const settle = async (): Promise<void> => {
   await Promise.resolve();

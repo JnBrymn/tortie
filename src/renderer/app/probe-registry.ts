@@ -62,6 +62,9 @@ import { registerP207HueDrive } from '../theme/p207-hue-drive';
 // It assigns one object to `window` and reads nothing until the probe calls a
 // method on it.
 import { registerP268AutoSaveDrive } from '../editor/p268-auto-save-drive';
+// PHASE 277. The save-completion drive, read by build/p277/probe-p277-save.mjs.
+// Same shape again: one object on `window`, nothing read until it is called.
+import { registerP277SaveDrive } from '../editor/p277-save-drive';
 import { driveZoom } from '../zoom/shot-probe';
 import type { ZoomProbeSpec } from '../zoom/shot-probe';
 import { driveQuickOpen } from '../quickopen/shot-probe';
@@ -399,6 +402,11 @@ function armModuleLoadDrives(): void {
   // build/p268/probe-p268-autosave.mjs. It exposes the auto-save policy, each
   // tab's dirty flag and stop record, and the toasts on screen.
   registerP268AutoSaveDrive();
+
+  // PHASE 277 hook, same shape again, read by build/p277/probe-p277-save.mjs.
+  // It exposes each tab's dirty flag, baseline and live buffer, and the one
+  // gesture a mouse cannot make: start a save and type in the same turn.
+  registerP277SaveDrive();
 }
 
 /**

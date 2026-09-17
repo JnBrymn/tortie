@@ -28792,6 +28792,333 @@ research phase does not edit it. And it does not adopt the operator's own diagno
 the tap must change, and the phase's job is to find out rather than to agree.
 
 
+## Phase 281 — the Claude meter reads the item Claude Code reads (operator reported, 2026-09-16; cause found by Phase 280) QUEUED, UNRUN UNTIL HE APPROVES STEP 1
+
+**Subject.** `fix(credentials): address Claude's keychain item by service and account`
+
+**First body line.** `Phase 281: the Claude meter reads the item Claude Code reads`
+
+**Semver.** Patch. It changes which keychain item an existing read addresses and which sentence a failed
+read draws. It adds no surface and no setting.
+
+**Tier 3, on three counts.** It reads and writes the person's credential store ("does it hold his
+credentials?"). The operator reported the symptom, so the parent commit measurement is mandatory. And the
+change decides WHOSE numbers a login's card draws, which is the one way this domain can show one
+account's usage under another account's name.
+
+**Charter.** `docs/research/126-claude-usage-reliability.md` §7.2 (landed `19a3007c`), which binds this
+entry, and the Phase 280 entry's screenshot: the Claude row reading "Login: <his address>" and directly
+beneath it "Sign in with Claude Code to see usage." The research is the source of truth for every
+measurement below; this entry does not re-derive them.
+
+**WHY IT IS UNRUN.** The research names one obvious fix and needs no decision about accounts. It does
+need two things only he can approve, and the phase does not start until he approves the first:
+
+1. **Before building**, one attributes-only lookup on his machine:
+   `security find-generic-password -a "$USER" -s "Claude Code-credentials"`. It prints attributes and
+   never a payload (no `-w`, no `-g`). Read the exit status and `mdat`. Expect exit 0 and a date after
+   2026-09-10. **Exit 44 stops the phase**, because it means research 126's cause is wrong.
+2. **Before landing**, one app run at the parent and one at HEAD on his real profile (proof step 6). That
+   run sends his token to the usage endpoint, which is the product's ordinary poll, and he runs one turn
+   in a default-login claude session just before each.
+
+### What was measured, so no round re-derives it
+
+- **The cause.** Tortie asks for `Claude Code-credentials` by service name alone
+  (`src/main/usage/credentials.ts:120`). On his machine that name matches two items and `security`
+  returns a stray whose account attribute is `unknown`, created 2026-09-10T02:44:31Z and never written
+  since, which gives no usable credential. Claude Code reads and writes by service AND account
+  (`-a` from its account rule), in every installed version from 2.1.263 to 2.1.274 (research 126 §2.4,
+  §8.12).
+- **The log.** 71 Claude `signed-out` and 4 `expired` from 2026-08-15 to 2026-09-16, all 69 since
+  2026-09-10T21:01Z `signed-out`, zero Codex failures (§2.5).
+- **No login is chosen.** `logins.json` holds `"chosen": {}`, so the empty directory `162d9e5e3eeec40e`
+  is not the branch his meter runs (§2.1).
+- **The write side is wrong too.** Driven over a fake runner whose service-only lookup matches `unknown`
+  first, `storeTarget` and `defaultStoreTarget` (`src/main/credentials/stores.ts:285`, `:323`) both
+  commit `add -U -a "unknown"`, so a login switch today updates the stray, not Claude Code's item (§8.10).
+- **Branch B reads across accounts.** With `CLAUDE_CONFIG_DIR` set in Tortie's process,
+  `readClaudeCredential` asks the scoped item and then the plain one (`credentials.ts:237-238`), and
+  `claudeServicesFor` does the same (`src/main/usage/login-accounts.ts:140-142`). The Phase 280 verifier
+  drove it: account X's token, plan word and weekly number drawn under "Login: <Y's address>", with a Y
+  tap applied beside them. Claude Code never makes that read: its service name function (`mI` in
+  2.1.274) gives the scoped name alone whenever `CLAUDE_CONFIG_DIR` is non-empty. The caveat at
+  `credentials.ts:73-79` calling this unmeasured is refuted (§5).
+
+### The rule
+
+Tortie reads the item Claude Code reads, and only that item. Two small functions copy the vendor, and
+every call site uses them:
+
+- **The account** (`Cv` in 2.1.274): `env.USER || userInfo().username`, and `claude-code-user` when that
+  throws or fails `^[a-zA-Z0-9._-]+$`. Every `security` call aimed at a Claude Code vendor service
+  (`Claude Code-credentials` and every `Claude Code-credentials-<hash>`) carries `-a <account>`.
+- **The service name** (`mI`). `CLAUDE_SECURESTORAGE_CONFIG_DIR` defined and empty means the plain name,
+  defined and not empty means the scoped name of its NFC form. Otherwise a non-empty `CLAUDE_CONFIG_DIR`
+  means the scoped name of its NFC form and NOTHING ELSE. Otherwise the plain name. A login directory's
+  name hashes the directory's NFC form, so `claudeScopedService` normalizes to NFC before hashing.
+
+### The mechanism, file by file
+
+1. `src/main/usage/credentials.ts`. Add the account and service name functions beside
+   `claudeScopedService` (`:80-83`), which both domains already import. Pass `-a` in `keychainReader`
+   (`:120`). Decode through `decodeKeychainPayload` (`src/main/credentials/security.ts:209-219`) rather
+   than raw stdout; that helper exists, so do not write another.
+2. **No plain fallback when `CLAUDE_CONFIG_DIR` is set.** `readClaudeCredential` (`credentials.ts:237-238`)
+   and `claudeServicesFor` (`login-accounts.ts:140-142`) answer the one name the vendor rule gives.
+   Rewrite the refuted caveat at `credentials.ts:73-79` and the branch description at `:211-213`.
+3. **A miss is not a failure.** The keychain seam answers found, absent (`security` exit 44), or
+   unreadable (any other exit, a spawn error, the deadline). `readClaudeCredential` returns `missing` only
+   when every store it tried was absent; an unreadable store surfaces as `unavailable`. `fetchProvider`
+   already maps a thrown read to `unavailable` (`src/main/usage/service.ts:345-349`), so the stale policy
+   keeps the last numbers under the glyph. Exit 36 (the keychain refusing interaction, for example locked)
+   is deliberately NOT absent here, although Claude Code treats it so: a locked keychain is not a
+   sign-out.
+4. `src/main/usage/login-accounts.ts:423`. The presence check passes `-a`.
+5. `src/main/credentials/security.ts`. `keychainRead`, `keychainAccount`, `keychainModified`,
+   `keychainHasItem` and `keychainDelete` (`:222-335`) take the account for vendor services.
+   `keychainWrite` already does.
+6. `src/main/credentials/stores.ts`. `readStore` (`:147`, `:184`), `keychainTarget` (`:243-254`),
+   `storeTarget` (`:285`), `defaultStoreTarget` (`:323`) and the forget path (`:369-371`) address by the
+   vendor account. `ownAccountName` (`:329-335`) stops copying whatever item the service name matched and
+   answers the vendor rule. Rewrite the comments at `:280-284` and `:317-321`.
+7. `src/main/credentials/watch.ts:351-363`. The backstop fingerprints the vendor-account item.
+
+Tortie's own vault items (`src/main/credentials/vault.ts:160-169`) are not vendor items and stay as they
+are.
+
+### The fallback objection, answered
+
+**The objection:** a lookup that stops falling back will show "Sign in" to somebody whose plain item
+works, so keep a fallback to the service-only read or to the plain name.
+
+**The answer is no, both ways.** A fallback to the service-only read is exactly the read that lands on the
+stray today, so it brings the defect straight back on any machine holding two same-named items, and which
+of the two `security` returns is undocumented (§8.4). A fallback to the plain name under
+`CLAUDE_CONFIG_DIR` is the read the verifier drove to show one account's numbers under another account's
+name. In both cases Claude Code itself would find nothing, so a Claude Code session in that same
+configuration is signed out too, and the sign-in line is the honest answer. The phase copies the vendor
+exactly so that "Tortie says signed out" and "Claude Code is signed out" are the same fact.
+
+### The refusals it carries
+
+From Phase 280, unchanged: **no token byte** in any log, test output, probe output or commit body, and
+no token prefix or length; **`-w` and `-g` are never passed** to `security` in a presence check, an
+attribute call, a probe or a verifier's command; **nothing writes to his keychain, his logins directory,
+his `~/.claude` or any credential file** during the build or the verification (the one write path under
+test, a login switch, is driven over a scratch keychain only); no account attribute is logged; no agent
+is launched and no turn is spent by any agent.
+
+New in this phase:
+
+- No service-only lookup of a vendor item survives, and there is no fallback to one when the
+  account-qualified lookup misses.
+- Tortie never reads the payload of, rewrites or deletes a vendor-named item whose account is not the
+  vendor rule's. The stray item on his machine is left exactly as it is.
+- A chosen login still never falls back to the plain item (`credentials.ts:207-222`).
+- No reader, presence check, observe or write target asks the plain name after a scoped one when
+  `CLAUDE_CONFIG_DIR` is set.
+- The first observe after the fix mints no promotion when the account in `.claude.json` has not changed,
+  even though the item it now reads holds bytes seven days newer than the vault copy.
+- The scratch keychain is never added to the person's keychain search list and is deleted in a `finally`.
+
+### The proof, run rather than read
+
+1. **His approval, then the attributes-only lookup** above. Exit 44 stops the phase.
+2. **A hostile fixture, independent method one.** A scratch keychain under `/private/tmp` made with
+   `security create-keychain`, holding two items under `Claude Code-credentials` with synthetic payloads,
+   one under the vendor account and one under `unknown`, and a scoped pair built the same way. Drive the
+   shipping readers and the credentials domain's runner over it through their existing seams. At the
+   parent, record which item the service-only read lands on and arrange the fixture so it lands on the
+   stray. At HEAD every reader and writer lands on the vendor-account item. The branch B row:
+   `CLAUDE_CONFIG_DIR=D`, no scoped item for D, a plain item for another account — the parent answers
+   `ok`, HEAD answers `missing`. A directory name not in NFC form hashes to the vendor's scoped name.
+3. **The attack, independent method two.** A verifier who did not build it tries to construct a layout
+   where HEAD draws one account's numbers under another account's name: two same-named items in each
+   order, `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` set, empty and unset, a chosen login
+   whose scoped item is absent, a `USER` that fails the vendor's pattern. Any layout that does is
+   blocking.
+4. **Gate rules** in `conformance:credentials` and `conformance:logins`: every `find-`, `add-` and
+   `delete-generic-password` argv aimed at a vendor service carries `-a`, read from source over every
+   call site with the call-site count pinned; and no service list names the plain name after a scoped
+   one. Ablate `-a` at each site: the gate goes red and the fixture reads the stray. Put back the branch B
+   fallback: the gate goes red and the branch B row answers `ok`.
+5. **The miss and failure split.** The shipping `keychainReader` over children exiting 44, 36 and 1, one
+   that cannot spawn and one that never answers. Only 44 draws "Sign in with Claude Code to see usage.";
+   the others keep a tap's numbers under the stale glyph.
+6. **The observe and the switch over the fixture.** A switch writes the vendor-account item and never the
+   stray. The first observe after the fix mints no promotion.
+7. **The parent commit, on real data, with his approval.** One app run at the parent and one at HEAD,
+   never at once, Claude switch on, two polls apart, each after he runs one turn in a default-login claude
+   session. The parent logs `usage.read.failed claude signed-out`; HEAD logs no `signed-out`, and an
+   `expired` after that turn fails the step. Successes are not logged (`service.ts:651`), so the run also
+   reads the row's state and plan word from the app at each poll. The main session runs this, not an
+   agent, through `build/electron-run.mjs` in a `finally`.
+8. **The gates.** typecheck, build, test, smoke:t1, `conformance:credentials`, `conformance:logins`.
+
+### What is NOT in this phase
+
+- **No change to the status-line tap**, its script, its stamp, its throttle, or the precedence between
+  the tap and the poll. Research 126 §4.2 names its ordering defects (a post carries no observation time;
+  a poll sent before a tap overwrites it), and the research recommends them as the phase after this one.
+  **This phase alone will not make the Claude row as steady as Codex**, and its report says so.
+- No cross-account fallback, and no account check before drawing numbers.
+- No deletion, repair or migration of the stray item, and no surface that tells a person about it. Its
+  deletion is his call (research 126 §7.3 says how to find its writer in Keychain Access).
+- `CLAUDE_SECURESTORAGE_CONFIG_DIR` changes only the default login's service name. The storage lock it
+  also moves stays the limit `src/main/credentials/locks.ts:59-62` states, and a chosen login under that
+  variable is not handled.
+- The two unexplained `signed-out` answers on 2026-09-06 and the four `expired` answers, all from before
+  the stray item existed, are not explained or fixed here (§7.3, §8.8).
+- No change to Tortie's vault item addressing, and no change to Codex. The Codex observe refusal logged
+  2,329 times between 2026-09-04 and 2026-09-16 is its own entry.
+- No release.
+
+
+## Phase 282 — the press that moves on (PR 28, JnBrymn, 2026-09-16; integrated by the operator's ask, 2026-09-17)
+
+**Subject.** `fix(editor): a press moves on to the change that came next, and typing stays whole`
+
+**First body line.** `Phase 282: the press that moves on`
+
+**Semver.** Minor. ⌥↩ and ⌥⌫ in the Redline view now move to the next change, and ⌥↓ and ⌥↑ loop at the
+ends, which is new behaviour a person will notice. The fixes change no other surface.
+
+**Tier 3.** The rewind half writes the person's file, and the adoption this PR adds moves `savedContents`
+and replaces the working model, which are the ⌘S precondition and the person's buffer. "Can it lose or
+corrupt the person's work?" is yes, and the review of 2026-09-17 below measured that it can.
+
+**Charter.** Pull request 28 (https://github.com/gregce/tortie/pull/28), six commits `f6108e9d..aa0e58f2` by
+John Berryman (JnBrymn) on top of `c1fe5fd3`, and the operator's ask of 2026-09-17: "queue a build phase
+with that branch, make all of the fixes with our standard build workflow, then commit to that PR as you go
+and ultimately close and integrate it after it's been verified". The requests quoted in the PR's commits
+and comments are the PR author's, not the operator's, and this phase credits them that way.
+`build/p277/SPEC.md` binds the save half: Phase 277 built its save surface on the ruling that the redline
+write patches no tab field, and this PR is the first thing that does.
+
+### What was measured before this entry was written, so no round re-derives it
+
+A four-lens review ran over `origin/main` with the PR merged (`3616a934`, local only), and every finding
+below was reproduced by its reviewer and then again by an independent skeptic using a different method.
+
+- **The battery is green and says nothing about the defects.** typecheck, build, 14,598 tests,
+  conformance:save, conformance:redline (rule 40 is the PR's), conformance:redline-write, ablation:p268 18
+  of 18, smoke:t1, probe:p277 4 of 4, and the PR's own probe:redlinemoveon 19 of 19 (accept 11 ms, rewind
+  26 ms). None of them types into the Redline view while the PR's live-text change is in.
+- **BLOCKING: typing in the Redline view is scrambled.** `src/renderer/editor/live-text.ts` now returns
+  `getWorkingModel(tabId)?.getValue()` at render. `useRedlineTyping` writes the model after an await, so the
+  next keystroke's render reads a model one keystroke behind, the typing effect takes it for an outside
+  write, and the characters land out of order; ⌘S or auto save writes that to disk. **Measured in the app**:
+  `npm run probe:p237` on the merged tree fails 5 checks (the typed word is not an insertion, the caret is
+  wrong, Enter reads `"rely\n lathro"`), and the same tree with only `live-text.ts` put back to main passes
+  every check, while probe:redlinemoveon still reads 19 of 19 with the rewind at 25 ms. The line buys no
+  speed: `adoptWritten` and the typing hook's own model listener already redraw at once.
+- **MAJOR: ⌥⌫ can land on the change BEFORE the rewound one.** The move carries the pressed change's INDEX
+  (`advanceAfterPress` in `src/renderer/editor/RedlineDocument.tsx`, spent through `indexAfterRemoval` in
+  `redline-current.ts`). `applyRewind` re-reads the file, so an agent's write already on disk above the
+  pressed change shifts every later index down one, and the move lands on a change the person had walked
+  past; the next ⌥⌫ in the rhythm the PR exists for rewrites it. Reproduced with the shipping modules and
+  again by mounting the real `RedlineDocument` in Chromium.
+- **MINOR: a redraw that merges or splits neighbours** makes the same index wrong without any outside write
+  (accepting change 3 of 4 in a list lands on a merged bullet above it; accepting the last can fail to
+  wrap). A per-change accept has no undo.
+- **MINOR: a second chord inside the rewind's write** acts on the change being rewound: ⌥⌫ then ⌥↩ accepts
+  it, the rewind still lands, and the change is drawn backwards with nothing said.
+- **MINOR: rewinding the only remaining change drops the keyboard** to `document.body`, so ⌥⇧⌫ (the undo the
+  face names) does nothing until a click. The accept path refocuses the host; the rewind path does not.
+- **MINOR: a watcher read that opened the file before the rewind's rename and answers after the adoption**
+  rolls `savedContents` and the buffer back to the pre-rewind bytes (37 of 500 interleavings over real main
+  handlers; 0 of 500 without the adoption). `refreshRepo`'s Phase 277 guard checks cleanliness and model
+  identity, and the adoption passes both.
+- **MINOR: a keystroke still in transit is invisible to `adoptWritten`.** `useRedlineTyping`
+  (`src/renderer/editor/redline-edits.ts`, the dispatch near :229-248) marks the tab dirty only after
+  `await ensureWorkingModel`, which is a real chunk load the first time in a session. A rewind inside that
+  await is adopted, then the buffer is set to the pre-rewind text plus the keystroke, and ⌘S (or auto save)
+  writes the agent's text back over the rewind with no question. Main has a narrower version (only when
+  the chunk load outlasts the watcher's round trip); the adoption widens it to the rewind's own round trip.
+- **MINOR: `HELPER_USER_FLOOR` is 139 with 140 helper users** after the merge, because Phase 277 and this PR
+  each raised 138 to 139 (`build/assert-electron-teardown.mjs:212`).
+- **MINOR: the PR credits its author's requests to "the operator"** in the running log, commit bodies, and
+  comments across `src/` and `build/`, and records the author's machine's `-L gmux` session count as
+  his.
+- **NIT: no gate reads `adoptWritten`'s refusals.** Removing either clause leaves conformance:save and
+  conformance:redline green; only the PR's own vitest (which feeds `dirty` in as a literal) goes red.
+- **NIT: CHANGELOG.md and docs/BACKLOG.md conflict with main, and no commit carries a phase label.**
+
+What holds, measured: the loop in `stepIndex` with one, two and many changes; 610 presses over 60 real
+consecutive versions of this repository's own markdown landed correctly (609 moved, 1 waited harmlessly); a
+refused press, an undo and accept-all arm nothing; a move the person makes during a rewind is kept; and no
+line of Phase 277's save pipeline changed in the merge.
+
+### The mechanism
+
+Work happens on the PR's own branch, `JnBrymn/tortie:feat/redline-accept-advance` (maintainer edits
+allowed), in a scratch worktree, starting with `origin/main` merged into it.
+
+1. **Put `live-text.ts` back** to main's `return modelText ?? savedContents;`, and drop the comment and the
+   commit-body claim that justified it.
+2. **Carry the follower's IDENTITY, not its index.** Before the press, record the change drawn after the
+   pressed one (or the first, when the pressed one was last and not the only one). After the redraw, find
+   that identity: a rewind leaves the baseline where it was, so its `off`, `del` and `ins` are stable; an
+   accept shifts `off` by `ins.length - del.length` when the follower came after the pressed change. Fall
+   back to `indexAfterRemoval` only when the follower is no longer drawn. Correct `indexAfterRemoval`'s
+   comment, which claims both verbs leave every other change in order.
+3. **One press at a time.** From a rewind's press until its result is handled, a per-change accept or rewind
+   on that tab does not act on the change being rewound. The spec decides between waiting for the move and
+   acting on the change it lands on, and dropping the press with a sentence; a silent backwards change is
+   refused either way.
+4. **The rewind keeps the keyboard.** When a rewind or undo writes and the keyboard is inside a change
+   wrapper, focus the host before the adoption, exactly as the accept does.
+5. **`refreshRepo` refuses a read that raced a newer baseline**: its clean-reload arm in
+   `src/renderer/editor/tab-io.ts` also requires `savedContents` unchanged since before the read, beside
+   Phase 277's model-identity check.
+6. **Typing is visible before its await.** `useRedlineTyping` marks the tab dirty synchronously when an edit
+   is dispatched, builds the model from `savedContents` read after the await, and never applies a `wanted`
+   text computed from a picture the view has since replaced.
+7. **Gates.** conformance:save gains rules that read `adoptWritten` by matching braces (the dirty and `was`
+   refusals before `deps.patch` and `resetWorkingModel`), `refreshRepo`'s new clause, and the synchronous
+   dirty mark's order in the typing path, each with an arm in `build/p268/ablation.mjs`. conformance:redline
+   rule 40 describes the identity move and the one-press rule. `HELPER_USER_FLOOR` becomes 140 with both
+   probes named. CLAUDE.md's conformance:save row names `adoptWritten`.
+8. **Credit.** Every "the operator's ask" or "his" that is the PR author's becomes "PR 28's author" or
+   "JnBrymn"; the session count is the author's machine.
+9. **CHANGELOG.** One `## Unreleased`: the PR's Changed bullet above main's Fixed list, and its rewind item
+   appended to that list.
+
+### The proof, run rather than read
+
+- **Parent measurement.** At the PR's head (with main merged), the hostile tests for findings 2 to 7 go red;
+  at HEAD they pass. `probe:p237` fails at the PR's head and passes at HEAD.
+- **App runs**, by the main session: `probe:redlinemoveon` extended with an outside write above the current
+  change landing just before ⌥⌫ (the move lands on the change that followed), a rewind of the last change
+  followed by ⌥⇧⌫ (the change comes back), ⌥⌫ ⌥↩ pressed back to back (no change is drawn backwards), and
+  a typing burst in the Redline view; plus `probe:p237`, `probe:p277` and `probe:p268`.
+- **Independent method one, the attack.** A verifier who did not build it tries to make a press land on the
+  wrong change or lose a keystroke: an agent write mid-press, chords faster than the write, typing before
+  Monaco's chunk has loaded, a watcher read crossing the rename.
+- **Independent method two, re-derive.** A verifier writes its own layouts (merges, splits, slid
+  insertions, tables, lists, the only change, the last change) and its own oracle for "the change that came
+  next", and compares every landing.
+- **Gates.** typecheck, build, test, smoke:t1, conformance:save, conformance:redline,
+  conformance:redline-write, ablation:p268 with the new arms each red on its own rule, gate:electron at 140.
+
+### Landing
+
+The fixes are committed to the PR branch as they pass, so the PR shows the work. Once verified, the phase
+lands on main as linear commits, the house's shape: the PR author's change as one commit authored by him,
+with a `Phase 282:` first body line and his requests credited to him, followed by this phase's fixes and the
+running-log line. The PR is then closed with a note in the operator's voice linking the landed commits.
+
+### What is NOT in this phase
+
+- No new chord, no change to what ⌥↩ or ⌥⌫ act on, and no move for an undo (⌥⇧⌫ puts a change back and
+  leaves the person where they are) or for accept-all.
+- No loop across files or tabs: the loop stays inside one document's picture.
+- No change to the guarded write door, the rewind journal, the baseline's durability or Phase 277's save
+  rules beyond the two guards named above.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29512,8 +29839,18 @@ cycle rather than only the evening it was written.
 
 - 2026-09-16, **PHASE 280 QUEUED, why Claude usage is flaky and Codex usage is not (operator reported), Tier 3, RESEARCH ONLY.** He sent a screenshot of the usage panel showing the Claude row reading **"Login: greg@itavero.software"** and directly beneath it **"Sign in with Claude Code to see usage."** — the panel names him and claims he is signed out in the same breath — while the Codex row beside it reads "Pro plan, 88% wk, Resets in 2d 15h" and is stable. His words: typing `/usage` inside a Tortie claude session makes it "update and reset", and he thinks "something about the status line approach we use might need to change". **THE SHAPE, measured before the entry was written.** There are TWO paths into the Claude number and only ONE into Codex's: the poll at `service.ts:350-374` is identical for both providers and needs a credential first, while the statusline tap at `statusline.ts` is Claude's alone and reads a `rate_limits` block out of the settings file the activity hooks already write — **so it only produces a number while a session is RUNNING and producing turns.** That is consistent with his observation: the tap works, the poll does not, and `/usage` makes turns which make the tap fire. **THE SENTENCE IS `signed-out`** — `usage-copy.ts:104` maps that exact string to that state and nothing else, so `readClaudeCredential` returned `missing`, while the panel drew his login NAME from a different reader. **AND THE READER HAS A BRANCH WITH NO FALLBACK**: `credentials.ts:229-247` tries `[claudeScopedService(loginDir)]` ALONE when a login is chosen, while the `CLAUDE_CONFIG_DIR` branch tries the scoped name AND the plain one — and that file's own comment at `:76-79` says why the fallback exists, being that "a reader that only tried the scoped name would find nothing on this machine and wrongly conclude the person is signed out", which is exactly what he is looking at. **MEASURED ON HIS MACHINE, attributes only, no `-g`, no `-w`, no value read**: the plain `Claude Code-credentials` keychain item EXISTS, and of his three claude login directories `240800e63706721c` and `ec0e1e77dd0c3bc4` each have a scoped keychain item and a `backups/` directory while **`162d9e5e3eeec40e` is an EMPTY DIRECTORY with no scoped item and no credentials file** — so if that is the chosen one the reader finds nothing, does not fall back to the plain item that exists, and returns missing. **That is a hypothesis with a measurement behind it and the entry is explicit that it is not a conclusion**: the phase confirms or refutes it first. The entry also refuses to adopt his own diagnosis — he may be right that the tap must change, and it may instead be that the tap is fine and the credential read is the whole fault, in which case changing the tap would be work that fixes nothing, so the phase says WHICH with evidence and says so plainly if he is wrong. It must also argue BOTH WAYS on the fallback, because a chosen login falling back to the plain item can show one person's usage under another person's name, which is arguably worse than a blank. **NO TOKEN BYTE anywhere, `-g` and `-w` never passed, nothing written to his keychain, his logins directory or any credential file**, and the repair is a later phase with its own tier.
 
-- 2026-09-16, **THE ACCEPT-ADVANCE ROUND LANDED, ⌥↩ in the Redline view forwards to the next change, `f6108e9d`, version 0.107.0 unmoved, no tag, not pushed (branch `feat/redline-accept-advance`).** The operator asked for this in his own words: "I want it to automatically forward to the next edit so I can do just keep doing option return if I want to keep approving... right now after I do option return I have to push option down to get the next edit, that's extra keystrokes." **THE MECHANISM IS AN INDEX READ BEFORE THE PRESS AND SPENT AFTER THE REDRAW**: an accept removes exactly the change it names and leaves the rest in order, so the change that followed sits at the index the accepted one stood at, the view arms that index only on a landed PER-CHANGE accept (a refusal must not move the person and accept-all has no next change), and a layout effect on the recompose makes the element at that index current and focuses it — the same two acts ⌥↓ performs, chip included. The end of the document is the end: `indexAfterAccept` refuses a wrap, so the last accept leaves the keyboard on the scroller and the press past it is a no-op. **MEASURED IN THE RUNNING APP, one Electron on a scratch profile, a scratch HOME and its own socket over a repository it builds itself, `npm run probe:redlineaccept` reads 15 of 15**: 8 changes, one ⌥↓ marks the first, one ⌥↩ takes it to 7 and leaves "bravo" current with the keyboard ON it and the chip drawn, a SECOND ⌥↩ with no ⌥↓ takes it to 6 and lands on "charlie", ⌥↓ then steps to "delta", accepting forward from the first remaining change empties the document, the press past the last change draws nothing, and not one byte of the file moves. **THE PARENT c1fe5fd3, same probe, `ACCEPT_ADVANCE_PARENT=1`**: the first accept still drops the picture to 7 and then NOTHING is current, the keyboard is back on the scroller, the chip is gone, and the second ⌥↩ with no ⌥↓ accepts NOTHING — 7 changes in, 7 out — while the ⌥↓ that follows lands on index 0, the change that followed, which is exactly the keystroke he had to add by hand. His `-L gmux` held 21 sessions before and after every run, listed only, never attached. **`conformance:redline` GAINS RULE 40** because the suite cannot see this — the tree carries no jsdom, so no test focuses an element or reads the state a recompose leaves behind — a scan of the shipping view that refuses an arming outside the accepted guard, an arming without the per-change clause, an armed index nothing reads or one read outside a layout effect, and an effect that does not ask the redrawn picture, does not bound the index, never makes the change current, never focuses it, or does not clear the index it spent, over nine fixtures of which the eight plants must all fail; `p239-anchored-controls.test.tsx` gains the arithmetic itself, including the end of the list and the ablation that `at + 1` would pass over the change that follows. **WHAT IS NOT TRUE AT THAT COMMIT, AND TWO CLAUSES OF IT WERE SUPERSEDED THE SAME DAY by the entry below.** The REWIND (⌥⌫) did not move on, because a rewind writes the file and its picture arrives through the watcher — the entry below arms it and closes the gap with two guards rather than accepting the gap — and there was no wrap at the end of the document, which the entry below turns into a loop for both arrows. What still stands: an UNDO arms nothing, deliberately, because it puts a change back and the next place to be is where the person already is; and the chip's buttons are unchanged, which means they advance and loop too because they run the same commands the chords run. The keymap's own explanation of the chord moved with the behaviour and the Edit menu did not move at all. CHANGELOG Unreleased item in his style. Gates, all foreground on the committed bytes: typecheck 0 at 1308 production files with 0 boundary violations and 0 runtime cycles, build 0 with the contract inventory byte for byte and the Electron helper floor raised 138 to 139, `npm test` 14,455 passed and 46 skipped with two `resolve.test.ts` fork-deadline tests failing under the loaded parallel run and passing in isolation at BOTH this tree and the parent c1fe5fd3, `conformance:redline` every rule with rule 40 added.
+- 2026-09-17, **PHASE 278 LANDED, a confirmed variable name survives a filled cap (audit F3's cap half), `85b76948`, version 0.107.0 unmoved, no tag, pushed.** The auditor's counterexample failed 1 of 2 at `b4569686` and ships unedited, passing 2 of 2: sixteen names written into settings.json by hand ahead of a name the person confirmed used up the sixteen-name cap in FILE ORDER before the seal ran, so the confirmed name was dropped and nothing said which. **It failed closed and still does** — no unconfirmed name was ever admitted and no value resolved. The repair recomputes each list from the file's own entries in the file's own order once the seal is open, keeping only what the seal covers, and it answers Phase 275's recorded objection that "a sanitizer that reorders admits a list nobody wrote" by MEASURING that it does not reorder: names written ZULU, ALPHA, MIKE, BRAVO against a seal sorted the other way came back ZULU, ALPHA, MIKE, BRAVO on both lists. **THE VERIFIERS FOUND A BUG THAT WOULD HAVE UNDONE IT**: closing the Settings window wrote `cached.settings` — the list already cut at sixteen — back to settings.json with its seal, so a confirmed name survived the load and was lost on disk the next time Settings closed; the bounds save now re-reads the file and replaces only `settingsWindowBounds`. **A TEST THAT PINNED THE LIMIT AS CORRECT was rewritten rather than deleted**: `p275-env-shared-seal.test.ts` asserted the displacement as expected behaviour, went red for the right reason, and now asserts the name is delivered and all sixteen junk names still refused, passing here and failing at the parent. **The first verifiers were killed by the workflow harness for running a full suite under load**, so this phase ran with agents on short commands and the main session on the long gates; the attack verifier then drove 3,096 names through forged and copied seals, case, whitespace, NUL, zero-width and Cyrillic and Greek look-alikes and admitted nothing, and both verifiers found that no committed test went red if the repair itself was removed. The fix round added `p278-env-cap.test.ts`, 23 tests proved by 21 ablations each restored by sha256. The half-built `conformance:envcap` probe the stalled gate builder left had no judge and was deleted. Gates on the committed bytes: typecheck 0, build 0, npm test 0 at 915 files and 14,521 tests, conformance:agents 0, conformance:installs 0, smoke:t1 0, smoke:t3 0, probe:p275 PASS with the sentinel value in no file the app wrote; his tmux read 50 sessions throughout. **What is still not true**: restore still passes the manifest's names on unsealed, as it passes the recorded argv, and recipe authentication stays the separate design the audit names.
 
-- 2026-09-16, **THE MOVE-ON ROUND LANDED, ⌥⌫ moves on and both arrows loop, `b3524b83`, version 0.107.0 unmoved, no tag, not pushed (branch `feat/redline-accept-advance`).** The operator asked for the rest the same evening, in his words: "when I press option delete, it should still go to the next available edit point, not just option return", and then "If I keep going past the end... I want it to flip over and go to the first edit point at the top of the document... And in reverse... to the last edit point so that it forms a loop instead of just hitting the end." **THE ARROWS LOOP IN ONE LINE**: `stepIndex` answers `(at + delta + count) % count`, so ⌥↓ past the last change comes round to the first and ⌥↑ before the first comes round to the last; one change loops onto itself; an empty redline answers null and the arrows do nothing. **THE REWIND MOVES ON AND THE TWO VERBS NOW SHARE ONE RULE**, `indexAfterRemoval`, because both take exactly the change they name out of the picture and leave the rest in order: the follow-on sits at the pressed index, and at or past the end the picture comes round to its first remaining change, so a run that started in the middle does not strand the changes above it. **TWO GUARDS, and the rewind needs both**: the person must still be standing on the change the press acted on, and the picture must have let that change go — an accept removes it in the same tick while a rewind's arrives through the watcher, so the move waits rather than stepping onto the change it just rewound, and that wait is what closes the rewind's own recorded limit, since the same layout effect now focuses the change it moved to in the commit that replaced the wrapper. **MEASURED IN THE RUNNING APP, `npm run probe:redlinemoveon` (renamed from `probe:redlineaccept`) reads 19 of 19**: one ⌥↓ marks the first; ⌥↑ from there comes round to the last (index 7 of 8) and ⌥↓ back to the first; an accept drops the picture to 7, moves no byte, and leaves "bravo" current with the keyboard on it and the chip drawn; a SECOND ⌥↩ with no ⌥↓ takes it to 6 and lands on "charlie"; ⌥⌫ writes the file (digest moved) and leaves "delta" current with the keyboard on it; the arrows still loop after a press; accepting forward empties the document; no later accept moved a byte; and a ⌥↩ past the end, and the arrows on an empty redline, draw nothing. **THE PARENT f6108e9d, the build he reported against, same probe, `ACCEPT_ADVANCE_PARENT=1`**: ⌥↑ at the first change stays on 0 and nine ⌥↓ presses stop on 7 where HEAD reads 7 and 1; the first accept leaves NO change marked, the keyboard on the scroller and no chip; the second ⌥↩ with no ⌥↓ accepts NOTHING (7 in, 7 out); and the rewind writes the file and leaves nothing marked. **THE RUN CORRECTED ONE OF THE PROBE'S OWN ARMS AND IT IS THE ROUND'S LESSON**: with a pointer click before the rewind the old build's caret restore can land inside the next change and mark it, so the parent arm is driven by the chords the operator uses and grades "nothing marked" rather than "nothing focused" — an absence claim about the keyboard would have been false about the parent and would have flattered the feature. `conformance:redline`'s rule 18 ends arm becomes the loop with the shipped clamp as its ablation (12 arms, 12 of 12 red), rule 18a names `pressedElement` (the read both verbs share, which keeps the focused wrapper and the caret fallback), and rule 40 is rewritten for both verbs over thirteen fixtures of which twelve must fail; `p239-anchored-controls.test.tsx` carries the loop's five positions and the wrap at both ends of `indexAfterRemoval`; the keymap's explanations of the three chords moved with the behaviour and the Edit menu did not move. **WHAT IS NOT TRUE**: the loop lives inside the picture, so an empty redline makes every chord a no-op; a rewind's move ARRIVED with its redraw rather than with the press — measured at 1,139 ms against the accept's 35 ms, and SUPERSEDED the same day by the entry below, which adopts the bytes the write already put on disk — so the chip sat on the change it was rewinding until the write landed, and a move made inside that window dropped the armed move; an UNDO arms nothing; and the earlier entry's two clauses about the rewind and the wrap are corrected in place above. His `-L gmux` held 21 sessions before and after every run, listed only, never attached. Gates, all foreground on the committed bytes: typecheck 0 with 0 boundary violations and 0 runtime cycles, build 0 with the contract byte for byte and the Electron helper floor at 139, `conformance:redline` every rule, the probe's `--self-test` 11 of 11 graders, and `npm test` 14,455 passed with the same two `resolve.test.ts` fork-deadline tests failing under the loaded run and passing in isolation at both this tree and the parent c1fe5fd3, which is the runner and not this change.
+- 2026-09-17, **PHASE 277 LANDED, a write clears only the text it wrote (audit F1 and F2), `29f47742`, version 0.107.0 unmoved, no tag, pushed.** The auditor's counterexample failed 3 of 4 at `b4569686` and ships unedited, passing 4 of 4, with `conformance:save` rule 24 now failing the build if it is ever edited to pass. **F1**: a save's answer patched `dirty: false` for the text it had written while the buffer already held newer typing, then cancelled the timer that would have caught up, and close asks only when dirty is true, so the newest typing was lost without a question; the unconditional clean patch PREDATES Phase 268. One completion rule now ends all four doors and derives dirty from the buffer, keyed by the Monaco model instance so an answer cannot reach a reopened tab. **F2**: a pending timer never re-read the mode; the store's settings subscription now revokes it and `run` re-checks permission before saving. **THE VERIFIERS FOUND THREE REGRESSIONS THIS PHASE HAD INTRODUCED** in its first save queue — a queued auto save wrote after Off, under a "Save changes to …?" dialog, and into a reopened tab — and a hung write held the slot across lifetimes; now a timer is never queued, it is re-armed after the save it waited on, and only a person's request waits. **Three OLDER losses of work were fixed in the same phase, each with a test red before the fix**: `refreshRepo` wiped typing that landed during its disk read, a remote tab in a folder the person allowed editing never marked itself unsaved so closing it asked nothing (since Phase 101), and the close prompt's Save closed a tab still dirty when its save answered. **THE GATE WAS HARDENED AND AN EXISTING ABLATION WAS FOUND BROKEN**: rules 1 and 11 were retargeted at `saveOnce`, rule 1c became an exact comparison after the fix round walked three shapes past its substring test, rules 18 to 24 are new, and `ablation:p268` had been crashing on its first arm since the first build (and its symlink-hole arm planted the hole in the wrong function) — repaired and grown to 18 arms, 18 of 18 red on the rule that owns them. **The first integrator was killed three times by the workflow harness for running a full suite under machine load**, so agents now run short commands and the main session runs the long gates. `probe:p277` is new (HELPER_USER_FLOOR 138 → 139) and every arm PASS, including that closing a tab holding unsaved typing shows "Save changes to 'notes.md'?" read off the window, and that a pending ten-second timer writes nothing after a switch to Off or On focus change against a control that does write. Gates on the committed bytes, after rebasing onto Phase 278: typecheck 0, build 0, npm test 0 at 919 files and 14,588 tests, conformance:save 0; before the rebase also conformance:redline-write 0, conformance:redline 0, smoke:t1 0, smoke:t3 0, probe:p268 PASS; no scratch Electron left and his tmux read 50 sessions throughout. **Still open**: the close prompt's re-check reads dirty, which can trail the Redline view by one effect turn — found by reading, not driven.
 
-- 2026-09-16, **THE REWIND REDRAWS AT ONCE, `3814b67a`, version 0.107.0 unmoved, no tag, not pushed (branch `feat/redline-accept-advance`).** The operator's report: "when I option delete instead of option return, the delete takes a little bit of time, and I don't know why. Option return is instantaneous, which is what I would expect option delete to be." **THE CAUSE WAS A WATCHER ROUND TRIP AND IT IS MEASURED**: `probe:redlinemoveon` gained a stopwatch started at the keydown (arm H8b), and at `b3524b83` it read **35 ms for the accept against 1,139 ms for the rewind** — an accept moves the baseline in memory while a rewind wrote the file and then waited for the file watcher to notice and re-read a file the view had just written. **THE FIX IS THAT THE BYTES ARE ALREADY KNOWN**: `applyRewind` returns what it wrote (`contents`) beside what it read (`was`), `pressRedline` carries both, and the tab adopts them the moment the write lands — `tab-io`'s `adoptWritten` patches the saved contents and replaces the working model, so the redline recomposes in that tick. **THE MODEL HALF IS NOT OPTIONAL**: a tab whose File view has mounted keeps a Monaco model, and with it holding the old text the next ⌘S would write that old text back over the bytes the door just wrote, with `savedContents` as its precondition and nothing to refuse it. **TWO REFUSALS**, being a tab that has become DIRTY (a keystroke can land inside the write's own round trip, which is exactly the window this opens) and a tab whose saved contents MOVED (a save, a watcher tick or a read of its own to believe); either way the watcher is the honest reader and the move waits for it as before. **AND THE LAST 150 ms WAS SOMEWHERE ELSE**: `useLiveTabText` returned its DEBOUNCED snapshot, so a tab WITH a model would still draw the old text until the debounce expired; the hook now reads the model at the call and keeps its state as the re-render trigger only, so the diff and the preview get the fresher answer too. **MEASURED IN THE RUNNING APP, the same arm: 6 ms and 23 ms**, and the 17 ms that is left is the guarded write itself — the IPC round trip, the compare-and-swap and the rename. `conformance:redline` rule 40 now refuses a landed write the tab does not adopt (fourteen plants, thirteen of which must fail), and `src/renderer/editor/__tests__/adopt-written.test.ts` pins the action itself: one patch carrying `savedContents` and nothing else, the model moving with it, and NEITHER moving for a dirty tab, for a tab whose saved contents are not `was`, or for a tab that is gone. **WHAT IS NOT TRUE**: the two verbs are not identical, because one of them writes a file — 23 ms against 6 ms, and a loaded machine stretches both; nothing else waits, and no byte of the redraw depends on the watcher any more. Gates: typecheck 0 with 0 boundary violations and 0 runtime cycles, build 0 with the contract byte for byte and the Electron helper floor at 139, `conformance:redline` every rule, `conformance:redline-write` 30 readings and 17 of 17 ablations red, the probe 19 of 19, and `npm test` 14,459 passed with the same two `resolve.test.ts` fork-deadline tests failing under the loaded run and passing in isolation at both this tree and the parent c1fe5fd3.
+- 2026-09-17, **PHASE 280 LANDED, why Claude usage goes blank, `19a3007c`, research only, no shipping byte, pushed.** The Claude row names him and says "Sign in with Claude Code to see usage." because Tortie looks up `Claude Code-credentials` by service name alone, and on his machine that name matches a stray keychain item with account `unknown` (created 2026-09-10T02:44:31Z) that gives no usable credential, while Claude Code reads its own item by service AND account. 71 Claude signed-out answers in the log and zero Codex failures. **The entry's hypothesis is refuted**: no login is chosen, so the empty directory `162d9e5e3eeec40e` is not in play. **His diagnosis is partly right**: the tap did not cause the sign-in line (the poll wipes what the tap posts, which is the "update and reset"), but the tap has ordering defects that will still move the number after the fix. The attack verifier returned needs_work (a cross-account read under `CLAUDE_CONFIG_DIR` the first draft of the fix kept, a tap verdict too broad, `expired` ignored, the second item provable by deduction); the fix round confirmed all four against the vendor bundle and rewrote the document. No token read, no `-w`/`-g`, no network, no turn; a credential-shape scan found nothing, and the one address the panel draws is written as `<his address>`.
+
+- 2026-09-17, **PHASE 281 QUEUED AND LEFT UNRUN, the Claude meter reads the item Claude Code reads, Tier 3.** Research 126 names one obvious fix: copy Claude Code's account rule and service-name rule at every vendor call site, let only `security` exit 44 draw the sign-in line, and remove the plain-name fallback under `CLAUDE_CONFIG_DIR` that draws one account's numbers under another's name. **It waits on him for one thing before it starts**: approval of the attributes-only `security find-generic-password -a "$USER" -s "Claude Code-credentials"` (no `-w`, no `-g`; exit 44 stops the phase). It needs him again before it lands, for one app run at the parent and at HEAD on his real profile after a turn in a claude session. It will not on its own make Claude as steady as Codex; the tap ordering defects are recommended as the phase after it.
+
+- 2026-09-17, **PHASE 279 LANDED, readiness and teardown fail differently (audit F4), `2cf078c8`, version 0.107.0 unmoved, no tag, pushed.** The fork-deadline test read `fork.pid` only after the 300 ms deadline, so a slow shell failed it on ENOENT before it asked whether the fork survived; the re-derive verifier reproduced that at the parent with a 1.28 s slow start and no load. The test now holds the shipping deadline on a controlled clock, waits up to 5 s for the fixture on the real clock, then fires runGuarded's own timers, and every step fails with its own word. **Descendant cleanup removed goes red on TEARDOWN; a slow start goes red on READINESS.** The attack verifier returned needs_work: the fixture's fork died on the first SIGTERM, so the SIGKILL escalation had never been tested (an escalation sending SIGTERM, or none, passed the whole file, at the parent too), the fake clock hid an escalation cancelled on leader exit, and cleanup leaked sleepers under a no-group spawn. The fix round confirmed all six findings and every escape is now caught. `guarded.ts` is byte identical and no assertion was deleted. **Under real concurrent load** (two full suites at once, load 20 to 22) this tree passed 14,589 tests with the real-clock check reaching the fork in 1,540 ms; the origin/main tree beside it went red on two wall-clock budgets in other files (`scan.integration` 1,130 ms against 900, `inline-diff-agreement` 74 ms against 50), both green alone straight after.
+
+- 2026-09-17, **THE 0.105.0 ARCHITECTURE AUDIT IS CLOSED: all four findings fixed, proved by the auditor's own fixtures at `2cf078c8`.** In a fresh scratch tree both fixtures were copied in unedited and run: `auto-save-interleavings` passes 4 of 4 and `env-cap-disclosure` passes 2 of 2, against 1 of 4 and 1 of 2 at `b4569686`; the copies and the tree were removed. **F1 and F2** closed by Phase 277 (a write clears only the text it wrote; a timer cannot outlive its policy), **F3** closed by Phase 278 (its cap half) and Phase 270 (its remote half), **F4** closed by Phase 279. The audit scored 32/36 at `6eb35f73`; a re-audit would re-score. **The drain is finished except Phase 281**, which is queued and waits on his approval of one attributes-only keychain lookup. No release was cut; one would carry 277, 278 and 279.
+
+- 2026-09-17, **PHASE 281 STARTED, the Claude meter reads the item Claude Code reads, Tier 3.** He ran the approved attributes-only lookup himself, `security find-generic-password -a "$USER" -s "Claude Code-credentials"` with no `-w` and no `-g`: **exit 0**, one item under his own account in the login keychain, created 2026-07-29T21:35:35Z and last written **2026-09-17T11:16:33Z**, a week after the stray `unknown` item appeared. So Claude Code's own item exists and is live, research 126's cause is confirmed rather than deduced, and the stop condition did not fire. Built as two workflows so the main session runs the long gates between them: spec, two builders with disjoint ownership (the usage domain and the credentials domain), an integrator and two gate authors, then the full battery, then a hostile scratch-keychain verifier, a wrong-account attack and a fix round. The one run that needs him again is the app run at the parent and at HEAD after a turn in a claude session.
+
+- 2026-09-17, **PHASE 282 QUEUED, the press that moves on (PR 28, JnBrymn), Tier 3.** He asked for the pull request to be built as a queued phase on its own branch, fixed with the standard workflow, committed to the PR as it goes, and closed and integrated once verified. The PR makes ⌥↩ and ⌥⌫ in the Redline view move to the next change and ⌥↓ ⌥↑ loop, and a review over main with it merged found one BLOCKING defect, **typing in the Redline view comes out scrambled**, confirmed in the app (`probe:p237` fails 5 checks with the PR and passes with its one `live-text.ts` line put back), one MAJOR (the move carries an index, so an agent write above the change sends ⌥⌫ back onto a change the person kept) and six MINOR (merged neighbours, a second chord during the write, the keyboard dropped after the last rewind, a watcher read rolling a rewind back, a keystroke in transit, the helper floor at 139 of 140) plus credit written as the operator's. The full battery was green throughout, which is why each finding was reproduced twice by different methods before it was written here.

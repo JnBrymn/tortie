@@ -1167,6 +1167,18 @@ export const CHECKS = [
   // channel, with `path-ready` as the control that SHOULD move. It spawns no agent
   // and spends no token.
   electron('probe:p276'),
+  // PHASE 277. A save may not mark newer typing clean, and a timer may not
+  // outlive its policy (audit F1 and F2). ONE Electron on a scratch profile with
+  // a scratch HOME under its own GMUX_HARNESS_DIR and the socket gmux-p277-<pid>,
+  // over one git project it builds itself. It starts ⌘S's save and types in the
+  // same turn, reads the newer typing still dirty and the older text on disk,
+  // presses close and reads the question off the DOM, presses the real Cancel,
+  // lets the surviving timer write the newer text, then with a 10 s delay types
+  // and switches to Off, to On focus change and to Off through File > Auto Save,
+  // reading the file's bytes and mtime unchanged past each deadline, with a
+  // control that the same delay unchanged does write. It spawns no agent and
+  // spends no token.
+  electron('probe:p277'),
   // PHASE 276's attack on its own gate. It breaks THIRTY-TWO clauses one at a time —
   // the coverage key weakened to "there is a slot", the projection handing out the
   // slot's own record and iterating the slot's order, a miss that narrows, a cap

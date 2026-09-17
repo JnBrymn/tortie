@@ -366,6 +366,49 @@ export function envUnreadLine(names: readonly string[], over = 0): string {
     : `Ignored, because Tortie will not read them: ${list}.`;
 }
 
+/**
+ * PHASE 278 — a name the person DID add here that this list no longer has.
+ *
+ * THE THIRD SENTENCE, AND IT HAD TO BE NEITHER OF THE TWO ABOVE. The two above
+ * are both about a name that IS in `settings.json` and is not being used, and
+ * they differ only in which fix is the person's. This one is the other
+ * direction: the seal covers the name — meaning a person stood in this window
+ * and confirmed it — and the finished list does not contain it. Reusing
+ * `envRejectedLine` would say "they were not added here" about a name they DID
+ * add, which is the precise untruth the fix round above existed to end, and
+ * reusing `envUnreadLine` would point at a dead end when re-adding is the fix
+ * that works.
+ *
+ * WHEN A PERSON SEES IT. Two causes, both rare and both real: the file no
+ * longer holds the name at all, because something deleted it; or a later build
+ * refuses the name on a shape rule that did not exist when it was confirmed.
+ * Phase 278's own repair means the ordinary case — junk names pushing a
+ * confirmed one past the cap — does NOT reach this line any more, because the
+ * name survives and is on the card. What is left here is what the repair cannot
+ * put back. ON THE SHARED CARD ONLY THE FIRST CAUSE REACHES THIS LINE (the fix
+ * round): a confirmed shared name the file still holds is already named by
+ * `envUnreadLine` on that card, and saying both about one name told the person
+ * to add it again when the Add sheet would refuse it.
+ *
+ * A COUNT AND NEVER A NAME. A per-agent seal key would have to be split to get
+ * the bare name back, and no seal key in this repository is ever split. One
+ * rule for both lists rather than a cleverer rule that names them on the shared
+ * card and counts them on the agent cards.
+ *
+ * WHY THESE WORDS. "you added here" says the person is not being blamed for a
+ * file they did not write. "not on this list any more" is true whether the name
+ * was deleted or has become unreadable, which is what lets one sentence cover
+ * both causes without a taxonomy. "Add it again if you still want it" is an
+ * action that WORKS: re-adding a deleted name restores and re-seals it, and
+ * re-adding a newly refused one meets the Add sheet's own specific refusal,
+ * which is the honest end of that road rather than a dead end.
+ */
+export function envMissingLine(count: number): string {
+  return count === 1
+    ? 'One name you added here is not on this list any more. Add it again if you still want it.'
+    : `${count} names you added here are not on this list any more. Add them again if you still want them.`;
+}
+
 /** The same fact for entries that could not be named safely enough to draw. */
 export function envRejectedUnnamedLine(count: number): string {
   return count === 1

@@ -983,6 +983,30 @@ export type EnvCandidateScope =
  * past the echo cap is `sharedUnreadOver` — counted, never echoed, the same
  * channel `unnamed` already is.
  *
+ * PHASE 278 ADDS A THIRD THING THAT CAN GO WRONG, AND IT IS A COUNT. The two
+ * fields above are both about a name that IS in `settings.json` and is not
+ * being used. The third is the other way round: a name the seal covers —
+ * meaning a person confirmed it in this window — that the finished lists do
+ * NOT contain, because the file no longer holds it or because a later build
+ * refuses its shape. Until this phase that case was silent everywhere, and it
+ * is the only one where the person is not at fault for anything.
+ *
+ * ON THE SHARED CARD IT COUNTS ONLY THE FIRST CAUSE (the Phase 278 fix round).
+ * A sealed shared name the file still holds and the shape layer refused is
+ * already NAMED in `sharedUnread`, or counted in `sharedUnreadOver`, on the same
+ * card. Counting it here as well drew two sentences about one name, and the
+ * second one said "Add it again", which the Add sheet would then refuse. An
+ * agent card draws no shape-layer report, so `perAgentMissing` counts both
+ * causes.
+ *
+ * IT IS A COUNT AND NEVER A LIST, and that is a consequence of a rule this
+ * module already keeps rather than a preference. A per-agent seal key is
+ * `envNameKey(id, name)` and no seal key in this repository is ever split back
+ * apart; recovering the bare name to draw it would be the first parser over a
+ * key space whose whole safety argument is that a key only has to be
+ * UNAMBIGUOUS. One rule for both lists rather than a cleverer rule that names
+ * them on the shared card and counts them on the agent cards.
+ *
  * NAMES ONLY. There is no field here that could carry a value.
  */
 export interface EnvRejections {
@@ -996,11 +1020,30 @@ export interface EnvRejections {
   perAgent: Partial<Record<LaunchableAgentId, string[]>>;
   /** Entries dropped that could not be named safely. */
   unnamed: number;
+  /**
+   * Sealed SHARED names the last read did not find on the finished list and
+   * did not find in the file either (Phase 278). A count, never a list. A
+   * sealed name the file still holds is `sharedUnread`'s to name.
+   */
+  sharedMissing: number;
+  /**
+   * Sealed PER-AGENT names the last read did not find, by agent id
+   * (Phase 278). Counts, never lists.
+   */
+  perAgentMissing: Partial<Record<LaunchableAgentId, number>>;
 }
 
 /** No rejection at all, which is what almost every settings file reads as. */
 export function noEnvRejections(): EnvRejections {
-  return { shared: [], sharedUnread: [], sharedUnreadOver: 0, perAgent: {}, unnamed: 0 };
+  return {
+    shared: [],
+    sharedUnread: [],
+    sharedUnreadOver: 0,
+    perAgent: {},
+    unnamed: 0,
+    sharedMissing: 0,
+    perAgentMissing: {}
+  };
 }
 
 /**
@@ -1154,6 +1197,127 @@ export function sanitizeEnvPassthrough(
     if (kept.length > 0) out[id as LaunchableAgentId] = kept;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// The seal-aware pass (Phase 278)
+// ---------------------------------------------------------------------------
+
+/**
+ * PHASE 278 — WHY THESE TWO FUNCTIONS EXIST, AND WHY THEY ARE NOT IN THE
+ * SANITIZER ABOVE.
+ *
+ * THE DEFECT. `sanitizeEnvPassthrough` admits names in FILE ORDER and stops at
+ * sixteen. The seal — "who wrote this?" — is asked four steps later, in
+ * `withSealedDangerState` in src/main/settings/store.ts. So sixteen
+ * valid-looking names written by anything with write access to the home
+ * directory consume the whole budget before anything asks who wrote them, and
+ * the seventeenth — the one the person confirmed in the Settings window — is
+ * gone at the shape layer before the seal ever sees it. The seal then rejects
+ * the sixteen. The person ends with no names, and the one line that exists to
+ * explain it names sixteen strings they never typed and not the one they did.
+ *
+ * IT FAILS CLOSED, and that is said here so nobody reads this block as a
+ * patched escalation. No extra name was ever authorised, no value was ever
+ * resolved, nothing leaked. The defect is that a person loses a setting they
+ * made and is not told which one — and at the parent commit the loss became
+ * PERMANENT at the next save, because `persistSettings` writes the
+ * seal-filtered settings and re-seals to them.
+ *
+ * WHY NOT INSIDE THE SANITIZER. The research that drove this rejected "apply
+ * the seal before the cap" for four mechanical reasons, and every one of them
+ * is about putting the seal INSIDE `sanitizeEnvPassthrough`: that function is
+ * memoised, runs before `app.isReady()`, is also the WRITE path through
+ * `applySettingsPatch` where the seal must NOT be consulted, and its documented
+ * contract is that it "bounds the SHAPE of a value; it cannot tell who wrote
+ * the file". All four dissolve when the pass lives at the SEAL SITE instead,
+ * which already has the opened seal in hand and runs on the read path only.
+ * These two functions are the pure half of that; `withSealedDangerState` calls
+ * them. The sanitizers above are untouched, byte for byte.
+ *
+ * NOTHING IS REORDERED, which is the objection Phase 275 recorded when it
+ * half-closed this ("a sanitizer that reorders admits a list nobody wrote").
+ * The answer is not "put the confirmed names first". It is "do not spend the
+ * budget on names that are about to be thrown away one step later". The output
+ * of `confirmedEnvNames` is a SUBSEQUENCE of its input: same elements, same
+ * relative order, nothing added, nothing moved. Every element and every
+ * adjacency belongs to the file, so a list nobody wrote is unreachable rather
+ * than merely avoided.
+ */
+
+/**
+ * Every entry of a raw passthrough list that is a NAME, in the file's own
+ * order (Phase 278). Nothing is trimmed, case-folded, truncated, de-duplicated
+ * or repaired — the unit that is kept or dropped is one whole entry, exactly as
+ * it is in the sanitizers above.
+ *
+ * IT USES `isDrawableEnvName`, which is the same test the shape layer already
+ * makes, so this filter can never lose a name the seal covers: a sealed name
+ * got into the seal by passing `envPassthroughRefusal`, whose first check is
+ * the same length bound and the same {@link OVERLAY_ENV_KEY_PATTERN}. What it
+ * does drop is the 4 KB blob and the entry with a newline in it, which have to
+ * be gone before anything downstream can hold them.
+ *
+ * NOT `envCandidateNames`. That name already belongs to the preload bridge
+ * method and `settings:envCandidates`, which answer "which names does the
+ * picker OFFER from the login shell". This function answers "which entries does
+ * the FILE hold", and the fix round renamed it so the two are never confused in
+ * the one domain where confusing them decides what a process receives.
+ */
+export function envFileEntryNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as unknown[]).filter(isDrawableEnvName);
+}
+
+/**
+ * The names of one list Tortie will actually USE, given the seal (Phase 278).
+ *
+ * Walks `candidates` in the file's own order and keeps a name when the seal
+ * covers it AND `envPassthroughRefusal` accepts it against the names kept so
+ * far. Its accumulator therefore never grows past
+ * `OVERLAY_LIMITS.maxEnvPassthroughNames`, because that refusal is where the
+ * cap lives.
+ *
+ * THE SEAL IS ASKED FIRST AND THE REFUSAL SECOND, and the order is the whole
+ * point of the function. `existing` is the accumulator either way, so asking
+ * the refusal first would keep exactly the same names — but it would read as if
+ * the budget were still being spent on entries that are about to be discarded,
+ * and this function exists to say that it is not.
+ *
+ * THERE IS DELIBERATELY NO `break` ON THE CAP, and that is not an oversight.
+ * This function copies NO rule from `envPassthroughRefusal`: not the duplicate
+ * check, not the three denylists, not the compiled-key check, and not the cap.
+ * Writing `if (kept.length >= OVERLAY_LIMITS.maxEnvPassthroughNames) break` here
+ * would be a second spelling of the sixteen, in a second file, that a later
+ * round could move on its own — so the cap is REACHED rather than restated, and
+ * the walk simply stops accumulating once the refusal starts saying no. The
+ * cost is one refusal call per remaining entry, which is what
+ * `sanitizeEnvPassthroughShared` already pays over the same raw list.
+ *
+ * IT ADMITS NOTHING. `isSealed` is the same question `withSealedDangerState`
+ * asks today, made no wider: a name no human confirmed is dropped. A name the
+ * seal covers that this build refuses on SHAPE is still dropped, because both
+ * tests must pass — which is what stops a seal from ever laundering `PATH` onto
+ * a list.
+ */
+export function confirmedEnvNames(
+  candidates: readonly string[],
+  isSealed: (name: string) => boolean,
+  agentEnvKeys: readonly string[],
+  scope: 'agent' | 'shared'
+): string[] {
+  const kept: string[] = [];
+  for (const name of candidates) {
+    if (!isSealed(name)) continue;
+    const refusal = envPassthroughRefusal(name, {
+      existing: kept,
+      agentEnvKeys,
+      scope
+    });
+    if (refusal !== null) continue;
+    kept.push(name);
+  }
+  return kept;
 }
 
 // ---------------------------------------------------------------------------

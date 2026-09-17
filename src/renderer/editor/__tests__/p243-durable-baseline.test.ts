@@ -31,13 +31,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const buffer = vi.hoisted(() => ({ text: 'typed\n' }));
+// PHASE 277. ONE model object for the whole file, not a fresh one per call.
+// The registry in ../monaco-loader hands the same instance back for the life of
+// a tab, and `completeSave` in ../tab-io compares that instance by reference to
+// decide whether an acknowledgement still belongs to the tab it was asked for.
+// A double that answered with a new object every call is a tab whose lifetime
+// ends between the write and its answer, so every completion patched nothing.
+const model = vi.hoisted(() => ({ getValue: () => buffer.text }));
 vi.mock('../monaco-loader', () => ({
   loadMonaco: async () => ({}),
   rememberLoaded: () => undefined,
   getLoadedMonaco: () => null,
   rekeyTabResources: () => undefined,
-  workingModel: () => ({ getValue: () => buffer.text }),
-  getWorkingModel: () => ({ getValue: () => buffer.text }),
+  workingModel: () => model,
+  getWorkingModel: () => model,
   resetWorkingModel: () => undefined,
   disposeModels: () => undefined,
   saveViewState: () => undefined,
