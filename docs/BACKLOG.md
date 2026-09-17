@@ -28510,6 +28510,154 @@ if the cache is cold, empty or invalidated, the create probes, because a session
 key a person set is worse than a session that takes a second.
 
 
+## Phase 277 — a save may not mark newer typing clean, and a timer may not outlive its policy (audit F1 and F2, 2026-09-16)
+
+**Subject.** `fix(save): a write clears only the text it wrote`
+
+**First body line.** `Phase 277: the save that clears newer typing`
+
+**Semver.** Patch. It repairs two shipped defects and adds nothing.
+
+**Tier 3, and F1 alone earns it.** "Can it lose or corrupt the person's work?" — F1 makes a tab report itself CLEAN while holding unsaved typing, and `closeTab` prompts only when `dirty` is true, so a falsely clean tab can be closed without the question that exists to save it. That is the most direct route to losing a person's work in this product.
+
+**Charter.** `docs/audits/2026-09-15-electron-typescript-architecture-0.105.0.md`, findings F1 (State ownership, 2/3) and F2 (Lifecycle, 2/3), and the two counterexamples the auditor shipped in `docs/audits/fixtures/2026-09-14/auto-save-interleavings.test.ts.fixture`. **They are ONE phase because they are one file and one fixture**: both live in `src/renderer/editor/auto-save.ts` and `tab-io.ts`, and the same fixture file holds all three failing cases. Splitting them would make two rounds fight over the same lines.
+
+### Measured at `5a604e26` before this entry was written
+
+The auditor's fixture was copied to `src/renderer/editor/__tests__/` and run against current code. **Three of its four cases fail:**
+
+```
+× a pending delay may not write after switching to off
+× a pending delay may not write after switching to onFocusChange
+× an acknowledgement for older text keeps a newer edit dirty and scheduled
+✓ (the steady-buffer control passes)
+  Tests  3 failed | 1 passed (4)
+```
+
+The two policy cases fail with `expected "vi.fn()" to not be called at all, but actually been called 1 times` — a guarded write really was submitted after the setting said stop. So this is not a stale audit: it reproduces today, after Phases 268, 275 and 276.
+
+### F1, and the exact sequence
+
+1. The scheduler starts saving `first edit`.
+2. Before the acknowledgement returns, the model becomes `first edit plus newer typing`, and another timer is armed.
+3. The first save answers `wrote`.
+4. `saveInProject` (`tab-io.ts`, around `:1239`) patches `savedContents: 'first edit', dirty: false` **without asking what the model holds now**.
+5. `notePatched` sees a clean transition and cancels the pending timer.
+
+The result is a newer model, older saved text, `dirty: false`, and zero pending timers. **The guarded write is not what failed here** — it protected against an external writer exactly as designed. What failed is whether the editor correctly represents its OWN unsaved work, which is a different promise and one nothing else is keeping.
+
+**The success patch predates Phase 268.** The audit says so plainly and this entry repeats it so no round blames auto save alone: Phase 268 added the background exposure and the cancellation consequence; the unconditional clean patch was already there.
+
+Resolution, from the audit and not to be narrowed:
+
+- carry the model instance, its version and the tab lifetime alongside the text being saved
+- update the saved baseline on a successful write, but derive `dirty` from the CURRENT model; an old acknowledgement must never clear a newer edit
+- keep or queue the latest pending save when one is already in flight, including when a second timer fires before the first acknowledgement returns
+- use the SAME completion rule for explicit save, automatic save and overwrite, and inspect the plain and remote success arms for the same unconditional patch
+- a close and reopen of one path must not receive the previous tab lifetime's completion
+
+### F2, and the honest limit it must state
+
+`arm` checks the mode when it creates a timer. `run` checks dialogs, eligibility and in-flight work and **never re-reads the mode**, and no settings-change hook cancels a pending timer. The store's comment claiming policy is read on every tick is therefore wider than the code — **that comment moves in this phase or it becomes a lie somebody trusts.**
+
+Resolution:
+
+- pending timers become revocable on a policy change, and the trigger's permission is re-checked immediately before a save is submitted
+- delay-triggered work is distinguished from blur-triggered work, so switching to On focus change does not preserve an old delay
+- define what a delay CHANGE does to pending work, and what a blocking dialog does to a due timer
+- keep cancellation on close, eviction, stopped saves and disposal
+- **state the limit rather than overclaim it**: switching to Off need not interrupt an atomic write already submitted to main, but it must stop a timer that has not submitted one
+
+### Proof, run rather than read
+
+- **The auditor's fixture is the closure test.** It is copied into the tree as a real test file and all four cases must pass. It is NOT edited to fit the implementation; if a case is wrong the phase says why with evidence and the auditor's wording is quoted beside the disagreement.
+- **Measure the parent.** All three failures reproduce at `5a604e26` and pass after. Both readings in the commit body.
+- **Method 1, the attack, beyond the fixture.** The audit names four cases the fixture does NOT cover and closure requires them: explicit-save overlap, a second timer expiring during a held write, close-and-reopen of the same path, and an unchanged-buffer success. Add a fifth of your own that the auditor did not think of.
+- **Method 2, the running app.** Hold an acknowledgement, type again, and verify the newer text stays dirty, saves when permitted, and **still prompts on close while unsaved** — that last clause is the one that connects this to losing work, and the audit notes it was never driven in a real Monaco tab. Then, with a long delay, type, change the mode before the deadline, and confirm disk is unchanged.
+- **Keep the existing concurrent-external-writer probe green.** `conformance:save`, `conformance:redline-write` and `probe:p268` all own this path.
+
+**What is NOT in this phase.** The guarded write channel does not change — issue 16 is why it exists and F1 is not a fault in it. `fs:writeGuarded` keeps ONE owner and this phase does not add a second write door. Auto save's default stays Off. No change to Phase 276's cache or its refresh. And the fixture is treated as the auditor's evidence, not as a file to make convenient.
+
+## Phase 278 — an untrusted name may not push out an authorised one (audit F3's open half, 2026-09-16)
+
+**Subject.** `fix(settings): a confirmed variable name survives a filled cap`
+
+**First body line.** `Phase 278: the name the cap pushed out`
+
+**Semver.** Patch.
+
+**Tier 3.** It is the one domain that decides which of a person's shell variables reach a process Tortie starts, and the failure mode is that a name the person CONFIRMED silently stops arriving. The seal is the thing being reasoned about, so the tier is not negotiable.
+
+**Charter.** The 0.105.0 audit's F3, second half, and its fixture `docs/audits/fixtures/2026-09-14/env-cap-disclosure.test.ts.fixture`. **F3's FIRST half is CLOSED** by Phase 270 — `remote-sessions.ts` reads the passthrough through `remote-env-carriage.ts` and `remote-env-probe.ts`, and a remote create resolves names on the far machine's own shell. This entry is what is left.
+
+### Measured at `5a604e26`
+
+The auditor's fixture placed at `src/main/settings/__tests__/` and run against current code:
+
+```
+× untrusted prefix entries cannot silently displace an authenticated name
+✓ (the ordinary-name control passes)
+  Tests  1 failed | 1 passed (2)
+```
+
+`sanitizeEnvPassthrough` (`src/shared/settings.ts`, around `:887`) caps accepted names **in file order**, before `withSealedDangerState` filters by the authenticated selection. Sixteen valid-looking but untrusted names at the front consume the cap, the authorised seventeenth is dropped during sanitisation, and the seal then rejects the sixteen. The person ends with NO names and a rejection list that does not name the one they actually authorised.
+
+**Phase 275 already reports it and does not prevent it**, which its own commit recorded as a limit: "the card now says so with the right sentence, but the ORDER is not repaired, because a sanitizer that reorders admits a list nobody wrote." That reasoning is real and this phase must answer it rather than ignore it — the repair cannot be "sort the authorised ones first" if that means admitting an order nobody wrote.
+
+**It fails CLOSED and the entry says so**, so nobody treats this as an escalation: no extra name is authorised, no value is resolved, nothing leaks. The defect is that a person loses a setting they made and is not told which one.
+
+Resolution, from the audit:
+
+- preserve authorised entries against untrusted cap consumption, **or** report explicitly that the selected name was discarded and why
+- do NOT remove the input bounds, and do NOT let an unsealed name through — the cap and the seal both stay
+- the fixture passes and the ordinary-name control stays passing
+
+**The restore boundary is NOT this phase and the entry says so.** `restore.ts` around `:962` still trusts `rec.envPassthrough` off the manifest, as it already trusts the recorded argv. The settings seal does not authenticate manifest recipes, this predates Phase 269, and the audit is explicit that recipe authentication is a separate durability and security design rather than an incidental settings fix. Keep the limitation stated; do not close it here.
+
+### Proof
+
+- **The auditor's fixture is the closure test**, unedited, plus its control.
+- **Measure the parent**: the failure reproduces at `5a604e26` and passes after.
+- **The attack**: try to make an authorised name disappear by another route — more than 16 untrusted names, names differing only by case or whitespace, a duplicate of the authorised name in the untrusted block, a name that is not a string, and the cap reached by authorised names alone. Prove no shape loses a confirmed name without saying so.
+- **The counter-attack, which matters as much**: prove the repair did not admit anything. An unsealed name must still be dropped, and the confirm hash must still move only when the name set changes.
+
+## Phase 279 — a test that fails before it reaches its subject (audit F4, 2026-09-16)
+
+**Subject.** `test(proc): readiness and teardown fail differently`
+
+**First body line.** `Phase 279: the fixture that never reached its subject`
+
+**Semver.** None. It changes a test seam and no shipping byte.
+
+**Tier 2.** It is invisible to a person and the gates are the evidence, so the verifier re-derives rather than photographs. It is NOT Tier 1: the subject is the process owner that kills descendants, and a weakened test there would hide a real leak.
+
+**Charter.** The 0.105.0 audit's F4 (Test seam, 2/3). `src/main/proc/__tests__/guarded.test.ts`, `kills the FORK too, not just the direct child`.
+
+### Measured at `5a604e26`
+
+Run in isolation the file passes 9 of 9, and `git log 6eb35f73..HEAD` shows the file untouched since the audit. **So the finding stands exactly as written**: it is not a failure that reproduces on demand, it is a fixture that CAN fail before reaching what it tests.
+
+The fixture starts a shell that should fork a sleeper and write `fork.pid`, with a 300 ms deadline, and awaits the guarded operation before looking for that file. In the audit's run the deadline result arrived and the file did not, so the assertion ended with `ENOENT` — **before it could test whether the fork survived**. A missing file and a leaked descendant are reported identically, and only one of them is a product defect.
+
+The audit is careful and this entry keeps its care: this does not prove the production owner leaked a child. What is established is that the test cannot tell startup failure from teardown failure.
+
+Resolution, from the audit:
+
+- separate bounded fixture READINESS from the deadline and kill assertion, and keep PID ownership and cleanup even when readiness never arrives
+- use a controlled deadline clock or an equivalent seam so the fork exists before its disposal is tested, **without delaying the production deadline until a child cooperates**
+- keep a real-time integration check with useful diagnostics for a spawn error, the deadline outcome and missing readiness
+- prove that removing descendant cleanup FAILS the test after readiness, while a deliberately slow-starting fixture gets a DISTINCT readiness result
+
+**The audit forbids three closures and so does this entry**: do not close it by rerunning until green, by deleting the assertion, or by widening a production timeout.
+
+### Proof
+
+- The corrected test passes in isolation AND in the ordinary full suite.
+- **The ablation is the point**: remove descendant cleanup from the production owner and the test must go red for the RIGHT reason, naming teardown rather than readiness. Restore by checksum.
+- **The second ablation**: make the fixture start slowly on purpose and prove the failure says READINESS, distinctly, rather than looking like a leak.
+- Run the full suite under real concurrent load, which is the condition the audit observed, and report what happened rather than only what passed.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29225,3 +29373,5 @@ cycle rather than only the evening it was written.
 - 2026-09-16, **PHASE 276 LANDED, the shell is asked once rather than once per session, `f2d173fd`, version 0.106.0 unmoved, no tag, pushed.** It is the second half of Phase 275's bill: a shared name applies to every agent, so the login-shell probe that used to fire for the one configured agent fired for all of them, on every create. **A SESSION NOW STARTS IN TENS OF MILLISECONDS INSTEAD OF A SECOND.** Measured by the same app probe at the parent and at HEAD, on a scratch HOME whose `.zshrc` sleeps 900 ms, with `$SHELL` pointed at a wrapper named `zsh` that appends a line per login shell so the count is taken from OUTSIDE the app: at the parent **nineteen creates, every one 958 to 1008 ms, and 22 login shells**; at HEAD the **cold create is 51 ms, the six warm creates are 25, 23, 20, 19, 20 and 21 ms, a create for a SECOND agent is 18 ms**, and **zero login shells** for the cold create, for the six warm creates, for the second agent and for a settings write that is not a shell variable. **THE COST WAS ONE FLAG AND THE FLAG STAYS.** Re-derived at commit time by a different method: on a calibrated slow home `zsh -lic` read 960, 940 and 940 ms and `zsh -lc` read under 10 ms three times, and `-lc` did NOT see the `.zshrc` export while it did see the `.zprofile` one — so removing the `i` would make the probe fast and the feature useless, which is what PR #21 did. **ROTATING A KEY STILL TAKES EFFECT ON THE NEXT SESSION WITH NOTHING TO RESTART**, which is Phase 269's promise and the reason a cache needed permission to exist. Proved out of the PANE'S OWN ENVIRON, eleven save shapes each followed by a real session whose stand-in agent wrote down which GENERATION of an invented sentinel it got: append, truncate-and-rewrite, `mv` rename-over, unlink-and-recreate, a file created for the first time, a write through a symlinked path and an edit to a dotfiles-repo target inside the home ALL arrived; a `touch` with no change was right either way; **the one file the rc SOURCES read STALE, as declared**, and `[Re-read shell]` then delivered it. **WHEN IT DOES NOT ARRIVE, THE ANSWER IS ONE BUTTON**, Settings then Launch defaults, right-aligned, drawn only when this person has named a shell variable somewhere, its whole explanation behind hover — *Ask your shell again. The next session you start gets the current values.* — and it returns nothing at all to the window, not a name, not a count, not a value. That control is why **the semver is minor rather than patch**, which is the condition the entry named. **THE KEY IS COVERAGE AND THAT IS WHAT MAKES ADDING A NAME SAFE**: one slot, and an ask is answered from it only if it holds EVERY name the ask mentions, with no listener and no timer in that path — a name added in Settings while the app ran arrived on the very next session. A miss widens rather than narrows, which is free, because the cost is the shell start and not the name count: `zsh -lic` for 1 name read 811 to 838 ms and for 52 names read 839 to 918 ms. **THE CACHE IS OFF UNTIL THE WATCHER IS ARMED**, so an unrecognised `$SHELL`, a home with no watchable directory or a quit that overtook the boot chain all land on today's cost rather than on a cache nothing can invalidate, and the per-create probe stays as the FALLBACK on every one of those paths. A failed probe is never cached as success — an rc that hung was killed at the 10,004 ms deadline, the slot held nothing after it, and the next create recovered. **FIVE CONCURRENT CREATES START ONE LOGIN SHELL.** The warm-up did not move the boot: twelve launches, six on and six with `GMUX_NO_ENV_CACHE=1`, `window-shown` medians **419.6 ms on against 408.8 ms off** and a second run 380.8 against 390.8, inside the spread in both directions, while the on arm started twice the login shells so it definitely ran. **NO VALUE IS WRITTEN ANYWHERE** — 72 profile files, the manifest, the log, `settings.json`, the pane report and the harness stdout, **0 hits each** — and the only door out of the slot hands back NAMES. **WHAT IS STILL NOT TRUE.** A key a rc file SOURCES, one a vault hands over at shell start, one a plugin loads from a `.env` and one the shell INHERITS move nothing we watch and need the button. A dotfiles target OUTSIDE the home is not watched at all, by this phase's own refusal. `ZDOTDIR` set to the empty string reads as unset through the probe, so the automatic invalidation is blind for that person, though coverage and the refresh both still work. `fish` is not in the shell table because it is not installed on this machine and an unmeasured row would arm a cache nobody has driven, so a fish user keeps today's cost and can never be stale. A bash login shell never reads `.bashrc` at all, which is a pre-existing gap. An invalidation revises nothing already RUNNING, because the value left this process on the `-e` argv and now lives in the tmux server's session environment. And the remote probe deliberately does not cache, because nothing can `fs.watch` across ssh. Gates green: `typecheck`, `build`, `test` (913 files, 14,496 tests), `smoke:t1` 6/6, `smoke:t3` 3/3, `package` signed, the new `conformance:shellenv` which spawns NO shell, `ablation:p276` at **32 ablations, one clause each, every one red on the rule that owns it**, `conformance:watcher`, `conformance:resume:capture`, `conformance:credentials`, the menu gates proving the native menus did not move, `gate:contract` regenerated for one added read-only channel (233 to 234) and two env names (111 to 113), `HELPER_USER_FLOOR` 137 to 138 and `RUNNER_CALLER_FLOOR` 48 to 50.
 
 - 2026-09-16, **v0.107.0 RELEASED from `b770d035`, tortie.sh updated, and issues 25 and 20 and PR 21 all closed.** Durability `35166734953` was DISPATCHED explicitly on the candidate rather than inherited from the nightly, because the last run was on `cd524701` and predated Phases 275 and 276; it passed, gates were green on `f2d173fd` beneath it, and only then was the tag pushed. The signed build notarized first time and the app INSIDE the DMG reads `accepted` / `source=Notarized Developer ID` / `origin=Developer ID Application: Gregory Ceccarelli (4GRQMF5T5U)` at `CFBundleShortVersionString` 0.107.0, with `codesign --verify --deep --strict` exit 0 and `xcrun stapler validate` worked; the stable download answers 200. **The release carries four phases**: 273 a symlinked project saves and a refusal says what it measured, 274 one folder is one project however it is spelled, 275 shell variables set once for every agent, 276 the login shell asked once rather than once per session. tortie.sh is at `37e9e34`: the changelog synced through 0.107.0 and the Settings page REWRITTEN where this release made it wrong — it described shell variables as a per-agent thing because that is what they were, and it now says named once under Every agent with each card showing what it inherits, the list scrolling and taking several at once, and the **Re-read shell** button named for the case the watched files cannot show. **THE TILDE HALF OF PR 21 IS NOT A BUG AND THE MEASUREMENT IS RECORDED HERE SO NO LATER ROUND RE-OPENS IT.** John reported that Tortie's captured PATH preserved literal `~` entries and a phase was nearly queued for it. Measured 2026-09-16: a literal `~` in PATH does not resolve in zsh either — `export PATH="~/bin:$PATH"` then `command -v faketool` finds NOTHING, while `$HOME/bin` finds it instantly — so Tortie copying the PATH faithfully MATCHES the shell exactly, and expanding it would make Tortie find binaries a person's own terminal cannot, which is a worse defect than the one it closes. His observation was real and his diagnosis was wrong; the fix is one character in his own `.zshrc`. The `-il` half WAS addressed, by a different route: an interactive shell for the PROBE rather than for every session, since an interactive shell measured ~1,000 ms against ~10 ms for a login shell, and his version never reached pi because `withLoginShellFlag` is called only on the plain-shell branch. **STILL OPEN AND UNQUEUED, his call**: issue 26 richer status icon colours, issue 23 file state is weird, issue 14 transfer a conversation to a different agent.
+
+- 2026-09-16, **PHASES 277, 278 and 279 QUEUED from the 0.105.0 architecture audit, and the audit and its two fixtures are COMMITTED here rather than left untracked in his checkout.** The audit scored 32/36 at `6eb35f73` with four findings, and **every one was re-measured at `5a604e26` before these entries were written rather than trusted from the document.** The auditor shipped two counterexample fixtures and they are the closure tests; copied into a current tree and run: `auto-save-interleavings` fails 3 of 4 (`a pending delay may not write after switching to off`, `…to onFocusChange`, and `an acknowledgement for older text keeps a newer edit dirty and scheduled`, the steady-buffer control passing), and `env-cap-disclosure` fails 1 of 2 (`untrusted prefix entries cannot silently displace an authenticated name`, the ordinary-name control passing). The two policy cases fail with a guarded write ACTUALLY SUBMITTED after the setting said stop, so this is not a stale document: it reproduces today, after 268, 275 and 276. **F3's FIRST half is CLOSED** by Phase 270 — `remote-sessions.ts` reads the passthrough through `remote-env-carriage.ts` and `remote-env-probe.ts` — so only its cap half is queued. **F4 passes in isolation at 9 of 9 and its file is untouched since the audit commit**, which is exactly the finding: it is not a failure that reproduces on demand, it is a fixture that can fail BEFORE reaching what it tests, reporting a missing readiness file identically to a leaked descendant. **277 is F1 and F2 together because they are one file and one fixture**, and F1 is the one that can lose work: a tab reports itself CLEAN while holding unsaved typing, and `closeTab` prompts only when `dirty` is true, so the question that exists to save a person's work never gets asked. The entry records what the audit records, that the unconditional clean patch PREDATES Phase 268, so no round blames auto save alone. **278 must answer Phase 275's own recorded reason for not fixing it** — "a sanitizer that reorders admits a list nobody wrote" — rather than sorting authorised names to the front and calling it done, and the entry states that the defect FAILS CLOSED, no extra name authorised and no value resolved, so nobody reads it as an escalation. **279 carries the audit's three forbidden closures verbatim**: not by rerunning until green, not by deleting the assertion, not by widening a production timeout. Four points are recoverable, being State ownership, Lifecycle, Failure flow and Test seam, and the restore trust boundary at `restore.ts:962` is explicitly NOT in any of them because the audit calls recipe authentication a separate durability and security design.
