@@ -578,11 +578,14 @@ export const KEYMAP = [
   // not in front. The view's own key handler answers them while the keyboard
   // is in it; the Edit menu rows carry the verbs with no chord beside them.
   {
+    // THE TWO ARROWS LOOP (2026-09-16): each end comes round to the other, so
+    // a document with changes in it can always be walked all the way round.
+    // The rule itself is `stepIndex` in src/renderer/editor/redline-current.
     id: 'redline.next',
     keys: [k('Alt+Down')],
     action: 'Next change',
     explain:
-      'In the Redline view, moves the focus to the next change so it can be rewound.',
+      'In the Redline view, moves to the next change, and from the last change back to the first.',
     group: 'editor',
     scope: 'editor',
     assignable: false,
@@ -593,7 +596,8 @@ export const KEYMAP = [
     id: 'redline.prev',
     keys: [k('Alt+Up')],
     action: 'Previous change',
-    explain: 'In the Redline view, moves the focus back to the previous change.',
+    explain:
+      'In the Redline view, moves back to the previous change, and from the first change to the last.',
     group: 'editor',
     scope: 'editor',
     assignable: false,
@@ -605,7 +609,7 @@ export const KEYMAP = [
     keys: [k('Alt+Backspace')],
     action: 'Rewind the change',
     explain:
-      'Puts the change under focus back to what the marking is measured against, and writes the file. Undo brings it back.',
+      'Puts the change under focus back to what the marking is measured against, writes the file, and moves to the next change. Undo brings it back.',
     group: 'editor',
     scope: 'editor',
     assignable: false,

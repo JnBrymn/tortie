@@ -2118,10 +2118,10 @@ export async function again(ctx) { const b = gmuxBridge(); const w = b.fs.writeG
 // focus is what swallowed the first ⌥↓ of a view (section 2.2, two runs), and
 // holding the ELEMENT rather than the identity is what let an outside write
 // take the person's place away while the change was still drawn with the same
-// identity, offset and generation (section 2.3). `focusedChange` KEEPS its
-// read, because it is the fallback for a hover that has never been stepped
-// from, so the scan is aimed at the two places the decision now lives and is
-// proved on plants that must fail.
+// identity, offset and generation (section 2.3). `pressedElement` KEEPS its
+// read of the focused wrapper and the caret, because it is what a press acts
+// on when nothing has been stepped to, so the scan is aimed at the two places
+// the DECISION now lives and is proved on plants that must fail.
 //
 // 18b DRIVES the shipping module under node through
 // build/redline-current-probe.mts and ablates the clause behind each arm. The
@@ -2173,8 +2173,11 @@ export async function again(ctx) { const b = gmuxBridge(); const w = b.fs.writeG
     else fail(`18a. the scanner behaved wrongly on the plant "${plant.name}"`);
   }
   // And the fallback is still there, or the scan above is a scan of nothing.
-  if (!viewSource.includes('focusedChange')) {
-    fail('18a. the view no longer names focusedChange at all, so a hovered change with no step has no identity to press');
+  // It is `pressedElement` that carries it now: the accept and the rewind both
+  // read that one element, and its last two clauses are the focused wrapper
+  // and the caret, which is the identity a hover with no step presses with.
+  if (!viewSource.includes('pressedElement')) {
+    fail('18a. the view no longer names pressedElement at all, so a hovered change with no step has no identity to press');
   }
   say(`18a. the current change and the step name no activeElement (${String(plantsOk)} of ${String(PLANTS.length)} scanner plants behaved), and the hover fallback is still named`);
 
@@ -2209,16 +2212,16 @@ export async function again(ctx) { const b = gmuxBridge(); const w = b.fs.writeG
       to: '  if (at === null) return null;'
     },
     {
-      name: 'at either end the position stays, and an empty document steps nowhere',
+      name: 'THE ENDS LOOP: past the last comes round to the first, and an empty document steps nowhere',
       key: 'ends',
-      expect: (a) => same(a, [0, 8, null]),
-      from: '  return Math.min(count - 1, Math.max(0, at + delta));',
-      to: '  return (at + delta + count) % count;'
+      expect: (a) => same(a, [8, 0, null]),
+      from: '  return (at + delta + count) % count;',
+      to: '  return Math.min(count - 1, Math.max(0, at + delta));'
     },
     {
       name: 'six positions, being the whole of the step',
       key: 'six',
-      expect: (a) => same(a, [1, 0, 5, 3, 8, 7]),
+      expect: (a) => same(a, [1, 8, 5, 3, 0, 7]),
       from: 'export function stepIndex(\n  count: number,\n  at: number | null,\n  delta: 1 | -1\n): number | null {\n  if (count <= 0) return null;',
       to: 'export function stepIndex(\n  count: number,\n  at: number | null,\n  delta: 1 | -1\n): number | null {\n  if (count <= 0) return null;\n  delta = (delta === 1 ? -1 : 1) as 1 | -1;'
     },
@@ -4965,90 +4968,126 @@ function gridOf(css, cls) {
 }
 
 // ---------------------------------------------------------------------------
-// THE ACCEPT-ADVANCE ROUND, 2026-09-16, rule 40: THE ACCEPT MOVES ON.
+// THE PRESS THAT MOVES ON, 2026-09-16, rule 40: A PRESS MOVES ON, AND THE
+// PICTURE LOOPS.
 //
-// ⌥↩ stops marking the change under focus and, from this round, leaves the
-// person on the change that was DRAWN AFTER it, so a run of approvals is a run
-// of ⌥↩ presses rather than ⌥↩ ⌥↓ repeated. The index is read off the picture
-// BEFORE the press — an accept removes exactly the change it names and leaves
-// every other one in order, so the follow-on sits at that same index — and it
-// is spent by a layout effect on the picture React draws AFTER the baseline
-// moved, which is the only moment that picture exists.
+// ⌥↩ stops marking the change under focus and ⌥⌫ puts it back, and BOTH now
+// leave the person on the change that was DRAWN AFTER it, so a run of
+// approvals or rejections is a run of the one chord rather than ⌥↩ ⌥↓ repeated
+// or ⌥⌫ ⌥↓ repeated. Past the last change the picture comes round to its first
+// remaining change, so a run that started in the middle of a document does not
+// strand the changes above it.
+//
+// THE INDEX IS READ OFF THE PICTURE BEFORE THE PRESS — both verbs remove
+// exactly the change they name and leave every other one in order, so the
+// follow-on sits at that same index — and it is spent by a layout effect on the
+// picture that exists AFTER the removal. That timing is the whole difference
+// between the two verbs and it is why there are TWO GUARDS: an accept removes
+// the change in this tick, while a rewind's picture arrives through the
+// watcher, so the effect waits until the pressed change is really gone and
+// drops the move entirely if the person went somewhere else meanwhile.
 //
 // NOTHING IN THE COMMIT BATTERY COULD SEE IT. This tree's vitest environment is
 // `node` and there is no jsdom, so no test focuses an element and none can read
 // the state a recompose leaves behind; `p239-anchored-controls.test.tsx` pins
-// `indexAfterAccept` itself, which is the arithmetic, and this rule pins the
-// WIRING, which is where a later round would drop it. It is the same instrument
-// rule 20 uses: a scan of the shipping source with its scanner proved on
-// fixtures this file writes.
+// `indexAfterRemoval` and `stepIndex`, which are the arithmetic, and this rule
+// pins the WIRING, which is where a later round would drop it. It is the same
+// instrument rule 20 uses: a scan of the shipping source with its scanner
+// proved on fixtures this file writes.
 //
-// THE PER-CHANGE CLAUSE IS PART OF THE RULE and it is not tidiness. An
-// accept-all leaves no change to move to, and a refused accept must not move
-// the person at all — an arming written outside the accepted guard, or without
-// the `kind === 'one'` clause, moves somebody on a press that did nothing.
+// THE CLAUSES ARE PART OF THE RULE and they are not tidiness. An accept-all
+// leaves no change to move to and a refused accept must not move the person at
+// all, so the accept's arming lives inside its accepted guard and behind the
+// per-change clause; an undo puts a change BACK and the next place to be is
+// where the person already is, so the rewind's arming is kept to a rewind.
 // ---------------------------------------------------------------------------
 {
   const VIEW = 'src/renderer/editor/RedlineDocument.tsx';
-  const REF = 'advanceAfterAccept';
+  const REF = 'advanceAfterPress';
+  const PENDING = `const pending = ${REF}.current;`;
   const ACCEPTED_GUARD = "result.outcome === 'accepted'";
+
+  /** The body of one named `const NAME = useCallback(` call, or null. */
+  const callbackBody = (code, open) => {
+    const at = code.indexOf(open);
+    if (at === -1) return null;
+    const paren = code.indexOf('(', at + open.length - 1);
+    const close = paren === -1 ? -1 : closeOf(code, paren);
+    return close === -1 ? null : code.slice(paren, close + 1);
+  };
+
   /**
-   * What is wrong with this source's accept-advance wiring, or an empty list.
-   * The accept callback is found by name and read by MATCHING PARENTHESES from
-   * `useCallback(`, the way rule 20 reads it, so a line scan cannot mistake
-   * the rewind callback's own references for this one's.
+   * What is wrong with this source's move-on wiring, or an empty list. Both
+   * callbacks are found by name and read by MATCHING PARENTHESES, the way rule
+   * 20 reads the accept, so a line scan cannot mistake one callback's own
+   * references for the other's.
    */
   const advanceFindings = (source) => {
     const code = stripComments(source);
-    const acceptAt = code.indexOf('const accept = useCallback(');
-    if (acceptAt === -1) return ['no `const accept = useCallback(` in the view'];
-    const acceptOpen = code.indexOf('(', acceptAt + 'const accept = useCallback'.length - 1);
-    const acceptClose = closeOf(code, acceptOpen);
-    if (acceptClose === -1) return ['the accept callback is not closed'];
-    const accept = code.slice(acceptOpen, acceptClose + 1);
-    const guard = accept.indexOf(ACCEPTED_GUARD);
-    if (guard === -1) return ['the accept callback has no accepted guard for the move to be armed inside'];
-    const brace = accept.indexOf('{', guard);
-    const guardBody = brace === -1 ? null : blockAt(accept, brace);
     const out = [];
-    if (guardBody === null || !guardBody.includes(`${REF}.current =`)) {
-      out.push('the accept never arms the move to the next change inside the accepted guard');
+    // 1. The accept: armed inside the accepted guard and only for one change.
+    const accept = callbackBody(code, 'const accept = useCallback(');
+    if (accept === null) out.push('no `const accept = useCallback(` in the view');
+    else {
+      const guard = accept.indexOf(ACCEPTED_GUARD);
+      const guardBody = guard === -1 ? null : blockAt(accept, accept.indexOf('{', guard));
+      if (guardBody === null || !guardBody.includes(`${REF}.current =`)) {
+        out.push('the accept never arms the move to the next change inside the accepted guard');
+      }
+      if (guardBody !== null && !guardBody.includes("kind === 'one'")) {
+        out.push('the accept arms without the per-change clause, so accept-all or a refusal could move somebody');
+      }
     }
-    if (guardBody !== null && !guardBody.includes("kind === 'one'")) {
-      out.push('the move is armed without the per-change clause, so accept-all or a refusal could move somebody');
+    // 2. The rewind: armed after the write landed, and NEVER for an undo.
+    const press = callbackBody(code, 'const press = useCallback(');
+    if (press === null) {
+      out.push('no `const press = useCallback(` in the view, so a rewind cannot move on');
+    } else {
+      if (!press.includes(`${REF}.current =`)) {
+        out.push('the rewind never arms the move to the next change');
+      }
+      if (!press.includes("kind === 'rewind'")) {
+        out.push('the arming is not kept to a rewind, so an undo could move somebody');
+      }
     }
-    // The effect that spends it, found by the read rather than by name, so the
-    // nearest layout effect above the read is the one judged.
-    const read = code.indexOf(`const at = ${REF}.current;`);
+    // 3. The effect that spends it, found by the read rather than by name, so
+    //    the nearest layout effect above the read is the one judged.
+    const read = code.indexOf(PENDING);
     if (read === -1) {
-      out.push('nothing reads the armed index, so the change that follows an accept is never taken');
+      out.push('nothing reads the armed move, so the change after a press is never taken');
       return out;
     }
     const effectAt = code.lastIndexOf('useLayoutEffect(', read);
     if (effectAt === -1) {
-      out.push('the armed index is read outside a layout effect, so it is spent before the redraw');
+      out.push('the armed move is read outside a layout effect, so it is spent before the redraw');
       return out;
     }
     const effectOpen = code.indexOf('(', effectAt);
     const effectClose = closeOf(code, effectOpen);
     const effect = effectClose === -1 ? '' : code.slice(effectOpen, effectClose + 1);
-    if (!effect.includes(`const at = ${REF}.current;`)) {
-      out.push('the layout effect above the read is not the one that takes the armed index');
+    if (!effect.includes(PENDING)) {
+      out.push('the layout effect above the read is not the one that takes the armed move');
+    }
+    if (!effect.includes('const standing = currentRef.current;')) {
+      out.push('the move does not check that the person is still standing on the pressed change, so it overrides a move made meanwhile');
+    }
+    if (!effect.includes('const stillDrawn = ')) {
+      out.push('the move does not wait for the pressed change to leave the picture, so a rewind could land on the change it just rewound');
     }
     if (!effect.includes(`${REF}.current = null;`)) {
-      out.push('the armed index is never cleared, so a later recompose moves somebody for no reason');
+      out.push('the armed move is never cleared, so a later recompose moves somebody for no reason');
     }
     if (!effect.includes('changeElements(')) {
       out.push('the move never asks the redrawn picture for the element to take');
     }
-    if (!effect.includes('indexAfterAccept(')) {
-      out.push('the move does not bound the index, so accepting the last change could walk off the end');
+    if (!effect.includes('indexAfterRemoval(')) {
+      out.push('the move does not bound the index, so a press on the last change could walk off the end');
     }
     if (!effect.includes('makeCurrent(')) {
-      out.push('the next change is never made current, so the controls stay on the change that was accepted');
+      out.push('the next change is never made current, so the controls stay on the change that was pressed');
     }
     if (!effect.includes('.focus(')) {
-      out.push('the next change is never focused, so the keyboard cannot reach the next ⌥↩');
+      out.push('the next change is never focused, so the keyboard cannot reach the next press');
     }
     return out;
   };
@@ -5058,76 +5097,118 @@ function gridOf(css, cls) {
     for (const line of advanceFindings(readFileSync(VIEW, 'utf8'))) fail(`40. ${line}`);
   }
 
-  // The scanner, proved on eight plants, seven of which must be caught.
-  const SHAPE = (arm, effect) =>
-    `const advanceAfterAccept = useRef(null);\n` +
+  // The scanner, proved on twelve plants, eleven of which must be caught.
+  const SHAPE = (arm, pressArm, effect) =>
+    `const advanceAfterPress = useRef(null);\n` +
     `const accept = useCallback((kind, host) => {\n` +
     `  const result = pressAccept(kind, tabOf(), deps(host));\n${arm}\n}, [tab.id]);\n` +
+    `const press = useCallback(async (kind, host) => {\n` +
+    `  const result = await pressRedline(kind, tabOf(), deps(host));\n${pressArm}\n}, [tab.id]);\n` +
     `useLayoutEffect(() => {\n${effect}\n}, [composed]);\n`;
-  const ARM = "  if (result.outcome === 'accepted') {\n    if (kind === 'one') advanceAfterAccept.current = pressedAt;\n    hostRef.current?.focus({ preventScroll: true });\n  }";
+  const ARM = "  if (result.outcome === 'accepted') {\n    if (kind === 'one') advanceAfterPress.current = { at: pressedAt, pressed };\n    hostRef.current?.focus({ preventScroll: true });\n  }";
+  const PRESS_ARM = "  if (kind === 'rewind' && result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };";
   const EFFECT =
     '  const host = hostRef.current;\n' +
-    '  const at = advanceAfterAccept.current;\n' +
-    '  if (host === null || at === null) return;\n' +
-    '  advanceAfterAccept.current = null;\n' +
+    '  const pending = advanceAfterPress.current;\n' +
+    '  if (host === null || pending === null) return;\n' +
+    '  const standing = currentRef.current;\n' +
+    '  if (standing === null || !sameChange(standing, pending.pressed)) {\n' +
+    '    advanceAfterPress.current = null;\n' +
+    '    return;\n' +
+    '  }\n' +
     '  const items = changeElements(host);\n' +
-    '  const next = indexAfterAccept(items.length, at);\n' +
+    '  const stillDrawn = items.some((el) => sameChange(identityOf(el), pending.pressed));\n' +
+    '  if (stillDrawn) return;\n' +
+    '  advanceAfterPress.current = null;\n' +
+    '  const next = indexAfterRemoval(items.length, pending.at);\n' +
     '  const el = next === null ? null : (items[next] ?? null);\n' +
     '  if (el === null) return;\n' +
     '  makeCurrent(el);\n' +
     '  el.focus();';
   const PLANTS = [
-    { name: 'the shipping shape', source: SHAPE(ARM, EFFECT), caught: false },
+    { name: 'the shipping shape', source: SHAPE(ARM, PRESS_ARM, EFFECT), caught: false },
     {
-      name: 'the arming deleted, so the accept stops where it landed',
+      name: 'the accept arming deleted, so an accept stops where it landed',
       source: SHAPE(
         "  if (result.outcome === 'accepted') {\n    hostRef.current?.focus({ preventScroll: true });\n  }",
+        PRESS_ARM,
         EFFECT
       ),
       caught: true
     },
     {
-      name: 'the arming outside the accepted guard, which moves somebody on a refusal',
+      name: 'the accept arming outside the accepted guard, which moves somebody on a refusal',
       source: SHAPE(
-        "  if (result.outcome === 'accepted') {\n    hostRef.current?.focus({ preventScroll: true });\n  }\n  if (kind === 'one') advanceAfterAccept.current = pressedAt;",
+        "  if (result.outcome === 'accepted') {\n    hostRef.current?.focus({ preventScroll: true });\n  }\n  if (kind === 'one') advanceAfterPress.current = { at: pressedAt, pressed };",
+        PRESS_ARM,
         EFFECT
       ),
       caught: true
     },
     {
-      name: 'the per-change clause dropped, so accept-all arms a change that is gone',
+      name: 'the accept per-change clause dropped, so accept-all arms a change that is gone',
       source: SHAPE(
-        "  if (result.outcome === 'accepted') {\n    advanceAfterAccept.current = pressedAt;\n    hostRef.current?.focus({ preventScroll: true });\n  }",
+        "  if (result.outcome === 'accepted') {\n    advanceAfterPress.current = { at: pressedAt, pressed };\n    hostRef.current?.focus({ preventScroll: true });\n  }",
+        PRESS_ARM,
         EFFECT
       ),
       caught: true
     },
     {
-      name: 'the read deleted, so the armed index is never spent',
-      source: SHAPE(ARM, EFFECT.replace('  const at = advanceAfterAccept.current;\n', '')),
+      name: 'the rewind arming deleted, so option-delete stops where it landed',
+      source: SHAPE(ARM, '  void result;', EFFECT),
       caught: true
     },
     {
-      name: 'the index left armed after it is spent, so a later recompose moves somebody',
-      source: SHAPE(ARM, EFFECT.replace('  advanceAfterAccept.current = null;\n', '')),
+      name: 'the rewind arming not kept to a rewind, so an undo could move somebody',
+      source: SHAPE(
+        ARM,
+        "  if (result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };",
+        EFFECT
+      ),
+      caught: true
+    },
+    {
+      name: 'the read deleted, so the armed move is never spent',
+      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace(`  ${PENDING}\n`, '')),
+      caught: true
+    },
+    {
+      name: 'the standing guard dropped, so a move made during a rewind is overridden',
+      source: SHAPE(
+        ARM,
+        PRESS_ARM,
+        EFFECT.replace('  const standing = currentRef.current;\n', '')
+      ),
+      caught: true
+    },
+    {
+      name: 'the still-drawn guard dropped, so a rewind lands on the change it just rewound',
+      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace('  const stillDrawn = ', '  void ')),
+      caught: true
+    },
+    {
+      name: 'the move left armed after it is spent, so a later recompose moves somebody',
+      source: SHAPE(ARM, PRESS_ARM, EFFECT.replaceAll('  advanceAfterPress.current = null;\n', '')),
       caught: true
     },
     {
       name: 'the bound dropped, so the last change can walk off the end',
       source: SHAPE(
         ARM,
-        EFFECT.replace('  const next = indexAfterAccept(items.length, at);\n', '')
+        PRESS_ARM,
+        EFFECT.replace('  const next = indexAfterRemoval(items.length, pending.at);\n', '')
       ),
       caught: true
     },
     {
       name: 'the focus dropped, so the keyboard cannot reach the next press',
-      source: SHAPE(ARM, EFFECT.replace('el.focus();', '')),
+      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace('el.focus();', '')),
       caught: true
     },
     {
       name: 'the move focused but never made current',
-      source: SHAPE(ARM, EFFECT.replace('  makeCurrent(el);\n', '')),
+      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace('  makeCurrent(el);\n', '')),
       caught: true
     }
   ];
@@ -5140,7 +5221,7 @@ function gridOf(css, cls) {
     }
   }
   say(
-    `40. the accept hands the next change on: the index is armed inside the accepted guard for one change and spent by a layout effect that bounds it, makes it current and focuses it (${String(plantsOk)} of ${String(PLANTS.length)} scanner fixtures behaved, ${String(PLANTS.filter((q) => q.caught).length)} of them must fail)`
+    `40. a press moves on: the accept arms inside its accepted guard for one change, the rewind arms after its write and never for an undo, and a layout effect bounded by indexAfterRemoval waits for the pressed change to leave, makes the next one current and focuses it (${String(plantsOk)} of ${String(PLANTS.length)} scanner fixtures behaved, ${String(PLANTS.filter((q) => q.caught).length)} of them must fail)`
   );
 }
 

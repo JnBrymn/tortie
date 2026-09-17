@@ -75,7 +75,7 @@ import {
   chipNeedsMeasure,
   currentElement,
   identityOf,
-  indexAfterAccept,
+  indexAfterRemoval,
   indexOfChange,
   pressLetsGo,
   sameChange,
@@ -192,32 +192,17 @@ function DocumentRuns({
 export type { PressedChange } from './redline-press';
 
 /**
- * The change under focus inside `host`, or null when none holds it. Read off
- * the wrapper's own attributes rather than off any list in memory, so a press
- * is bound to exactly the picture the person is looking at, generation
- * included (research 83 B.8a).
- */
-export function focusedChange(host: HTMLElement): PressedChange | null {
-  const el = pressedElement(host);
-  if (el === null) return null;
-  const off = Number(el.dataset['changeOff']);
-  const generation = Number(el.dataset['changeGen']);
-  if (!Number.isInteger(off) || !Number.isInteger(generation)) return null;
-  return {
-    off,
-    del: el.dataset['changeDel'] ?? '',
-    ins: el.dataset['changeIns'] ?? '',
-    generation
-  };
-}
-
-/**
- * The change wrapper a press acts on, as an ELEMENT: the one the controls
- * belong to, and with nothing current, the one holding the keyboard or the
- * caret. It is `focusedChange`'s own read, answered as an element so a press
- * can ask WHERE the change it is about to act on stood among the changes
- * drawn, which is what the accept-advance round needs to hand the next
- * change on.
+ * THE CHANGE A PRESS ACTS ON, as an ELEMENT: the one the controls belong to,
+ * and with nothing current, the one holding the keyboard or the caret. It is
+ * the wrapper's own attributes the press is bound to rather than any list in
+ * memory, so a press is bound to exactly the picture the person is looking at,
+ * generation included (research 83 B.8a).
+ *
+ * IT ANSWERS AN ELEMENT RATHER THAN AN IDENTITY, and that is the one thing the
+ * press needs beyond the identity: the index it stood at among the changes
+ * drawn, which is what an accept or a rewind hands the next change on with. A
+ * caller that only wants the identity reads it off this through
+ * ./redline-current `identityOf`.
  */
 function pressedElement(host: HTMLElement): HTMLElement | null {
   const marked = currentElement(host);
@@ -298,13 +283,13 @@ export function RedlineDocument({
   // other side of the same pair.
   const shownRef = useRef(shownText);
   shownRef.current = shownText;
-  // THE ACCEPT-ADVANCE ROUND, 2026-09-16. WHERE THE NEXT ⌥↩ LANDS. An accept
-  // removes the change it names from the picture, so the change that follows
-  // it is a change of the picture that does not exist until React has drawn
-  // it; this holds the index across that one commit. It is armed by a landed
-  // per-change accept and consumed by the layout effect below, which is the
-  // only reader.
-  const advanceAfterAccept = useRef<number | null>(null);
+  // THE PRESS THAT MOVES ON, 2026-09-16. WHERE THE NEXT ACCEPT OR REWIND
+  // LANDS. Both verbs take the change they name out of the picture, so the
+  // change that follows it belongs to a picture that does not exist until
+  // React has drawn it; this holds the index, and the change that was pressed,
+  // across that commit. It is armed by a landed per-change accept or a landed
+  // rewind and consumed by the layout effect below, which is the only reader.
+  const advanceAfterPress = useRef<{ at: number; pressed: PressedChange } | null>(null);
   // PHASE 236. `chipRef` is held here so the pointer handler below can tell
   // "the pointer moved onto the chip" from "the pointer left the change".
   // The BOX the chip is placed against was `.ed-redline-view` until Phase 251
@@ -426,7 +411,13 @@ export function RedlineDocument({
       // prop both trail disk, and the generation guard needs the value now.
       const live = useEditor.getState().tabs.find((t) => t.id === tab.id);
       if (live === undefined) return;
-      await pressRedline(
+      // The change the press will act on, read once as an ELEMENT, exactly as
+      // the accept below reads it: the same two clauses, and the index so a
+      // rewind can hand the next change on once its write has landed.
+      const pressedEl = pressedElement(host);
+      const pressed = pressedEl === null ? null : identityOf(pressedEl);
+      const pressedAt = indexOfChange(changeElements(host), pressed);
+      const result = await pressRedline(
         kind,
         {
           id: live.id,
@@ -443,10 +434,7 @@ export function RedlineDocument({
           // ./redline-write (research 83 B.8a); the held state is a place and
           // never a stale generation. With nothing current — a hover with no
           // step yet — the DOM answer stands, exactly as Phase 236 left it.
-          focused: () => {
-            const marked = currentElement(host);
-            return marked === null ? focusedChange(host) : identityOf(marked);
-          },
+          focused: () => pressed,
           apply: applyRewind,
           // A refusal is never silent. A success shows nothing on the face:
           // the watcher recomposes the view, exactly as an outside write does.
@@ -465,6 +453,22 @@ export function RedlineDocument({
           }
         }
       );
+      // A REWIND MOVES ON TOO, which is the operator's ask of 2026-09-16:
+      // "when I press option delete, it should still go to the next available
+      // edit point". It is armed HERE, after the write landed, because the
+      // picture a rewind changes arrives through the watcher rather than in
+      // this tick, and the layout effect below is what spends it once the
+      // pressed change is really gone from the drawn picture. An UNDO arms
+      // nothing: it puts a change back, and the next place to be is where the
+      // person already is.
+      if (
+        kind === 'rewind' &&
+        result.outcome === 'wrote' &&
+        pressed !== null &&
+        pressedAt !== null
+      ) {
+        advanceAfterPress.current = { at: pressedAt, pressed };
+      }
       bumpJournal();
     },
     [tab.id]
@@ -480,6 +484,11 @@ export function RedlineDocument({
    * is still focused, for the ring and for the scroll-into-view research 83
    * D.3 measured on a 3,670px document, but the state moves whatever the focus
    * does.
+   *
+   * THE TWO ENDS LOOP, which is the operator's ask of 2026-09-16: past the
+   * last change ⌥↓ comes round to the first, and before the first ⌥↑ comes
+   * round to the last, so a document with changes in it can always be walked
+   * all the way round.
    */
   const step = useCallback(
     (delta: 1 | -1): void => {
@@ -498,12 +507,14 @@ export function RedlineDocument({
   // the store's `acceptBaseline` owns the one advance, which also PINS the
   // tab, because an accept on the preview tab dies on the next Explorer click.
   //
-  // THE ACCEPT-ADVANCE ROUND. AND IT MOVES ON. ⌥↩ used to leave the person on
-  // the change it had just stopped marking, so approving a run of changes was
-  // ⌥↩ ⌥↓ ⌥↩ ⌥↓ — one extra keystroke per change for a gesture the operator
-  // makes in a run. The change that was DRAWN AFTER the accepted one now
-  // becomes current and takes the focus, exactly as ⌥↓ would have put it
-  // there, so ⌥↩ again accepts the next change.
+  // THE PRESS THAT MOVES ON. ⌥↩ used to leave the person on the change it had
+  // just stopped marking, so approving a run of changes was ⌥↩ ⌥↓ ⌥↩ ⌥↓ — one
+  // extra keystroke per change for a gesture the operator makes in a run; ⌥⌫
+  // had the same shape and he asked for it too. The change that was DRAWN
+  // AFTER the pressed one now becomes current and takes the focus, exactly as
+  // ⌥↓ would have put it there, so ⌥↩ again accepts the next change and ⌥⌫
+  // again rewinds it; and past the last one the picture comes round to its
+  // first remaining change, which is the loop the two arrows keep.
   const accept = useCallback(
     (kind: 'one' | 'all', host: HTMLElement): void => {
       const live = useEditor.getState().tabs.find((t) => t.id === tab.id);
@@ -514,10 +525,8 @@ export function RedlineDocument({
       // from the picture after it, and an accept removes exactly that one and
       // leaves every other change in order.
       const pressedEl = pressedElement(host);
-      const pressedAt = indexOfChange(
-        changeElements(host),
-        pressedEl === null ? null : identityOf(pressedEl)
-      );
+      const pressed = pressedEl === null ? null : identityOf(pressedEl);
+      const pressedAt = indexOfChange(changeElements(host), pressed);
       const result = pressAccept(
         kind,
         {
@@ -535,7 +544,7 @@ export function RedlineDocument({
           // rewind above does: two verbs on one chip that acted on two
           // different changes would be the research 99 section 7.1 defect
           // wearing this phase's name.
-          focused: () => (pressedEl === null ? null : identityOf(pressedEl)),
+          focused: () => pressed,
           advance: (contents, at) => {
             useEditor.getState().acceptBaseline(live.id, contents, at);
           },
@@ -561,19 +570,18 @@ export function RedlineDocument({
       // schedules the render, so the wrapper is no longer the focused element
       // by the time it is removed and there is nothing to fall out of.
       //
-      // THE REWIND HAS THE SAME SHAPE AND IS NOT TOUCHED HERE. Its recompose
-      // arrives through the watcher rather than in this tick, so the fix is
-      // not the same line, and it is Phase 227's surface rather than this
-      // one's; it is recorded here so a later round finds it written down.
-      // The accept-advance round moved the ACCEPT on and deliberately left the
-      // rewind where it is: a rewind's picture arrives when the file write
-      // lands, so the same index would have to wait across an unbounded gap
-      // and would move the person on some later recompose if the write never
-      // changed the picture at all.
+      // THE REWIND REACHES THE SAME PLACE through the arming in ./press above,
+      // and this is what used to be its stated limit. Its recompose arrives
+      // through the watcher rather than in this tick, so the keyboard would be
+      // dropped when the wrapper it was on is replaced; the layout effect
+      // below focuses the change the rewind moved to, in the same commit as
+      // that recompose, so the next chord lands.
       if (result.outcome === 'accepted') {
         // Armed only for a landed per-change accept: a refusal must not move
         // the person, and accept-all leaves no change to move to.
-        if (kind === 'one') advanceAfterAccept.current = pressedAt;
+        if (kind === 'one' && pressed !== null && pressedAt !== null) {
+          advanceAfterPress.current = { at: pressedAt, pressed };
+        }
         hostRef.current?.focus({ preventScroll: true });
       }
     },
@@ -729,30 +737,49 @@ export function RedlineDocument({
       remeasure();
     }
   }, [current, composed]);
-  // THE ACCEPT-ADVANCE ROUND. THE MOVE AN ACCEPT ARMED, taken after the
-  // recompose and never inside the press: the change that follows the accepted
-  // one belongs to the picture AFTER the baseline moved, and that picture does
-  // not exist until React has drawn it. The index was read off the picture
-  // before the press and an accept removes exactly the change it names, so the
-  // element at that index now is the change that was drawn next.
+  // THE PRESS THAT MOVES ON. THE MOVE AN ACCEPT OR A REWIND ARMED, taken after
+  // the redraw and never inside the press: the change that follows the pressed
+  // one belongs to the picture AFTER the removal, and that picture does not
+  // exist until React has drawn it. The index was read off the picture before
+  // the press and the press removes exactly the change it names, so the element
+  // at that index now is the change that was drawn next; past the end, the
+  // picture comes round to its first remaining change.
   //
   // The two acts are the ones ⌥↓ performs, in its own order, so a change a
-  // person accepted and one they stepped to leave the view in the same state.
-  // An index past the end means the accepted change was the last one: nothing
-  // moves, and the keyboard is already back on the scroller from the accept
-  // itself.
+  // person accepted or rewound and one they stepped to leave the view in the
+  // same state. Where there is nothing left after the removal, nothing moves,
+  // and the keyboard is where the press left it.
   //
   // The generation is a dependency as well as the picture, because an accept
   // that lands on bytes the baseline already held leaves the composed string
   // untouched while the generation still moves; without it the armed index
   // would ride on until some later recompose moved the person for no reason.
+  //
+  // TWO GUARDS, and a rewind needs both. The first is that the person must
+  // still be standing on the change the press acted on — a move made while a
+  // rewind's redraw was in flight is theirs, and the armed move is dropped
+  // rather than overriding it. The second is that the picture must have LET
+  // THAT CHANGE GO: an accept removes it in this tick, while a rewind's
+  // picture arrives through the watcher, and until it does the element at the
+  // index is still the pressed change — so the move waits rather than stepping
+  // onto the change it just rewound.
   useLayoutEffect(() => {
     const host = hostRef.current;
-    const at = advanceAfterAccept.current;
-    if (host === null || at === null) return;
-    advanceAfterAccept.current = null;
+    const pending = advanceAfterPress.current;
+    if (host === null || pending === null) return;
+    const standing = currentRef.current;
+    if (standing === null || !sameChange(standing, pending.pressed)) {
+      advanceAfterPress.current = null;
+      return;
+    }
     const items = changeElements(host);
-    const next = indexAfterAccept(items.length, at);
+    const stillDrawn = items.some((el) => {
+      const id = identityOf(el);
+      return id !== null && sameChange(id, pending.pressed);
+    });
+    if (stillDrawn) return;
+    advanceAfterPress.current = null;
+    const next = indexAfterRemoval(items.length, pending.at);
     const el = next === null ? null : (items[next] ?? null);
     if (el === null) return;
     makeCurrent(el);

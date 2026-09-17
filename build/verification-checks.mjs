@@ -1280,22 +1280,23 @@ export const CHECKS = [
   // and opens no keychain, and touches `-L gmux` in one place only, a read
   // only session count taken before and after.
   electron('probe:p237'),
-  // THE ACCEPT-ADVANCE ROUND, 2026-09-16. The operator's ask: ⌥↩ on a change
-  // should forward to the next one, so approving a run of changes is a run of
-  // ⌥↩ presses rather than ⌥↩ ⌥↓ repeated. ONE launch on a scratch profile, a
-  // scratch HOME and its own socket over a repository it builds itself, with
-  // eight changes written by a synchronous /bin/sh. It presses ⌥↓ once, then
-  // ⌥↩ and reads the live DOM after each: the picture loses the change that was
-  // accepted, the change that FOLLOWED it becomes current with the keyboard on
-  // it, a SECOND ⌥↩ with no ⌥↓ accepts the next one, ⌥↓ still steps from where
-  // the accept left the person, the last accept empties the redline and the
-  // press past it does nothing, and not one byte of the file moves. Its arms
-  // are graded against the readings the PARENT commit's app gives, which is why
-  // `ACCEPT_ADVANCE_PARENT=1` grades the other way round and must report the defect.
+  // THE PRESS THAT MOVES ON, 2026-09-16. The operator's three asks: ⌥↩ on a
+  // change should forward to the next one, ⌥⌫ should do the same, and both
+  // arrows should loop at the ends instead of stopping. ONE launch on a
+  // scratch profile, a scratch HOME and its own socket over a repository it
+  // builds itself, with eight changes written by a synchronous /bin/sh. It
+  // presses ⌥↓ once, walks both ends to prove the loop, then drives each verb
+  // and reads the live DOM after it: the picture loses the change that was
+  // pressed, the change that FOLLOWED it becomes current with the keyboard on
+  // it, a SECOND ⌥↩ with no ⌥↓ accepts the next one, the arrows still loop
+  // after a press, and the file's digest separates the verbs — an accept
+  // moves no byte and a rewind writes. Its arms are graded the other way
+  // round at the build the operator reported, which is why
+  // `ACCEPT_ADVANCE_PARENT=1` must report the defect instead of the feature.
   // No agent, no token, no keychain; `-L gmux` counted before and after rather
-  // than touched. `node build/probe-redline-accept-advance.mjs --self-test`
-  // proves the two graders on twelve fixtures and launches nothing.
-  electron('probe:redlineaccept'),
+  // than touched. `node build/probe-redline-move-on.mjs --self-test` proves the
+  // two graders on eleven fixtures and launches nothing.
+  electron('probe:redlinemoveon'),
   // PHASE 238's MEASURE STEP. It answers one question with a number: how many
   // ordinary acts it takes to lose a baseline that only memory holds, which is
   // the shape research 83 B.3 gives an accept. ONE launch on a scratch profile
