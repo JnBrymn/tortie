@@ -221,7 +221,7 @@ export interface TabIo {
    * the plan read. A tab that is still holding `was` adopts `contents` now,
    * which is what lets the redline redraw in the same tick rather than after
    * the file watcher's next round trip — measured at 1,139 ms against an
-   * accept's 35 ms, the operator's own complaint.
+   * accept's 35 ms, PR 28's author's own complaint.
    *
    * TWO REFUSALS, and both are the difference between "the file holds these
    * bytes" and "the file held these bytes when the press was made": a tab
@@ -229,6 +229,12 @@ export interface TabIo {
    * a tab whose saved contents MOVED has a save or a read of its own to
    * believe. Either way the watcher is the honest reader and this does
    * nothing.
+   *
+   * PHASE 282. DIRTY INCLUDES A KEYSTROKE STILL ON ITS WAY TO THE BUFFER.
+   * ./redline-edits marks the tab when the edit is dispatched, before its
+   * first model has loaded, because a rewind's whole write fits inside that
+   * load and this refusal cannot answer a flag set after it
+   * (adopt-written.test.ts drives it through the real typing hook).
    */
   adoptWritten(id: string, contents: string, was: string): void;
   /**
@@ -1878,15 +1884,34 @@ export function createTabIo(deps: TabIoDeps): TabIo {
       // clean tab over a file with mixed endings reads differently from the
       // bytes it was loaded from, and that compare would stop the watcher
       // following such a file for good.
+      //
+      // PHASE 282. AND THE BASELINE THE READ STARTED FROM IS STILL THE TAB'S.
+      // `adoptWritten` below moves `savedContents` and the model's text while
+      // leaving the tab clean and the instance the same, so it passes both
+      // questions above. A read whose descriptor was opened before the guarded
+      // write's `renameSync` answers the OLD inode's bytes, and when it
+      // answered after the adoption it rolled `savedContents` and the buffer
+      // back to the pre-rewind text while the disk held the rewind — 37 of 500
+      // interleavings over the real main handlers, 0 of 500 with the adoption
+      // taken out. A read that raced a newer baseline is dropped, and the
+      // rename's own file event reads again. The same clause closes the same
+      // race for a ⌘S, whose `completeSave` moves `savedContents` the same way:
+      // a read opened on a clean tab before the person typed and saved put the
+      // pre-save bytes back into the buffer at 9217ae0d with no adoption
+      // anywhere. p282-watcher-race.test.ts drives both writers over real
+      // files. So the clause names the fact, not the writer; comparing the
+      // bytes with the adoption's `was` would answer for one writer only.
       const before = deps.byId(tab.id);
       if (before !== undefined && !before.dirty) {
         const model = getWorkingModel(tab.id);
+        const savedBefore = before.savedContents;
         try {
           const result = await gmux.fs.readFile(tab.path);
           const live = deps.byId(tab.id);
           if (
             live !== undefined &&
             !live.dirty &&
+            live.savedContents === savedBefore &&
             result.contents !== live.savedContents &&
             getWorkingModel(tab.id) === model
           ) {

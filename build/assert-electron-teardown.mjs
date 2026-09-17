@@ -207,13 +207,24 @@ const HELPER = 'electron-run.mjs';
  * PHASE 281 RAISED IT FROM 139 TO 140, for build/p281/probe-p281-meter.mjs, the
  * app run that reads the Claude meter's state at the parent and at HEAD over
  * the person's real keychain, two polls apart.
+ * PHASE 282 RAISED IT FROM 139 TO 140, for the two helper users that each
+ * counted themselves as the 139th: build/p277/probe-p277-save.mjs (`probe:p277`,
+ * Phase 277's app run for the save that clears newer typing) and
+ * build/probe-redline-move-on.mjs (`probe:redlinemoveon`, PR 28's app run for
+ * the press that moves on). The two rounds were in flight at once and each
+ * raised 138 to 139, so after the merge the gate read 140 users against a floor
+ * of 139 and either probe could have been deleted with it green.
+ *
+ * PHASE 282 RAISES IT AGAIN, from 140 to 141, because Phase 281 and this round
+ * landed within an hour of each other and each had raised it to 140 on its own
+ * branch: main carries both probes and the floor must count both.
  *
  * RAISE IT WHEN YOU ADD ONE, in the same commit, and that is not optional
  * bookkeeping. Adding a probe cannot turn this gate red, so a floor left where
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-const HELPER_USER_FLOOR = 140;
+const HELPER_USER_FLOOR = 141;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

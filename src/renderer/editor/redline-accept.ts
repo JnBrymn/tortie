@@ -42,7 +42,7 @@
 
 import { planAccept } from './rewind';
 import type { RewindRefusal } from './rewind';
-import type { PressedChange } from './redline-press';
+import type { PressedChange, RewindHold } from './redline-press';
 
 /** The live tab's fields an accept needs, read fresh at the press. */
 export interface AcceptTab {
@@ -67,11 +67,18 @@ export interface AcceptDeps {
   refuse: (why: RewindRefusal) => void;
   /** The clock, injected so a gate can pin the sentence rather than read one. */
   now: () => number;
+  /**
+   * PHASE 282. The view's rewind holds (./redline-press `RewindHold`), only
+   * ever READ here. Optional, so a caller that hands none is never held.
+   */
+  holds?: readonly RewindHold[];
 }
 
 export type AcceptResult =
   /** Nothing was under focus: no compose, no advance, no word. */
   | { outcome: 'nothing' }
+  /** PHASE 282. A rewind on this tab has not left the picture: no compose, no advance. */
+  | { outcome: 'held' }
   | { outcome: 'refused'; why: RewindRefusal }
   /** The baseline moved; `baseline` is the bytes it moved to. */
   | { outcome: 'accepted'; baseline: string };
@@ -90,6 +97,19 @@ export type AcceptResult =
  * A per-change accept with nothing under focus answers `nothing`, exactly as a
  * rewind does, so the chord from an empty document is a no-op rather than a
  * sentence about a change that was never named.
+ *
+ * PHASE 282. WHILE ANY REWIND ON THE TAB IS HELD, EVERY ACCEPT ANSWERS `held`,
+ * per change or all, and not only an accept of the change being rewound.
+ * ⌥⌫ then ⌥↩ on one change was the review's race: the accept took the change,
+ * the rewind still landed, and the change was drawn backwards with nothing
+ * said. A DIFFERENT change is refused too, because an accept moves the
+ * baseline and a moved baseline moves the rewound change's `off`: the hold
+ * would stop recognising it, a redraw would let it go, and the next ⌥↩ could
+ * take it while its write was still landing — found by reading while the spec
+ * was written, not driven (build/p282/SPEC.md §1.2). Accept-all is refused for
+ * the plainer reason that the bytes in front of the person still hold the
+ * rewound change's insertion. The cost is one more press once the redraw has
+ * come, and the view says why.
  */
 export function pressAccept(
   kind: 'one' | 'all',
@@ -98,6 +118,9 @@ export function pressAccept(
 ): AcceptResult {
   const pressed = kind === 'all' ? null : deps.focused();
   if (kind === 'one' && pressed === null) return { outcome: 'nothing' };
+  // After `nothing`, so the chord from an empty document stays a silent no-op,
+  // and before the plan, so a held accept composes nothing.
+  if (deps.holds !== undefined && deps.holds.length > 0) return { outcome: 'held' };
   const plan = planAccept({
     baseline: tab.baseline,
     baselineGeneration: tab.generation,

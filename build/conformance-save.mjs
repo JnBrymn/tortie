@@ -129,12 +129,27 @@
  * the word a person meets is decided in src/main/fs/guarded-write.ts and
  * logged in src/main/fs/ipc.ts, and a sentence map that is honest above a
  * catch that is not has separated nothing.
+ *
+ * AND IT READS THE REDLINE'S TYPING MODULE SINCE PHASE 282, for the same
+ * reason one file further out. `savedContents` is ⌘S's precondition, and
+ * Phase 282 is the first round in which something OTHER than a save moves it:
+ * the rewind adopts its own bytes, and the keystroke that was still React
+ * state when it did decided whether that adoption was refused. Rules 18 to 24
+ * are Phase 277's and 25 to 27c are Phase 282's; each is written at the block
+ * that asks it rather than here, and each has an arm in build/p268/ablation.mjs.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blockAt, functionBodyOf, namedFunctions, stripComments } from './scan-source.mjs';
+import {
+  blockAt,
+  callArguments,
+  closeOf,
+  functionBodyOf,
+  namedFunctions,
+  stripComments
+} from './scan-source.mjs';
 
 const TAG = '[conformance:save]';
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -147,6 +162,10 @@ const SAVE_WRITE = 'src/renderer/editor/save-write.ts';
 const SENTENCES = 'src/renderer/editor/save-sentences.ts';
 const AUTO_SAVE = 'src/renderer/editor/auto-save.ts';
 const EDITOR_STORE = 'src/renderer/editor/store.ts';
+// PHASE 282. The Redline view's typing hook, which rules 27 to 27c read. It
+// is the only other module that decides whether a tab is dirty while a write
+// of its own is in the air.
+const REDLINE_EDITS = 'src/renderer/editor/redline-edits.ts';
 // PHASE 273. The two MAIN-side files rules 16 and 17 read. This gate has only
 // ever read the renderer, and it reads them now because the word a person
 // meets is decided in one and logged in the other, and a sentence map that is
@@ -302,6 +321,77 @@ function orderInTail(tail, _marker, first, second) {
   const b = tail.indexOf(second);
   if (a === -1 || b === -1) return null;
   return a < b;
+}
+
+/**
+ * The body of the anonymous effect callback that holds `anchor`, braces
+ * matched. Null when the anchor is absent or sits outside every effect.
+ *
+ * PHASE 282. Rules 27 to 27c ask about ONE effect in ./redline-edits, and an
+ * effect has no name at all — it is an argument to `useEffect`, so
+ * `namedFunctions` cannot reach it and `methodBody`'s shape is not this one.
+ * Asking the whole FILE instead would read the wrong effect: the module
+ * declares four, and the two below this one name `markDirty` and
+ * `savedContents` as well, so a dirty mark deleted from the typing path would
+ * still be found in the model listener. The reader starts at the line the
+ * effect opens with and matches braces back from the `useEffect(` above it.
+ * `closeOf` is the matcher rather than `blockAt` because it tracks quotes, and
+ * this body carries a sentence a person reads.
+ */
+function effectBodyHolding(code, anchor) {
+  const at = code.indexOf(anchor);
+  if (at === -1) return null;
+  const opened = code.lastIndexOf('useEffect(', at);
+  if (opened === -1) return null;
+  const arrow = code.indexOf('=>', opened);
+  const open = arrow === -1 ? -1 : code.indexOf('{', arrow);
+  if (open === -1 || open > at) return null;
+  const close = closeOf(code, open);
+  return close === -1 ? null : code.slice(open + 1, close);
+}
+
+/**
+ * The arguments of the first call to `name` inside `body`, as source text, or
+ * null when it is not called there.
+ *
+ * PHASE 282. Rule 27b asks what KIND of thing the second argument is, and the
+ * two answers — a string captured before the await, and a function read after
+ * it — differ by nothing a substring test can see. `callArguments` splits at
+ * the commas at depth zero, so the arrow function's own comma-separated body
+ * does not split it.
+ */
+function argumentsOfCall(body, name) {
+  if (body === null) return null;
+  const at = body.indexOf(`${name}(`);
+  if (at === -1) return null;
+  return callArguments(body, body.indexOf('(', at));
+}
+
+// PHASE 282. The line the redline's typing effect opens with, which is what
+// tells this gate WHICH of that module's four effects to read; the mark that
+// makes a keystroke visible; and the step that makes the rest of the effect
+// asynchronous.
+const TYPING_ANCHOR = 'if (!editable || state.edits === written.current) return;';
+const DIRTY_MARK = 'markDirty(tabId, true)';
+const ASYNC_STEP = 'void (async';
+
+/**
+ * Where the typing effect marks a clean tab dirty, relative to the
+ * continuation: 'before', 'inside' or 'absent'. Null when there is no
+ * continuation to be on either side of.
+ *
+ * The three answers are three different defects and they get three different
+ * sentences: 'absent' is the shape at this phase's parent, where a keystroke
+ * was invisible until the chunk was in, and 'inside' is the same hole written
+ * so it looks fixed.
+ */
+function dirtyMarkPlace(body) {
+  if (body === null) return null;
+  const step = body.indexOf(ASYNC_STEP);
+  if (step === -1) return null;
+  const mark = body.indexOf(DIRTY_MARK);
+  if (mark === -1) return 'absent';
+  return mark < step ? 'before' : 'inside';
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +750,211 @@ const FIXTURES = [
       const body = functionBodyOf(c, 'autoSaveStopSentence') ?? '';
       return !(body.includes('saveRefusalSentence') && body.includes('staleSaveTitle'));
     }
+  },
+  // -- Phase 282, rules 25 to 27c -----------------------------------------
+  {
+    name: 'an adoption that refuses a dirty tab before it patches is clean',
+    catches: false,
+    code:
+      'const adoptWritten = (id, contents, was) => { const tab = deps.byId(id); ' +
+      'if (tab === undefined) return; if (tab.dirty || tab.savedContents !== was) return; ' +
+      'deps.patch(id, { savedContents: contents }); resetWorkingModel(id, contents); };',
+    check: (c) =>
+      bodyOrder(c, 'adoptWritten', 'tab.dirty', 'deps.patch(') === true &&
+      bodyOrder(c, 'adoptWritten', '!== was', 'resetWorkingModel(') === true &&
+      tailOrder(c, 'adoptWritten', 'tab.dirty', 'return', 'deps.patch(') === true
+  },
+  {
+    name: 'an adoption that patches BEFORE it refuses is caught',
+    catches: true,
+    code:
+      'const adoptWritten = (id, contents, was) => { const tab = deps.byId(id); ' +
+      'deps.patch(id, { savedContents: contents }); ' +
+      'if (tab.dirty || tab.savedContents !== was) return; resetWorkingModel(id, contents); };',
+    check: (c) => bodyOrder(c, 'adoptWritten', 'tab.dirty', 'deps.patch(') === false
+  },
+  {
+    name: 'an adoption with no `was` comparison at all reads as absent rather than as clean',
+    catches: true,
+    code:
+      'const adoptWritten = (id, contents, was) => { const tab = deps.byId(id); ' +
+      'if (tab.dirty) return; deps.patch(id, { savedContents: contents }); ' +
+      'resetWorkingModel(id, contents); };',
+    check: (c) => bodyOrder(c, 'adoptWritten', '!== was', 'deps.patch(') === null
+  },
+  {
+    name: 'an adoption that TESTS the refusal without returning on it is caught',
+    catches: true,
+    // The shape that reads like a guard and is not one: the dirty tab is
+    // mentioned before the patch, and the patch happens anyway.
+    code:
+      'const adoptWritten = (id, contents, was) => { const tab = deps.byId(id); ' +
+      'const skip = tab.dirty || tab.savedContents !== was; ' +
+      'deps.patch(id, { savedContents: contents, skip }); resetWorkingModel(id, contents); };',
+    check: (c) =>
+      bodyOrder(c, 'adoptWritten', 'tab.dirty', 'deps.patch(') === true &&
+      tailOrder(c, 'adoptWritten', 'tab.dirty', 'return', 'deps.patch(') !== true
+  },
+  {
+    name: 'a refresh that records the baseline before its read and compares it is clean',
+    catches: false,
+    code:
+      'const refreshRepo = async (repoPath) => { const before = deps.byId(tab.id); ' +
+      'const savedBefore = before.savedContents; const result = await gmux.fs.readFile(tab.path); ' +
+      'const live = deps.byId(tab.id); if (live.savedContents === savedBefore) ' +
+      '{ deps.patch(tab.id, { savedContents: result.contents }); resetWorkingModel(tab.id, result.contents); } };',
+    check: (c) =>
+      bodyOrder(c, 'refreshRepo', 'savedBefore =', 'fs.readFile(') === true &&
+      tailOrder(
+        c,
+        'refreshRepo',
+        'fs.readFile(',
+        'live.savedContents === savedBefore',
+        'resetWorkingModel('
+      ) === true
+  },
+  {
+    name: 'a refresh that records the baseline AFTER its read is caught',
+    catches: true,
+    // It compares the value with itself, so the clause is there and answers
+    // yes to every interleaving it was written to refuse.
+    code:
+      'const refreshRepo = async (repoPath) => { const result = await gmux.fs.readFile(tab.path); ' +
+      'const live = deps.byId(tab.id); const savedBefore = live.savedContents; ' +
+      'if (live.savedContents === savedBefore) ' +
+      '{ deps.patch(tab.id, { savedContents: result.contents }); resetWorkingModel(tab.id, result.contents); } };',
+    check: (c) => bodyOrder(c, 'refreshRepo', 'savedBefore =', 'fs.readFile(') === false
+  },
+  {
+    name: 'a refresh that replaces the buffer without comparing the baseline is caught',
+    catches: true,
+    code:
+      'const refreshRepo = async (repoPath) => { const before = deps.byId(tab.id); ' +
+      'const savedBefore = before.savedContents; const result = await gmux.fs.readFile(tab.path); ' +
+      'const live = deps.byId(tab.id); if (!live.dirty) ' +
+      '{ deps.patch(tab.id, { savedContents: result.contents }); resetWorkingModel(tab.id, result.contents); } };',
+    check: (c) =>
+      tailOrder(
+        c,
+        'refreshRepo',
+        'fs.readFile(',
+        'live.savedContents === savedBefore',
+        'resetWorkingModel('
+      ) === null
+  },
+  {
+    name: 'the typing effect that marks dirty before its continuation is clean',
+    catches: false,
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  if (live !== undefined && !live.dirty) useEditor.getState().markDirty(tabId, true);\n' +
+      '  void (async () => { const model = await ensureWorkingModel(tabId, () => now().savedContents, path); })();\n' +
+      '}, [state.edits]);',
+    check: (c) => dirtyMarkPlace(effectBodyHolding(stripComments(c), TYPING_ANCHOR)) === 'before'
+  },
+  {
+    name: 'the typing effect that marks dirty INSIDE its continuation is caught',
+    catches: true,
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  void (async () => { const model = await ensureWorkingModel(tabId, () => now().savedContents, path);\n' +
+      '    if (live !== undefined && !live.dirty) useEditor.getState().markDirty(tabId, true); })();\n' +
+      '}, [state.edits]);',
+    check: (c) => dirtyMarkPlace(effectBodyHolding(stripComments(c), TYPING_ANCHOR)) === 'inside'
+  },
+  {
+    name: "THE PARENT'S SHAPE: the typing effect that never marks dirty at all is caught",
+    catches: true,
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  void (async () => { const model = await ensureWorkingModel(tabId, live?.savedContents, path);\n' +
+      '    markDirty(tabId, want !== now.savedContents); })();\n' +
+      '}, [state.edits]);',
+    check: (c) => dirtyMarkPlace(effectBodyHolding(stripComments(c), TYPING_ANCHOR)) === 'absent'
+  },
+  {
+    name: 'a mark in a NEIGHBOURING effect is not read as the typing effect`s',
+    catches: true,
+    // The module declares four effects and the ones below this name
+    // `markDirty` too, so a whole-file question would answer yes to a typing
+    // path that lost its own mark.
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  void (async () => { const model = await ensureWorkingModel(tabId, live?.savedContents, path); })();\n' +
+      '}, [state.edits]);\n' +
+      'useEffect(() => {\n' +
+      '  useEditor.getState().markDirty(tabId, true);\n' +
+      '}, [liveText]);',
+    check: (c) => dirtyMarkPlace(effectBodyHolding(stripComments(c), TYPING_ANCHOR)) === 'absent'
+  },
+  {
+    name: 'a model built from a function is read as a function',
+    catches: false,
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  void (async () => { const model = await ensureWorkingModel(\n' +
+      '    tabId,\n' +
+      '    () => useEditor.getState().tabs.find((t) => t.id === tabId)?.savedContents ?? typedOn,\n' +
+      '    path); })();\n' +
+      '}, [state.edits]);',
+    check: (c) => {
+      const args = argumentsOfCall(effectBodyHolding(stripComments(c), TYPING_ANCHOR), 'ensureWorkingModel');
+      return args !== null && args.length === 3 && /^\(\s*\)\s*=>/.test(args[1].trim());
+    }
+  },
+  {
+    name: 'a model built from a string captured before the await is caught',
+    catches: true,
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  void (async () => { const model = await ensureWorkingModel(tabId, live?.savedContents ?? typedOn, path); })();\n' +
+      '}, [state.edits]);',
+    check: (c) => {
+      const args = argumentsOfCall(effectBodyHolding(stripComments(c), TYPING_ANCHOR), 'ensureWorkingModel');
+      return args !== null && args.length === 3 && !/^\(\s*\)\s*=>/.test(args[1].trim());
+    }
+  },
+  {
+    name: 'a continuation that returns on a moved baseline before it applies is clean',
+    catches: false,
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  void (async () => {\n' +
+      '    if (!had && now.savedContents !== typedOn) { markDirty(tabId, model.getValue() !== now.savedContents); return; }\n' +
+      '    applyModelText(model, want, !continues); })();\n' +
+      '}, [state.edits]);',
+    check: (c) =>
+      orderIn(
+        effectBodyHolding(stripComments(c), TYPING_ANCHOR),
+        'now.savedContents !== typedOn',
+        'return',
+        'applyModelText('
+      ) === true
+  },
+  {
+    name: 'a continuation that applies a text typed on a replaced picture is caught',
+    catches: true,
+    code:
+      'useEffect(() => {\n' +
+      `  ${TYPING_ANCHOR}\n` +
+      '  void (async () => {\n' +
+      '    applyModelText(model, want, !continues);\n' +
+      '    markDirty(tabId, want !== now.savedContents); })();\n' +
+      '}, [state.edits]);',
+    check: (c) =>
+      orderIn(
+        effectBodyHolding(stripComments(c), TYPING_ANCHOR),
+        'now.savedContents !== typedOn',
+        'return',
+        'applyModelText('
+      ) === null
   }
 ];
 
@@ -1452,6 +1747,190 @@ const PROJECT_CLOSED_SENTENCE =
     fail(`24. ${shipped} differs from the auditor's fixture, so the closure test was edited rather than satisfied`);
   } else {
     say("24. the auditor's closure test ships byte for byte as the fixture it was given");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PHASE 282's rules. `savedContents` is ⌘S's precondition, and until this
+// phase a save was the only thing that moved it. PR 28's rewind adopts the
+// bytes it just wrote so the picture does not wait for the watcher, and the
+// four-lens review of 2026-09-17 measured what that opened: a read that
+// crossed the adoption rolled the buffer back to the pre-rewind text in 37 of
+// 500 interleavings over the real main handlers, and a keystroke that was
+// still React state when the adoption ran was invisible to every refusal in
+// this file. Each rule below has an arm in build/p268/ablation.mjs.
+// ---------------------------------------------------------------------------
+
+// Rule 25. `adoptWritten` REFUSES BEFORE IT MOVES ANYTHING. It is the one door
+// that patches `savedContents` and replaces the working model with no write of
+// its own, so its two refusals — a dirty tab, and a baseline that is no longer
+// the `was` the write expected — are the whole guard. Both have to be read
+// before `deps.patch` and before `resetWorkingModel`, because after either of
+// those the person's buffer already holds the adopted text. The review's own
+// finding was that taking either clause out left this gate and
+// conformance:redline green and reddened only PR 28's own vitest.
+{
+  const code = source(TAB_IO);
+  const body = bodyOf(TAB_IO, 'adoptWritten', '25');
+  if (body !== null) {
+    const problems = [];
+    if (!body.includes('deps.byId(')) {
+      problems.push('it never reads the live tab, so both refusals are about a snapshot');
+    }
+    for (const [clause, what] of [
+      ['tab.dirty', 'a dirty tab'],
+      ['!== was', 'a baseline that moved since the write was planned']
+    ]) {
+      for (const [mutation, effect] of [
+        ['deps.patch(', 'moves savedContents'],
+        ['resetWorkingModel(', 'replaces the buffer']
+      ]) {
+        const ordered = bodyOrder(code, 'adoptWritten', clause, mutation);
+        if (ordered === null) {
+          problems.push(`it does not refuse ${what} before it ${effect}`);
+        } else if (ordered === false) {
+          problems.push(`it ${effect} before it refuses ${what}`);
+        }
+      }
+    }
+    // Asked only of the shape it was written for: a dirty test that IS above
+    // the patch and lets it happen anyway. The two questions above already
+    // answer for a test that is missing or below the patch, and asking this
+    // one there as well put a third sentence on the screen that was not true
+    // of either shape.
+    if (
+      bodyOrder(code, 'adoptWritten', 'tab.dirty', 'deps.patch(') === true &&
+      tailOrder(code, 'adoptWritten', 'tab.dirty', 'return', 'deps.patch(') !== true
+    ) {
+      problems.push('the dirty test is not a refusal: nothing returns between it and the patch');
+    }
+    if (problems.length > 0) {
+      fail(`25. adoptWritten in ${TAB_IO}: ${[...new Set(problems)].join('; ')}`);
+    } else {
+      say(
+        '25. adoptWritten reads the live tab and refuses a dirty one and a moved baseline before it patches savedContents or replaces the buffer'
+      );
+    }
+  }
+}
+
+// Rule 26. THE WATCHER'S CLEAN RELOAD ASKS WHETHER THE BASELINE MOVED UNDER
+// ITS READ. Rule 22 is the other half of the same question: the tab is still
+// clean and the model is still the same instance. `adoptWritten` passes both,
+// because it leaves the tab clean and the instance the same — so a read whose
+// descriptor was opened before the guarded write's `renameSync` answered the
+// OLD inode's bytes and put the pre-rewind text back while the disk held the
+// rewind. A read that raced a newer baseline is dropped, and the rename's own
+// file event reads again. The clause names the FACT rather than the writer, so
+// it closes the same race for a ⌘S's completion.
+{
+  const code = source(TAB_IO);
+  const body = bodyOf(TAB_IO, 'refreshRepo', '26');
+  if (body !== null) {
+    const captured = bodyOrder(code, 'refreshRepo', 'savedBefore =', 'fs.readFile(');
+    const compared = tailOrder(
+      code,
+      'refreshRepo',
+      'fs.readFile(',
+      'live.savedContents === savedBefore',
+      'resetWorkingModel('
+    );
+    if (captured === null) {
+      fail(
+        '26. refreshRepo never records the baseline its read started from, so an adoption or a save that lands inside the read is rolled back'
+      );
+    } else if (captured === false) {
+      fail(
+        '26. refreshRepo records the baseline AFTER its read, which compares a value with itself and answers yes to every interleaving the clause was written to refuse'
+      );
+    } else if (compared !== true) {
+      fail(
+        `26. refreshRepo ${compared === null ? "does not compare the live tab's savedContents with that baseline" : 'replaces the buffer before it compares them'}, so a read of the old inode wins over the bytes the write just landed`
+      );
+    } else {
+      say(
+        "26. refreshRepo records the baseline before its read and drops a reload whose baseline moved under it, beside rule 22's clean tab and model identity"
+      );
+    }
+  }
+}
+
+// Rules 27 to 27c. THE REDLINE'S TYPING PATH. Rule 14 pins the order in
+// `markDirty` because the auto save timer is armed off a tab the store already
+// holds; these pin the order one caller out, for the same kind of reason. A
+// keystroke in the Redline view is React state until an effect writes it to
+// the model, and the first keystroke of a session makes that effect wait on a
+// real chunk load. At this phase's parent the tab was marked dirty only after
+// that await, so a rewind landing inside it met a tab that read clean:
+// `adoptWritten` adopted, the continuation applied the pre-rewind text plus the
+// keystroke, and the next ⌘S wrote the agent's text back over the rewind with
+// `savedContents` as its precondition and nothing to refuse it.
+{
+  const body = effectBodyHolding(source(REDLINE_EDITS), TYPING_ANCHOR);
+  if (body === null) {
+    fail(
+      `27. ${REDLINE_EDITS} holds no effect opening with \`${TYPING_ANCHOR}\`, so rules 27 to 27c read nothing`
+    );
+  } else {
+    // 27. The mark is synchronous: it is made before the step that makes the
+    // rest of the effect asynchronous, which is the same instant every refusal
+    // in this file reads the tab at.
+    const place = dirtyMarkPlace(body);
+    if (place === null) {
+      fail('27. the typing effect hands nothing to a continuation, so this rule read nothing');
+    } else if (place === 'absent') {
+      fail(
+        "27. the typing effect never marks the tab dirty before its await, so a keystroke is invisible to adoptWritten, to refreshRepo's clean arm and to pressRedline's dirty refusal for as long as the chunk takes to load"
+      );
+    } else if (place === 'inside') {
+      fail(
+        '27. the typing effect marks the tab dirty inside its continuation, after the chunk load — which is the same window written so that it looks closed'
+      );
+    } else {
+      say(
+        '27. the redline typing effect marks a clean tab dirty synchronously, before the await that loads the chunk'
+      );
+    }
+
+    // 27b. The model is built from the bytes the tab holds when it is BUILT.
+    // A string captured before the await is the bytes of a file that a chunk
+    // load outlasting a whole rewind has already replaced, so the argument is
+    // a function the loader calls once the chunk is in.
+    const args = argumentsOfCall(body, 'ensureWorkingModel');
+    if (args === null || args.length !== 3) {
+      fail(
+        `27b. the typing effect calls ensureWorkingModel with ${args === null ? 'nothing this rule could read' : `${String(args.length)} arguments`}, so this rule read nothing`
+      );
+    } else if (!/^\(\s*\)\s*=>/.test(args[1].trim())) {
+      fail(
+        '27b. the typing effect hands ensureWorkingModel a captured string rather than a function, so a chunk load that outlasts a write builds the model from a file that is no longer on disk'
+      );
+    } else if (!args[1].includes('savedContents')) {
+      fail('27b. the function the typing effect hands ensureWorkingModel does not read savedContents');
+    } else {
+      say(
+        '27b. the typing effect builds its model from a function the loader calls after the chunk is in, reading the savedContents the tab holds then'
+      );
+    }
+
+    // 27c. A text computed on a picture the view has since replaced is never
+    // applied. `want` is the whole current side, so applying it over bytes that
+    // moved during the chunk load writes the old file back with the keystroke
+    // in it, and the model would make that the buffer ⌘S saves.
+    const returns = orderIn(body, 'now.savedContents !== typedOn', 'return', 'applyModelText(');
+    if (!body.includes('applyModelText(')) {
+      fail('27c. the typing effect never applies a text to the model at all, so this rule read nothing');
+    } else if (returns === null) {
+      fail(
+        '27c. the typing effect applies its text without asking whether savedContents moved since the edit was typed, so a keystroke drawn beside an adoption writes the pre-rewind file back'
+      );
+    } else if (returns === false) {
+      fail('27c. the typing effect applies its text before it returns on a moved baseline');
+    } else {
+      say(
+        '27c. the typing effect returns without applying when savedContents moved since the edit was typed, and re-derives dirty from the model'
+      );
+    }
   }
 }
 

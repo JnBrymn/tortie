@@ -141,7 +141,7 @@ console.log(
     // 1. From nowhere, next is the first change and previous the last.
     fromNowhere: [stepIndex(9, null, 1), stepIndex(9, null, -1)],
     // 2. THE ENDS LOOP: past the last change a step comes round to the first,
-    //    and before the first to the last (the operator's ask of 2026-09-16);
+    //    and before the first to the last (PR 28's author's ask of 2026-09-16);
     //    an empty document steps nowhere at all.
     ends: [stepIndex(9, 0, -1), stepIndex(9, 8, 1), stepIndex(0, null, 1)],
     // 3. Six positions, being the whole of the step's behaviour.

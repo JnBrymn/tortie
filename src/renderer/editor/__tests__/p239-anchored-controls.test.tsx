@@ -54,10 +54,15 @@
  *   8. A PRESS MOVES ON (2026-09-16). The change that was drawn after the one
  *      just accepted or rewound becomes current and takes the focus, so ⌥↩ can
  *      be pressed again for the next change instead of ⌥↩ ⌥↓ ⌥↩ ⌥↓, and the
- *      same for ⌥⌫. Both verbs remove exactly the change they name and leave
- *      the others in order, so the follow-on sits at the index the pressed
- *      change stood at, and PAST THE LAST ONE IT COMES ROUND TO THE FIRST
- *      REMAINING — there is no stranded run above the place a person started.
+ *      same for ⌥⌫; PAST THE LAST ONE IT COMES ROUND TO THE FIRST REMAINING —
+ *      there is no stranded run above the place a person started. PHASE 282
+ *      corrected HOW it is found. PR 28 took the index the pressed change stood
+ *      at, on the claim that both verbs leave the others in order, and the
+ *      review measured that false twice: a rewind re-reads the file, so an
+ *      agent's write above adds a change in front, and a redraw re-cuts
+ *      neighbours. The follower is now carried by IDENTITY
+ *      (./redline-current `landingAfterPress`, pinned in p282-move-on.test.ts)
+ *      and the index is its fallback, which is what this file still pins.
  *
  *   9. THE ENDS LOOP (2026-09-16). ⌥↓ past the last change lands on the first
  *      and ⌥↑ before the first lands on the last, so a document with changes
@@ -92,7 +97,9 @@ const {
   identityOf,
   indexAfterRemoval,
   indexOfChange,
+  landingAfterPress,
   pressLetsGo,
+  pressMoveOf,
   sameChange,
   stepIndex
 } = await import('../redline-current');
@@ -198,7 +205,7 @@ describe('the step computes from the held position, never from the focus', () =>
   });
 
   it('THE ENDS LOOP: past the last comes round to the first, and before the first to the last', () => {
-    // The operator asked for this on 2026-09-16: "I want it to flip over and
+    // PR 28's author asked for this on 2026-09-16: "I want it to flip over and
     // go to the first edit point at the top of the document", and backwards
     // for ⌥↑, "so that it forms a loop instead of just hitting the end".
     expect(stepIndex(9, 8, 1)).toBe(0);
@@ -215,12 +222,41 @@ describe('the step computes from the held position, never from the focus', () =>
 // ---------------------------------------------------------------------------
 
 describe('a press that removed a change hands the next one on', () => {
-  it('the change that followed the pressed one sits at the same index in a picture one shorter', () => {
+  it('THE FOLLOWER IS FOUND BY IDENTITY, even where the index now names another change (Phase 282)', () => {
+    // Research 99's nine, press the fourth with ⌥⌫ while an agent's write
+    // already on disk ABOVE it is picked up by the rewind's own re-read: the
+    // pressed change goes and a new one arrives in front of it, so the count
+    // does not move and the fourth element is now the AGENT's change, above
+    // the one the person rewound. PR 28's rule answered that index; the move
+    // now carries the fifth change's identity and lands on it.
+    const drawn = NINE.map((el) => identityOf(el));
+    const move = pressMoveOf('rewind', drawn, drawn[3] ?? null);
+    expect(move?.follower).toEqual(drawn[4]);
+    const after = [
+      ...drawn.slice(0, 3),
+      identityOf(wrapper(230, 'the shell wrote this', 'and this')),
+      ...drawn.slice(4)
+    ];
+    expect(after).toHaveLength(9);
+    expect(indexAfterRemoval(after.length, 3)).toBe(3);
+    expect(move).not.toBeNull();
+    expect(landingAfterPress(after, move!)).toBe(4);
+  });
+
+  it('THE FALLBACK, when the follower is gone: the index the pressed change stood at, in the picture after', () => {
     // Nine changes, press the fourth: eight remain and what was drawn fifth
-    // is now fourth, which is where the index the accept read still points.
+    // is now fourth, which is where the index the press read still points —
+    // right exactly when nothing else moved, which is why it is only the
+    // fallback.
     expect(indexAfterRemoval(8, 3)).toBe(3);
     // And from the top, so a press on the first change lands on the second.
     expect(indexAfterRemoval(8, 0)).toBe(0);
+    // The redraw merged the fifth away as well, so there is no follower to
+    // find: the fallback takes what now stands in the fourth place.
+    const drawn = NINE.map((el) => identityOf(el));
+    const move = pressMoveOf('rewind', drawn, drawn[3] ?? null);
+    expect(move).not.toBeNull();
+    expect(landingAfterPress([...drawn.slice(0, 3), ...drawn.slice(5)], move!)).toBe(3);
   });
 
   it('THE LAST CHANGE LOOPS: the picture comes round to its first remaining change', () => {

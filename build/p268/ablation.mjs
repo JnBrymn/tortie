@@ -4,14 +4,19 @@
  * fail, which is the only thing that makes a green gate evidence.
  *
  * It launches no Electron, starts no tmux server, spawns no agent, makes no
- * request and touches nothing under the person's home. It copies two source
- * files aside, breaks one clause at a time, runs the gate, and RESTORES BOTH
- * IN A `finally` block whatever happened — including on a signal.
+ * request and touches nothing under the person's home. It copies the source
+ * files it breaks aside, breaks one clause at a time, runs the gate, and
+ * RESTORES EVERY ONE IN A `finally` block whatever happened — including on a
+ * signal. Since Phase 282 the restore is PROVED rather than asserted: the
+ * sha256 of every file it rewrites is taken before the first ablation and
+ * compared after the `finally`, so a restore that wrote the wrong bytes is a
+ * finding rather than a phase's source quietly altered by its own proof.
  *
- * Four ablations, one clause each, and each must redden THE RULE THAT OWNS IT.
+ * Every ablation is ONE CLAUSE, and each must redden THE RULE THAT OWNS IT.
  * An ablation that passes is a hole in the gate; an ablation that reddens a
  * rule other than its own is a finding about the gate rather than about the
- * build.
+ * build. The count lives in the PASS line at the bottom and nowhere else: this
+ * header opened "Four ablations" and was still saying it at eighteen.
  *
  *  1. Route auto save through the unguarded door — rules 6 and 10.
  *  2. Delete the auto guard from `save`'s body — rule 11.
@@ -39,12 +44,26 @@
  *  16-17. A literal clean patch in tab-io, and a door that does not end in
  *     completeSave — rule 23.
  *  18. The auditor fixture edited to pass — rule 24.
+ *  19-21. PHASE 282. `adoptWritten` adopting over a dirty tab, over a moved
+ *     baseline, and refusing only after it has already patched — rule 25. The
+ *     review of 2026-09-17 took each clause out at PR 28's head and found this
+ *     gate and conformance:redline both green.
+ *  22-23. `refreshRepo` reloading a clean tab over a baseline that moved under
+ *     its read, and the same clause taken from the wrong instant so that it
+ *     compares a value with itself — rule 26.
+ *  24-25. The redline's typing path leaving a keystroke invisible until the
+ *     chunk is in, and the same window written so that it looks closed — rule
+ *     27.
+ *  26. The model built from a string captured before the await — rule 27b.
+ *  27. A text typed on a picture the view has since replaced, applied anyway —
+ *     rule 27c.
  *
  * Then the files are restored and the gate must exit ZERO again.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -54,6 +73,8 @@ const say = (l) => console.log(`${TAG} ${l}`);
 const AUTO_SAVE = join(REPO, 'src/renderer/editor/auto-save.ts');
 const TAB_IO = join(REPO, 'src/renderer/editor/tab-io.ts');
 const EDITOR_STORE = join(REPO, 'src/renderer/editor/store.ts');
+// PHASE 282. The Redline view's typing hook, which arms 24 to 27 break.
+const REDLINE_EDITS = join(REPO, 'src/renderer/editor/redline-edits.ts');
 const GATE = join(REPO, 'build/conformance-save.mjs');
 const AUDIT_TEST = join(REPO, 'src/renderer/editor/__tests__/audit-0914-auto-save.test.ts');
 
@@ -75,12 +96,27 @@ const originals = new Map([
   [AUTO_SAVE, readFileSync(AUTO_SAVE, 'utf8')],
   [TAB_IO, readFileSync(TAB_IO, 'utf8')],
   [EDITOR_STORE, readFileSync(EDITOR_STORE, 'utf8')],
+  [REDLINE_EDITS, readFileSync(REDLINE_EDITS, 'utf8')],
   [AUDIT_TEST, readFileSync(AUDIT_TEST, 'utf8')]
 ]);
 
 function restore() {
   for (const [path, text] of originals) writeFileSync(path, text, 'utf8');
 }
+
+/**
+ * The digest of every file this script rewrites, taken before the first
+ * ablation and compared with the tree it gives back.
+ *
+ * PHASE 282. The `finally` is what makes this script safe to run, and until
+ * now nothing checked that it worked: a `restore()` that wrote the wrong bytes
+ * would leave a phase's own source altered by its proof, and the next thing to
+ * read the tree would be reading the ablation rather than the build. The
+ * comparison is at the end, after the `finally`, so it answers for the tree as
+ * a person finds it.
+ */
+const digestOf = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+const digestsBefore = new Map([...originals.keys()].map((path) => [path, digestOf(path)]));
 
 // Restore on a signal too: a killed ablation must not leave the tree broken.
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
@@ -353,6 +389,149 @@ try {
     restore();
   }
 
+  // ------------------------------------------------------------------ 19
+  // PHASE 282. `adoptWritten` with its dirty refusal taken out. The review of
+  // 2026-09-17 removed each of these clauses at the PR's head and found this
+  // gate and conformance:redline both green; only PR 28's own vitest, which
+  // feeds `dirty` in as a literal, went red. That is the hole rule 25 fills.
+  {
+    ablate(
+      TAB_IO,
+      'if (tab.dirty || tab.savedContents !== was) return;',
+      'if (tab.savedContents !== was) return;'
+    );
+    const { code, failed } = runGate();
+    say(`19 (adoptWritten adopts over a dirty tab): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('19. an adoption over a dirty tab passed the gate');
+    if (!failed.includes('25')) problems.push('19. rule 25 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 20
+  // The other clause: an adoption that never asks whether the baseline is
+  // still the one the write was planned against.
+  {
+    ablate(
+      TAB_IO,
+      'if (tab.dirty || tab.savedContents !== was) return;',
+      'if (tab.dirty) return;'
+    );
+    const { code, failed } = runGate();
+    say(`20 (adoptWritten adopts over a moved baseline): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('20. an adoption over a moved baseline passed the gate');
+    if (!failed.includes('25')) problems.push('20. rule 25 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 21
+  // Both clauses kept and read too late. The refusal is still in the source,
+  // which is what makes this the shape a reader skims past.
+  {
+    ablate(
+      TAB_IO,
+      '    if (tab.dirty || tab.savedContents !== was) return;\n    deps.patch(id, { savedContents: contents });\n',
+      '    deps.patch(id, { savedContents: contents });\n    if (tab.dirty || tab.savedContents !== was) return;\n'
+    );
+    const { code, failed } = runGate();
+    say(`21 (adoptWritten refuses after it patches): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('21. an adoption that refuses after it patches passed the gate');
+    if (!failed.includes('25')) problems.push('21. rule 25 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 22
+  // PHASE 282. The parent's clean reload: a tab that is clean and holds the
+  // same model is reloaded whatever moved its baseline while the read was out.
+  // 37 of 500 interleavings over the real main handlers rolled a rewind back.
+  {
+    ablate(TAB_IO, '            live.savedContents === savedBefore &&\n', '');
+    const { code, failed } = runGate();
+    say(`22 (refreshRepo reloads over a moved baseline): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('22. a reload over a moved baseline passed the gate');
+    if (!failed.includes('26')) problems.push('22. rule 26 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 23
+  // The clause kept and taken from the wrong instant. It compares the value
+  // with itself, so it reads like the fix and refuses nothing at all.
+  {
+    ablate(
+      TAB_IO,
+      '        const savedBefore = before.savedContents;\n        try {\n          const result = await gmux.fs.readFile(tab.path);\n          const live = deps.byId(tab.id);\n',
+      '        try {\n          const result = await gmux.fs.readFile(tab.path);\n          const live = deps.byId(tab.id);\n          const savedBefore = live?.savedContents;\n'
+    );
+    const { code, failed } = runGate();
+    say(`23 (the baseline recorded after the read): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('23. a baseline recorded after the read passed the gate');
+    if (!failed.includes('26')) problems.push('23. rule 26 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 24
+  // PHASE 282. The parent's typing path: the tab is marked dirty only after
+  // the chunk load, so a rewind landing inside it meets a tab that reads clean
+  // and the next ⌘S writes the agent's text back over it.
+  {
+    ablate(
+      REDLINE_EDITS,
+      '    if (live !== undefined && !live.dirty) useEditor.getState().markDirty(tabId, true);\n',
+      ''
+    );
+    const { code, failed } = runGate();
+    say(`24 (the keystroke invisible until the chunk is in): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('24. a typing path with no synchronous dirty mark passed the gate');
+    if (!failed.includes('27')) problems.push('24. rule 27 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 25
+  // The same window, written so that it looks closed: the mark is there and it
+  // is made after the await, which is the instant it was needed before.
+  {
+    ablate(
+      REDLINE_EDITS,
+      '    if (live !== undefined && !live.dirty) useEditor.getState().markDirty(tabId, true);\n    void (async () => {\n',
+      '    void (async () => {\n      if (live !== undefined && !live.dirty) useEditor.getState().markDirty(tabId, true);\n'
+    );
+    const { code, failed } = runGate();
+    say(`25 (the dirty mark moved inside the continuation): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('25. a dirty mark inside the continuation passed the gate');
+    if (!failed.includes('27')) problems.push('25. rule 27 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 26
+  // The model built from a string captured before the await — the parent's
+  // shape, and a chunk load can outlast a whole rewind.
+  {
+    ablate(
+      REDLINE_EDITS,
+      '        () => useEditor.getState().tabs.find((t) => t.id === tabId)?.savedContents ?? typedOn,\n',
+      '        live?.savedContents ?? typedOn,\n'
+    );
+    const { code, failed } = runGate();
+    say(`26 (the model built from a captured string): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('26. a model built from a captured string passed the gate');
+    if (!failed.includes('27b')) problems.push('26. rule 27b did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 27
+  // The text typed on a picture the view has since replaced, applied anyway.
+  {
+    ablate(
+      REDLINE_EDITS,
+      '      if (!had && now.savedContents !== typedOn) {\n        useEditor.getState().markDirty(tabId, model.getValue() !== now.savedContents);\n        return;\n      }\n',
+      ''
+    );
+    const { code, failed } = runGate();
+    say(`27 (a text typed on a replaced picture, applied): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('27. applying a text typed on a replaced picture passed the gate');
+    if (!failed.includes('27c')) problems.push('27. rule 27c did not go red');
+    restore();
+  }
+
   // ---------------------------------------------------------------- restored
   {
     const { code } = runGate();
@@ -363,10 +542,24 @@ try {
   restore();
 }
 
+// The tree this script borrowed is the tree it gives back, compared by sha256
+// rather than asserted. This runs after the `finally`, so it answers for the
+// files as the next reader finds them.
+for (const [path, digest] of digestsBefore) {
+  const now = digestOf(path);
+  if (now !== digest) {
+    problems.push(
+      `${relative(REPO, path)} was not restored: sha256 ${digest.slice(0, 12)} became ${now.slice(0, 12)}`
+    );
+  }
+}
+
 if (problems.length > 0) {
   for (const p of problems) process.stderr.write(`${TAG} ${p}\n`);
   process.stderr.write(`${TAG} FAILED: ${String(problems.length)} finding(s).\n`);
   process.exit(1);
 }
-say('PASS: 18 ablations, each red on the rule that owns it, and the tree restored.');
+say(
+  'PASS: 27 ablations, each red on the rule that owns it, and the tree restored byte for byte by sha256.'
+);
 process.exit(0);

@@ -249,10 +249,17 @@ export function languageFor(m: Monaco, path: string): string {
  *
  * Answers null when the chunk fails to load, which the caller says out loud
  * rather than swallowing.
+ *
+ * PHASE 282. `contents` may be a FUNCTION, read AFTER the chunk has loaded,
+ * where the model is made. The first keystroke of a session waits on that
+ * load, and a rewind's whole write and adoption fit inside it, so bytes read
+ * before the await can be a file that is no longer there; ./redline-edits
+ * passes a reader of the tab's `savedContents` for that reason. A string
+ * behaves exactly as it did.
  */
 export async function ensureWorkingModel(
   key: string,
-  contents: string,
+  contents: string | (() => string),
   path: string
 ): Promise<monacoNs.editor.ITextModel | null> {
   const existing = getWorkingModel(key);
@@ -266,7 +273,8 @@ export async function ensureWorkingModel(
     }
     rememberLoaded(m);
   }
-  return workingModel(m, key, contents, languageFor(m, path));
+  const text = typeof contents === 'function' ? contents() : contents;
+  return workingModel(m, key, text, languageFor(m, path));
 }
 
 /** Dispose the working model for a closed tab. */

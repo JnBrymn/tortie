@@ -480,39 +480,88 @@
  *      Its ablation directories are `.p251-chip-*` at the repository root, for
  *      rules 19, 25 and 26's reason.
  *
- *  40. A PRESS MOVES ON IN THE SAME TICK (2026-09-16, extended the same day).
+ *  40. THE PRESS THAT MOVES ON (2026-09-16; rewritten by Phase 282 on
+ *      2026-09-17, when PR 28's own rule was measured wrong twice).
  *      ⌥↩ stopped marking the change under focus and ⌥⌫ puts it back, and both
  *      now leave the person on the change that was DRAWN AFTER the one they
  *      pressed, so a run of approvals or rejections is one chord pressed over
- *      and over rather than ⌥↩ ⌥↓ repeated. An accept removes exactly the
- *      change it names and leaves every other one in order, so the follow-on
- *      sits at the index the pressed change stood at, and past the end the
- *      picture comes round to its first remaining change rather than
- *      stranding the changes above it.
+ *      and over rather than ⌥↩ ⌥↓ repeated. Past the end the picture comes
+ *      round to its first remaining change rather than stranding the changes
+ *      above it.
+ *
+ *      THE FOLLOWER IS CARRIED BY IDENTITY AND THE INDEX IS ONLY THE
+ *      FALLBACK. PR 28 carried the pressed change's INDEX across the redraw
+ *      and took the element standing there afterwards, on the claim that both
+ *      verbs leave every other change in the order it was drawn in. The Phase
+ *      282 review measured that claim false twice: ⌥⌫ RE-READS the file, so
+ *      an agent's write already on disk above the pressed change adds a
+ *      change in front of it and the move landed on the one the person had
+ *      just walked past — which the next ⌥⌫ in the rhythm would rewrite, and
+ *      a per-change accept has no undo; and a redraw RE-CUTS neighbours, so
+ *      accepting change 3 of 4 in a list landed on a merged bullet above it.
+ *      So `pressMoveOf` records WHICH change came next and `landingAfterPress`
+ *      asks three questions in one fixed order: WAIT while the pressed change
+ *      is still drawn on `off`, `del` AND `ins` (and not `sameChange`, which
+ *      parked the move on an agent's new change at the same span); then the
+ *      FOLLOWER by `sameChange`, at its offset plus an accept's own
+ *      `ins.length - del.length` when it was drawn after the pressed one;
+ *      then `indexAfterRemoval`, only when that follower is gone. The view
+ *      names `indexAfterRemoval` nowhere at all now.
  *
  *      THE TWO VERBS DIFFER IN ONE WAY THAT MATTERS: an accept moves the
  *      baseline in memory and redraws in its own tick, while a rewind writes
- *      the file. Measured in the app at 35 ms against 1,139 ms, and the
- *      operator's own complaint — so a landed write is ADOPTED by the tab
- *      that wrote it, which is the line this rule refuses to lose.
+ *      the file. Measured in the app at 35 ms against 1,139 ms, and PR 28's
+ *      author's own complaint — so a landed write is ADOPTED by the tab that
+ *      wrote it, which is the line this rule refuses to lose. Two orderings
+ *      ride on that adoption and both are read here: the host takes the
+ *      keyboard BEFORE it, because a rewind of the ONLY remaining change
+ *      removes the wrapper the keyboard was on and Chromium sends focus to
+ *      `document.body`, where the scroller's key handler never hears ⌥⇧⌫
+ *      again; and the hold LANDS AFTER it, with the bytes the tab holds once
+ *      the adoption has had its say.
+ *
+ *      ONE PRESS AT A TIME. A rewind is in the air for a write and, when the
+ *      adoption refuses, a whole watcher round trip, and the picture goes on
+ *      drawing the change it rewound. So the press takes a HOLD; a second
+ *      rewind of that change and every accept on that tab answer `held` with
+ *      a sentence and touch nothing; and the hold is let go by a layout
+ *      effect keyed on the picture AND on `savedContents`, because a watcher
+ *      read moves the bytes without moving a dirty tab's picture. A KEY
+ *      REPEAT IS NOT A PRESS either: with the move-on, a held ⌥⌫ became
+ *      "rewind every change in the file, writing it once per change" and a
+ *      held ⌥↩ became the accept-all chord keymap.ts removed on purpose, so a
+ *      repeated keydown runs only `next` and `prev` — after the
+ *      `preventDefault()`, which is not optional, because an unprevented ⌥⌫
+ *      in the `plaintext-only` document is Chromium's `deleteWordBackward`.
+ *
+ *      AND live-text.ts READS NO WORKING MODEL ON THE RENDER PATH. PR 28
+ *      added one line there that read the model at every render; it made the
+ *      Redline view draw text one keystroke ahead of the typing hook's own
+ *      last picture, which is the BLOCKING scramble (`swift` typed as
+ *      `swfti`, and `probe:p237` failing 5 checks in the app). The `useState`
+ *      initialiser and the effect may read the model; nothing that runs on
+ *      every render may.
  *
  *      IT IS A SCAN BECAUSE THE SUITE CANNOT SEE IT: this tree carries no
- *      jsdom, so nothing in vitest focuses an element, and the index is read
- *      off one picture and spent on the next. The scan reads both callbacks
- *      by MATCHING PARENTHESES and refuses an arming outside the accepted
- *      guard, an arming without the per-change clause — accept-all leaves no
- *      change to move to, and a refusal must not move anybody — a rewind
- *      that does not adopt its own bytes, an arming not kept to a rewind, an
- *      armed move nothing reads or one read outside a layout effect, and an
- *      effect that does not ask the redrawn picture, does not bound the
- *      index, never makes the change current, never focuses it, or does not
- *      clear the move it spent. Fourteen planted shapes beside the shipping
- *      one, and every one of the thirteen must fail.
+ *      jsdom, so nothing in vitest focuses an element, and the move is read
+ *      off one picture and spent on the next. Three scanners, over
+ *      RedlineDocument.tsx, redline-current.ts and live-text.ts, reading the
+ *      callbacks and the effects by MATCHING PARENTHESES so that one
+ *      callback's references are never mistaken for another's. Each is proved
+ *      on planted shapes this file writes, one per clause that must fail, and
+ *      then on ABLATIONS OF THE SHIPPING SOURCE — the identity lookup removed
+ *      so only the index is left, the holds dropped from each verb, the host
+ *      focus dropped, the repeat test dropped, PR 28's live-text line put
+ *      back, and six more — each of which must turn this rule red on its own
+ *      clause. The ablations are made on the strings in memory and never on
+ *      the tree, because this gate runs in the commit battery; the three
+ *      files' sha256 are compared in a `finally` to prove it.
  *
  * Exit 0 when every rule passes, 1 otherwise with each failure named.
  */
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -4974,8 +5023,9 @@ function gridOf(css, cls) {
 }
 
 // ---------------------------------------------------------------------------
-// THE PRESS THAT MOVES ON, 2026-09-16, rule 40: A PRESS MOVES ON, AND THE
-// PICTURE LOOPS.
+// THE PRESS THAT MOVES ON, 2026-09-16, rule 40, rewritten by Phase 282 on
+// 2026-09-17: THE FOLLOWER IS CARRIED BY IDENTITY, ONE PRESS AT A TIME, AND
+// THE RENDER PATH READS NO MODEL.
 //
 // ⌥↩ stops marking the change under focus and ⌥⌫ puts it back, and BOTH now
 // leave the person on the change that was DRAWN AFTER it, so a run of
@@ -4984,31 +5034,74 @@ function gridOf(css, cls) {
 // remaining change, so a run that started in the middle of a document does not
 // strand the changes above it.
 //
-// THE INDEX IS READ OFF THE PICTURE BEFORE THE PRESS — both verbs remove
-// exactly the change they name and leave every other one in order, so the
-// follow-on sits at that same index — and it is spent by a layout effect on the
-// picture that exists AFTER the removal. That timing is the whole difference
-// between the two verbs and it is why there are TWO GUARDS: an accept removes
-// the change in this tick, while a rewind's picture arrives through the
-// watcher, so the effect waits until the pressed change is really gone and
-// drops the move entirely if the person went somewhere else meanwhile.
+// THE INDEX WAS THE WRONG THING TO CARRY. PR 28 read the pressed change's
+// index off the picture before the press and took the element standing at that
+// index after the redraw, on the claim that both verbs leave every other
+// change in the order it was drawn in. The Phase 282 review measured that
+// claim false twice: a rewind RE-READS the file, so an agent's write already
+// on disk above the pressed change adds a change in front of it and the move
+// landed on the change the person had just walked past — which the next ⌥⌫ in
+// the rhythm would rewrite, and a per-change accept has no undo; and a redraw
+// RE-CUTS neighbours, so accepting change 3 of 4 in a list landed on a merged
+// bullet above it. So the press records WHICH CHANGE CAME NEXT, and the index
+// survives only as the fallback for a follower that is gone — inside
+// ./redline-current `landingAfterPress`, which the view no longer works around.
 //
-// NOTHING IN THE COMMIT BATTERY COULD SEE IT. This tree's vitest environment is
-// `node` and there is no jsdom, so no test focuses an element and none can read
-// the state a recompose leaves behind; `p239-anchored-controls.test.tsx` pins
-// `indexAfterRemoval` and `stepIndex`, which are the arithmetic, and this rule
-// pins the WIRING, which is where a later round would drop it. It is the same
-// instrument rule 20 uses: a scan of the shipping source with its scanner
-// proved on fixtures this file writes.
+// The two verbs still differ in one way that matters: an accept moves the
+// baseline in memory and redraws in its own tick, while a rewind writes the
+// file. Measured in the app at 35 ms against 1,139 ms, and PR 28's author's own
+// complaint — so a landed write is ADOPTED by the tab that wrote it, which is
+// the line this rule refuses to lose. TWO ORDERINGS RIDE ON THAT ADOPTION and
+// this rule reads both: the host takes the keyboard BEFORE it, because a
+// rewind of the ONLY remaining change removes the wrapper the keyboard was on
+// and Chromium sends focus to `document.body`, where the scroller's React key
+// handler never hears ⌥⇧⌫ again; and the hold LANDS AFTER it, with the bytes
+// the tab holds once the adoption has had its say.
 //
-// THE CLAUSES ARE PART OF THE RULE and they are not tidiness. An accept-all
-// leaves no change to move to and a refused accept must not move the person at
-// all, so the accept's arming lives inside its accepted guard and behind the
-// per-change clause; an undo puts a change BACK and the next place to be is
-// where the person already is, so the rewind's arming is kept to a rewind.
+// ONE PRESS AT A TIME, because a rewind is in the air for a write and, when
+// the adoption refuses, a whole watcher round trip, and the picture goes on
+// drawing the change it rewound. So the press takes a HOLD; a second rewind of
+// that same change and EVERY accept on that tab answer `held` with a sentence
+// and touch nothing; and the hold is let go by a layout effect keyed on the
+// picture AND on `savedContents`, because a watcher read moves the bytes
+// without moving a dirty tab's picture and the release must still be asked.
+// A KEY REPEAT IS NOT A PRESS either: with the move-on, a held ⌥⌫ became
+// "rewind every change in the file, writing it once per change" and a held ⌥↩
+// became the accept-all chord `keymap.ts` removed on purpose, so a repeated
+// keydown runs only `next` and `prev` — after the `preventDefault()`, which is
+// not optional, because an unprevented ⌥⌫ in the `plaintext-only` document is
+// Chromium's `deleteWordBackward`.
+//
+// AND ./live-text READS NO WORKING MODEL ON THE RENDER PATH. PR 28 added one
+// line there that read the model at every render; it made this view draw text
+// one keystroke ahead of the typing hook's own last picture, which is the
+// BLOCKING scramble — `swift` typed as `swfti`, and `probe:p237` failing 5
+// checks in the app. The `useState` initialiser and the effect may read the
+// model; nothing that runs on every render may.
+//
+// NOTHING IN THE COMMIT BATTERY COULD SEE THE WIRING. This tree's vitest
+// environment is `node` and there is no jsdom, so no test focuses an element
+// and none can read the state a recompose leaves behind;
+// `p282-move-on.test.ts` and `p282-one-press.test.ts` pin the ARITHMETIC and
+// the ANSWERS, and this rule pins the WIRING, which is where a later round
+// would drop it. It is the same instrument rule 20 uses: three scanners over
+// the shipping source, each reading callbacks and effects by MATCHING
+// PARENTHESES so one callback's references cannot be mistaken for another's,
+// each proved on planted shapes this file writes, and then on ABLATIONS OF THE
+// SHIPPING SOURCE ITSELF.
+//
+// THE ABLATIONS ARE MADE ON STRINGS AND NEVER ON THE TREE. This gate runs in
+// the commit battery, so a rule that edited the operator's own source and
+// crashed between the edit and the restore would leave him an ablated file.
+// Each ablation reads the shipping bytes, mutates the COPY and asks the same
+// scanner; the three files' sha256 are taken before and compared in a
+// `finally` after, so a later round that reaches for the disk instead is
+// caught here rather than by him.
 // ---------------------------------------------------------------------------
 {
   const VIEW = 'src/renderer/editor/RedlineDocument.tsx';
+  const CURRENT = 'src/renderer/editor/redline-current.ts';
+  const LIVE = 'src/renderer/editor/live-text.ts';
   const REF = 'advanceAfterPress';
   const PENDING = `const pending = ${REF}.current;`;
   const ACCEPTED_GUARD = "result.outcome === 'accepted'";
@@ -5023,18 +5116,50 @@ function gridOf(css, cls) {
   };
 
   /**
-   * What is wrong with this source's move-on wiring, or an empty list. Both
-   * callbacks are found by name and read by MATCHING PARENTHESES, the way rule
-   * 20 reads the accept, so a line scan cannot mistake one callback's own
-   * references for the other's.
+   * The body of the scroller's own key handler, found by the command it
+   * DECODES rather than by being the only `onKeyDown` in the file, so a second
+   * handler added later is never judged in its place.
+   */
+  const keyHandlerBody = (code) => {
+    let from = 0;
+    for (;;) {
+      const at = code.indexOf('onKeyDown', from);
+      if (at === -1) return null;
+      const arrow = code.indexOf('=>', at);
+      const open = arrow === -1 ? -1 : code.indexOf('{', arrow);
+      const body = open === -1 ? null : blockAt(code, open);
+      if (body !== null && body.includes('redlineCommandOf(')) return body;
+      from = at + 1;
+    }
+  };
+
+  /**
+   * What is wrong with this source's move, one-press and repeat wiring, or an
+   * empty list. Both callbacks and both layout effects are found by name or by
+   * the call they hold and read by MATCHING PARENTHESES, the way rule 20 reads
+   * the accept, so a line scan cannot mistake one callback's own references
+   * for the other's.
    */
   const advanceFindings = (source) => {
     const code = stripComments(source);
     const out = [];
-    // 1. The accept: armed inside the accepted guard and only for one change.
+    // 1. THE ACCEPT records the follower BEFORE the press (the change it takes
+    //    is gone from the picture after it), passes the holds, says something
+    //    when it is held, and arms inside the accepted guard for one change
+    //    only — accept-all leaves no change to move to and a refusal must not
+    //    move anybody.
     const accept = callbackBody(code, 'const accept = useCallback(');
     if (accept === null) out.push('no `const accept = useCallback(` in the view');
     else {
+      if (!accept.includes("pressMoveOf('accept'")) {
+        out.push('the accept never records the change drawn after the one it takes, so the move is the index PR 28 carried and nothing better');
+      }
+      if (!accept.includes('holds:')) {
+        out.push('the accept passes no holds, so it can take a change while a rewind this view pressed is still being drawn');
+      }
+      if (!accept.includes("outcome === 'held'") || !accept.includes('redlineHeldSentence(')) {
+        out.push('a held accept is not answered with a sentence, so a press that was refused says nothing at all');
+      }
       const guard = accept.indexOf(ACCEPTED_GUARD);
       const guardBody = guard === -1 ? null : blockAt(accept, accept.indexOf('{', guard));
       if (guardBody === null || !guardBody.includes(`${REF}.current =`)) {
@@ -5044,9 +5169,10 @@ function gridOf(css, cls) {
         out.push('the accept arms without the per-change clause, so accept-all or a refusal could move somebody');
       }
     }
-    // 2. The rewind: armed after the write landed, never for an undo, and the
-    //    bytes it wrote ADOPTED by the tab in the same tick (the acceptance
-    //    that keeps the two verbs feeling alike).
+    // 2. THE REWIND: the follower recorded before the press, the holds passed,
+    //    a held press answered, the arming kept to a rewind, and the three
+    //    acts around the adoption in their measured order — focus, adopt,
+    //    land.
     const press = callbackBody(code, 'const press = useCallback(');
     if (press === null) {
       out.push('no `const press = useCallback(` in the view, so a rewind cannot move on');
@@ -5057,70 +5183,263 @@ function gridOf(css, cls) {
       if (!press.includes("kind === 'rewind'")) {
         out.push('the arming is not kept to a rewind, so an undo could move somebody');
       }
-      if (!press.includes('adoptWritten(')) {
+      if (!press.includes("pressMoveOf('rewind'")) {
+        out.push(
+          'the rewind never records the change drawn after the one it rewinds, so an agent’s write above lands the move on the change before it'
+        );
+      }
+      if (!press.includes('holds:')) {
+        out.push(
+          'the rewind passes no holds, so a second ⌥⌫ on the change this view is still rewinding writes the file again'
+        );
+      }
+      if (!press.includes("outcome === 'held'") || !press.includes('redlineHeldSentence(')) {
+        out.push('a held rewind is not answered with a sentence, so a press that was refused says nothing at all');
+      }
+      const adopt = press.indexOf('adoptWritten(');
+      if (adopt === -1) {
         out.push('a landed write is not adopted by the tab, so a rewind redraws only when the watcher gets round to it');
+      } else {
+        const land = press.indexOf('landHold(');
+        if (land === -1) {
+          out.push(
+            'the hold the press took is never landed, so the release can never let it go and every accept on that tab is refused until the view is opened again'
+          );
+        } else if (land < adopt) {
+          out.push(
+            'the hold lands before the adoption, so it records the bytes the tab held before the write instead of the ones it holds after it'
+          );
+        }
+        const focus = press.indexOf('host.focus(');
+        if (focus === -1) {
+          out.push(
+            'the rewind never gives the host the keyboard, so rewinding the only remaining change leaves the focus at document.body and ⌥⇧⌫ does nothing until a click'
+          );
+        } else if (focus > adopt) {
+          out.push(
+            'the host takes the keyboard after the adoption, and the adoption is what removes the wrapper it was on, so there is nothing left to take it from'
+          );
+        } else if (!press.includes('CHANGE_SELECTOR')) {
+          out.push(
+            'the rewind takes the keyboard without asking whether it was on a change wrapper, so a rewind from the Edit menu pulls it out of a terminal'
+          );
+        }
       }
     }
-    // 3. The effect that spends it, found by the read rather than by name, so
-    //    the nearest layout effect above the read is the one judged.
+    // 3. THE ARITHMETIC BELONGS TO ./redline-current NOW. `indexAfterRemoval`
+    //    is the fallback inside `landingAfterPress`, and a caller here would
+    //    be PR 28's index rule growing back beside the identity move that
+    //    replaced it.
+    if (code.includes('indexAfterRemoval(')) {
+      out.push('the view bounds the index itself, so PR 28’s index rule is back beside the identity move that replaced it');
+    }
+    // 4. THE EFFECT THAT SPENDS THE MOVE, found by the read rather than by
+    //    name, so the nearest layout effect above the read is the one judged.
     const read = code.indexOf(PENDING);
     if (read === -1) {
       out.push('nothing reads the armed move, so the change after a press is never taken');
-      return out;
+    } else {
+      const effectAt = code.lastIndexOf('useLayoutEffect(', read);
+      if (effectAt === -1) {
+        out.push('the armed move is read outside a layout effect, so it is spent before the redraw');
+      } else {
+        const effectOpen = code.indexOf('(', effectAt);
+        const effectClose = closeOf(code, effectOpen);
+        const effect = effectClose === -1 ? '' : code.slice(effectOpen, effectClose + 1);
+        const waitAt = effect.indexOf("'wait'");
+        const clearAt = effect.lastIndexOf(`${REF}.current = null;`);
+        if (!effect.includes(PENDING)) {
+          out.push('the layout effect above the read is not the one that takes the armed move');
+        }
+        if (!effect.includes('const standing = currentRef.current;')) {
+          out.push('the move does not check that the person is still standing on the pressed change, so it overrides a move made meanwhile');
+        }
+        if (!effect.includes('landingAfterPress(')) {
+          out.push('the move does not ask landingAfterPress where to land, so the follower is never found by identity');
+        }
+        if (waitAt === -1) {
+          out.push('the move does not honour the wait, so a rewind whose adoption refused lands on the change it just rewound');
+        } else if (clearAt !== -1 && clearAt < waitAt) {
+          out.push('the armed move is cleared before the wait is answered, so a picture that has not caught up loses the move altogether');
+        }
+        if (clearAt === -1) {
+          out.push('the armed move is never cleared, so a later recompose moves somebody for no reason');
+        }
+        if (!effect.includes('changeElements(')) {
+          out.push('the move never asks the redrawn picture for the element to take');
+        }
+        if (!effect.includes('makeCurrent(')) {
+          out.push('the next change is never made current, so the controls stay on the change that was pressed');
+        }
+        if (!effect.includes('.focus(')) {
+          out.push('the next change is never focused, so the keyboard cannot reach the next press');
+        }
+      }
     }
-    const effectAt = code.lastIndexOf('useLayoutEffect(', read);
-    if (effectAt === -1) {
-      out.push('the armed move is read outside a layout effect, so it is spent before the redraw');
-      return out;
+    // 5. THE HOLDS LET GO IN THEIR OWN LAYOUT EFFECT, and it watches the bytes
+    //    as well as the picture: a watcher read moves `savedContents` without
+    //    moving a dirty tab's composed picture, and the release's second
+    //    clause must still be asked.
+    const releaseAt = code.indexOf('releaseHolds(');
+    if (releaseAt === -1) {
+      out.push('nothing releases the rewind holds, so one landed rewind refuses every accept on that tab until the view is opened again');
+    } else {
+      const holdAt = code.lastIndexOf('useLayoutEffect(', releaseAt);
+      const holdOpen = holdAt === -1 ? -1 : code.indexOf('(', holdAt);
+      const holdClose = holdOpen === -1 ? -1 : closeOf(code, holdOpen);
+      const holdEffect = holdClose === -1 ? '' : code.slice(holdOpen, holdClose + 1);
+      if (!holdEffect.includes('releaseHolds(')) {
+        out.push('the holds are released outside a layout effect, so they are let go a paint after the picture that stopped drawing them');
+      } else {
+        const args = callArguments(code, holdOpen);
+        const deps = args[args.length - 1] ?? '';
+        if (!deps.includes('savedContents')) {
+          out.push('the release effect does not watch savedContents, so a watcher read that moves the bytes under a dirty tab never asks whether the hold may go');
+        }
+      }
     }
-    const effectOpen = code.indexOf('(', effectAt);
-    const effectClose = closeOf(code, effectOpen);
-    const effect = effectClose === -1 ? '' : code.slice(effectOpen, effectClose + 1);
-    if (!effect.includes(PENDING)) {
-      out.push('the layout effect above the read is not the one that takes the armed move');
-    }
-    if (!effect.includes('const standing = currentRef.current;')) {
-      out.push('the move does not check that the person is still standing on the pressed change, so it overrides a move made meanwhile');
-    }
-    if (!effect.includes('const stillDrawn = ')) {
-      out.push('the move does not wait for the pressed change to leave the picture, so a rewind could land on the change it just rewound');
-    }
-    if (!effect.includes(`${REF}.current = null;`)) {
-      out.push('the armed move is never cleared, so a later recompose moves somebody for no reason');
-    }
-    if (!effect.includes('changeElements(')) {
-      out.push('the move never asks the redrawn picture for the element to take');
-    }
-    if (!effect.includes('indexAfterRemoval(')) {
-      out.push('the move does not bound the index, so a press on the last change could walk off the end');
-    }
-    if (!effect.includes('makeCurrent(')) {
-      out.push('the next change is never made current, so the controls stay on the change that was pressed');
-    }
-    if (!effect.includes('.focus(')) {
-      out.push('the next change is never focused, so the keyboard cannot reach the next press');
+    // 6. A KEY REPEAT IS NOT A PRESS, and the `preventDefault()` stays in
+    //    front of that test whatever else moves.
+    const keydown = keyHandlerBody(code);
+    if (keydown === null) {
+      out.push('the scroller has no key handler that decodes a redline command, so no chord reaches the view at all');
+    } else {
+      const prevent = keydown.indexOf('preventDefault()');
+      const repeat = keydown.indexOf('event.repeat');
+      if (prevent === -1) {
+        out.push(
+          'the key handler does not preventDefault, so ⌥⌫ is Chromium’s deleteWordBackward and deletes a word of the person’s text'
+        );
+      }
+      if (repeat === -1 || !keydown.includes('redlineRepeatRuns(')) {
+        out.push(
+          'a repeated keydown runs the command, so a held ⌥⌫ rewinds every change in the file and a held ⌥↩ is the accept-all chord keymap.ts removed on purpose'
+        );
+      } else if (prevent !== -1 && prevent > repeat) {
+        out.push('the repeat is consumed before the preventDefault, so the repeat that fell through deletes a word through ./redline-edits');
+      }
     }
     return out;
   };
 
-  if (!existsSync(VIEW)) fail(`40. ${VIEW} is not there, so rule 40 proves nothing`);
-  else {
-    for (const line of advanceFindings(readFileSync(VIEW, 'utf8'))) fail(`40. ${line}`);
+  /**
+   * What is wrong with `landingAfterPress`, or an empty list. THE ORDER OF THE
+   * THREE QUESTIONS IS THE RULE: wait, then the follower, then the index.
+   */
+  const landingFindings = (source) => {
+    const out = [];
+    const body = functionBodyOf(stripComments(source), 'landingAfterPress');
+    if (body === null) {
+      out.push('there is no landingAfterPress, so the move has nowhere to ask where it lands');
+      return out;
+    }
+    const waitAt = body.indexOf("'wait'");
+    const followerAt = body.indexOf('move.follower');
+    const fallbackAt = body.indexOf('indexAfterRemoval(');
+    if (waitAt === -1) {
+      out.push('landingAfterPress never waits, so a rewind whose adoption refused steps past the change it just rewound while the picture still draws it');
+    } else if (!body.slice(0, waitAt).includes('.ins')) {
+      out.push('the wait asks sameChange rather than off, del AND ins, so an agent’s new change at the same span parks the move until the person walks away');
+    }
+    if (followerAt === -1) {
+      out.push('landingAfterPress never looks for the follower by identity, so it is PR 28’s index rule under a new name');
+    } else if (!body.includes('followerAfter')) {
+      out.push('the follower is looked for at its recorded offset whatever the verb did, so an accept’s own ins-minus-del shift is never taken and change 3 of 4 in a list lands above it');
+    }
+    if (fallbackAt === -1) {
+      out.push('landingAfterPress has no fallback, so a follower merged away or split leaves the person nowhere');
+    }
+    if (waitAt !== -1 && followerAt !== -1 && waitAt > followerAt) {
+      out.push('the follower is asked before the wait, so a picture that has not caught up is moved on anyway');
+    }
+    if (followerAt !== -1 && fallbackAt !== -1 && followerAt > fallbackAt) {
+      out.push('the index fallback is asked before the follower, so the identity the press recorded is never used');
+    }
+    return out;
+  };
+
+  /**
+   * What is wrong with `useLiveTabText`, or an empty list. The `useState`
+   * initialiser and the effect may read the working model; NOTHING THAT RUNS
+   * ON EVERY RENDER MAY. Every hook CALL is cut out of the body, arguments and
+   * all, and what is left is what React runs on every render of every
+   * consumer.
+   */
+  const liveTextFindings = (source) => {
+    const out = [];
+    const body = functionBodyOf(stripComments(source), 'useLiveTabText');
+    if (body === null) {
+      out.push('there is no useLiveTabText, so the two surfaces that shared one debounce have grown apart again');
+      return out;
+    }
+    let everyRender = body;
+    for (const hook of ['useState', 'useEffect', 'useMemo', 'useRef', 'useCallback']) {
+      for (;;) {
+        const at = everyRender.indexOf(hook);
+        if (at === -1) break;
+        // The `(` of the CALL, past a generic argument list if there is one.
+        const open = everyRender.indexOf('(', at + hook.length);
+        if (open === -1 || /[;{}]/.test(everyRender.slice(at + hook.length, open))) break;
+        const close = closeOf(everyRender, open);
+        if (close === -1) break;
+        everyRender = everyRender.slice(0, at) + everyRender.slice(close + 1);
+      }
+    }
+    if (everyRender.includes('getWorkingModel')) {
+      out.push(
+        'live-text.ts reads the working model on the render path, so the Redline view draws text one keystroke ahead of the typing hook’s own last picture and a burst of keys scrambles'
+      );
+    }
+    return out;
+  };
+
+  // ---- The shipping sources, read once and judged. -------------------------
+  const SOURCES = new Map();
+  for (const file of [VIEW, CURRENT, LIVE]) {
+    if (!existsSync(file)) fail(`40. ${file} is not there, so rule 40 proves nothing`);
+    else SOURCES.set(file, readFileSync(file, 'utf8'));
+  }
+  const SCANNERS = new Map([
+    [VIEW, advanceFindings],
+    [CURRENT, landingFindings],
+    [LIVE, liveTextFindings]
+  ]);
+  const scanOf = (file) => SCANNERS.get(file) ?? (() => []);
+  for (const [file, source] of SOURCES) {
+    for (const line of scanOf(file)(source)) fail(`40. ${file}: ${line}`);
   }
 
-  // The scanner, proved on fourteen plants, thirteen of which must be caught.
-  const SHAPE = (arm, pressArm, effect) =>
-    `const advanceAfterPress = useRef(null);\n` +
-    `const accept = useCallback((kind, host) => {\n` +
-    `  const result = pressAccept(kind, tabOf(), deps(host));\n${arm}\n}, [tab.id]);\n` +
-    `const press = useCallback(async (kind, host) => {\n` +
-    `  const result = await pressRedline(kind, tabOf(), deps(host));\n${pressArm}\n}, [tab.id]);\n` +
-    `useLayoutEffect(() => {\n${effect}\n}, [composed]);\n`;
-  const ARM = "  if (result.outcome === 'accepted') {\n    if (kind === 'one') advanceAfterPress.current = { at: pressedAt, pressed };\n    hostRef.current?.focus({ preventScroll: true });\n  }";
-  const PRESS_ARM =
-    "  if (result.outcome === 'wrote') adoptWritten(result.contents, result.was);\n" +
-    "  if (kind === 'rewind' && result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };";
-  const EFFECT =
+  // ---- The view's scanner, proved on planted shapes, one clause each. ------
+  const ACCEPT_BODY =
+    '  const pressed = identityOf(pressedElement(host));\n' +
+    "  const move = pressMoveOf('accept', changeElements(host).map(identityOf), pressed);\n" +
+    '  const result = pressAccept(kind, tabOf(), { focused: () => pressed, holds: rewindHolds.current });\n' +
+    "  if (result.outcome === 'held') {\n" +
+    "    toast('info', redlineHeldSentence('accept', live.name));\n" +
+    '    return;\n' +
+    '  }\n' +
+    "  if (result.outcome === 'accepted') {\n" +
+    "    if (kind === 'one' && move !== null) advanceAfterPress.current = move;\n" +
+    '    hostRef.current?.focus({ preventScroll: true });\n' +
+    '  }';
+  const PRESS_BODY =
+    '  const pressed = identityOf(pressedElement(host));\n' +
+    "  const move = pressMoveOf('rewind', changeElements(host).map(identityOf), pressed);\n" +
+    '  const result = await pressRedline(kind, tabOf(), { focused: () => pressed, apply: applyRewind, holds: rewindHolds.current });\n' +
+    "  if (result.outcome === 'held') {\n" +
+    "    toast('info', redlineHeldSentence('rewind', live.name));\n" +
+    '    return;\n' +
+    '  }\n' +
+    "  if (result.outcome === 'wrote') {\n" +
+    '    const active = host.ownerDocument.activeElement;\n' +
+    '    const onAChange = active instanceof HTMLElement && host.contains(active) && active.closest(CHANGE_SELECTOR) !== null;\n' +
+    '    if (onAChange) host.focus({ preventScroll: true });\n' +
+    '    adoptWritten(live.id, result.contents, result.was);\n' +
+    '    const adopted = tabOf();\n' +
+    "    if (kind === 'rewind' && adopted !== undefined) landHold(rewindHolds.current, result.entry, adopted.savedContents, result.was);\n" +
+    '  }\n' +
+    "  if (kind === 'rewind' && result.outcome === 'wrote' && move !== null) advanceAfterPress.current = move;";
+  const MOVE_EFFECT =
     '  const host = hostRef.current;\n' +
     '  const pending = advanceAfterPress.current;\n' +
     '  if (host === null || pending === null) return;\n' +
@@ -5130,120 +5449,560 @@ function gridOf(css, cls) {
     '    return;\n' +
     '  }\n' +
     '  const items = changeElements(host);\n' +
-    '  const stillDrawn = items.some((el) => sameChange(identityOf(el), pending.pressed));\n' +
-    '  if (stillDrawn) return;\n' +
+    '  const landing = landingAfterPress(items.map(identityOf), pending);\n' +
+    "  if (landing === 'wait') return;\n" +
     '  advanceAfterPress.current = null;\n' +
-    '  const next = indexAfterRemoval(items.length, pending.at);\n' +
-    '  const el = next === null ? null : (items[next] ?? null);\n' +
+    '  const el = landing === null ? null : (items[landing] ?? null);\n' +
     '  if (el === null) return;\n' +
     '  makeCurrent(el);\n' +
     '  el.focus();';
-  const PLANTS = [
-    { name: 'the shipping shape', source: SHAPE(ARM, PRESS_ARM, EFFECT), caught: false },
+  const RELEASE_EFFECT =
+    'useLayoutEffect(() => {\n' +
+    '  const host = hostRef.current;\n' +
+    '  releaseHolds(rewindHolds.current, host === null ? [] : changeElements(host).map(identityOf), tab.savedContents);\n' +
+    '}, [composed, tab.savedContents]);';
+  const KEY_HANDLER =
+    'const scroller = { onKeyDown: (event) => {\n' +
+    '  const command = redlineCommandOf(event);\n' +
+    '  if (command === null) return;\n' +
+    '  event.preventDefault();\n' +
+    '  if (event.repeat && !redlineRepeatRuns(command)) return;\n' +
+    '  runCommand(command);\n' +
+    '} };';
+  const viewSource = (over = {}) => {
+    const p = {
+      accept: ACCEPT_BODY,
+      press: PRESS_BODY,
+      effect: MOVE_EFFECT,
+      release: RELEASE_EFFECT,
+      keydown: KEY_HANDLER,
+      ...over
+    };
+    return (
+      'const advanceAfterPress = useRef(null);\n' +
+      'const rewindHolds = useRef([]);\n' +
+      `const accept = useCallback((kind, host) => {\n${p.accept}\n}, [tab.id]);\n` +
+      `const press = useCallback(async (kind, host) => {\n${p.press}\n}, [tab.id]);\n` +
+      `useLayoutEffect(() => {\n${p.effect}\n}, [composed, generation, makeCurrent]);\n` +
+      `${p.release}\n${p.keydown}\n`
+    );
+  };
+  const NO_ACCEPT_MOVE =
+    '  const move = { at: indexOfChange(changeElements(host), pressed) };\n';
+  const VIEW_PLANTS = [
+    { name: 'the shipping shape', source: viewSource(), want: null },
+    {
+      name: 'the accept records no follower, so only PR 28’s index is left',
+      source: viewSource({
+        accept: ACCEPT_BODY.replace(
+          "  const move = pressMoveOf('accept', changeElements(host).map(identityOf), pressed);\n",
+          NO_ACCEPT_MOVE
+        )
+      }),
+      want: 'never records the change drawn after the one it takes'
+    },
+    {
+      name: 'the accept passes no holds, so it takes a change mid-rewind',
+      source: viewSource({ accept: ACCEPT_BODY.replace(', holds: rewindHolds.current', '') }),
+      want: 'the accept passes no holds'
+    },
+    {
+      name: 'a held accept says nothing',
+      source: viewSource({
+        accept: ACCEPT_BODY.replace(
+          "  if (result.outcome === 'held') {\n    toast('info', redlineHeldSentence('accept', live.name));\n    return;\n  }\n",
+          ''
+        )
+      }),
+      want: 'a held accept is not answered with a sentence'
+    },
     {
       name: 'the accept arming deleted, so an accept stops where it landed',
-      source: SHAPE(
-        "  if (result.outcome === 'accepted') {\n    hostRef.current?.focus({ preventScroll: true });\n  }",
-        PRESS_ARM,
-        EFFECT
-      ),
-      caught: true
+      source: viewSource({
+        accept: ACCEPT_BODY.replace(
+          "    if (kind === 'one' && move !== null) advanceAfterPress.current = move;\n",
+          ''
+        )
+      }),
+      want: 'never arms the move to the next change inside the accepted guard'
     },
     {
       name: 'the accept arming outside the accepted guard, which moves somebody on a refusal',
-      source: SHAPE(
-        "  if (result.outcome === 'accepted') {\n    hostRef.current?.focus({ preventScroll: true });\n  }\n  if (kind === 'one') advanceAfterPress.current = { at: pressedAt, pressed };",
-        PRESS_ARM,
-        EFFECT
-      ),
-      caught: true
+      source: viewSource({
+        accept:
+          ACCEPT_BODY.replace(
+            "    if (kind === 'one' && move !== null) advanceAfterPress.current = move;\n",
+            ''
+          ) + "\n  if (kind === 'one') advanceAfterPress.current = move;"
+      }),
+      want: 'never arms the move to the next change inside the accepted guard'
     },
     {
       name: 'the accept per-change clause dropped, so accept-all arms a change that is gone',
-      source: SHAPE(
-        "  if (result.outcome === 'accepted') {\n    advanceAfterPress.current = { at: pressedAt, pressed };\n    hostRef.current?.focus({ preventScroll: true });\n  }",
-        PRESS_ARM,
-        EFFECT
-      ),
-      caught: true
+      source: viewSource({
+        accept: ACCEPT_BODY.replace("if (kind === 'one' && move !== null) ", 'if (move !== null) ')
+      }),
+      want: 'arms without the per-change clause'
     },
     {
       name: 'the rewind arming deleted, so option-delete stops where it landed',
-      source: SHAPE(ARM, '  void result;', EFFECT),
-      caught: true
-    },
-    {
-      name: 'the write not adopted, so the rewind redraws only when the watcher says so',
-      source: SHAPE(
-        ARM,
-        "  if (kind === 'rewind' && result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };",
-        EFFECT
-      ),
-      caught: true
+      source: viewSource({
+        press: PRESS_BODY.replace(
+          "\n  if (kind === 'rewind' && result.outcome === 'wrote' && move !== null) advanceAfterPress.current = move;",
+          ''
+        )
+      }),
+      want: 'the rewind never arms the move'
     },
     {
       name: 'the rewind arming not kept to a rewind, so an undo could move somebody',
-      source: SHAPE(
-        ARM,
-        "  if (result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };",
-        EFFECT
-      ),
-      caught: true
+      source: viewSource({ press: PRESS_BODY.replaceAll("kind === 'rewind' && ", '') }),
+      want: 'not kept to a rewind'
+    },
+    {
+      name: 'the rewind records no follower, so an agent’s write above lands the move before it',
+      source: viewSource({
+        press: PRESS_BODY.replace(
+          "  const move = pressMoveOf('rewind', changeElements(host).map(identityOf), pressed);\n",
+          NO_ACCEPT_MOVE
+        )
+      }),
+      want: 'never records the change drawn after the one it rewinds'
+    },
+    {
+      name: 'the rewind passes no holds, so a second chord writes the file again',
+      source: viewSource({ press: PRESS_BODY.replace(', holds: rewindHolds.current', '') }),
+      want: 'the rewind passes no holds'
+    },
+    {
+      name: 'a held rewind says nothing',
+      source: viewSource({
+        press: PRESS_BODY.replace(
+          "  if (result.outcome === 'held') {\n    toast('info', redlineHeldSentence('rewind', live.name));\n    return;\n  }\n",
+          ''
+        )
+      }),
+      want: 'a held rewind is not answered with a sentence'
+    },
+    {
+      name: 'the write not adopted, so the rewind redraws only when the watcher says so',
+      source: viewSource({
+        press: PRESS_BODY.replace('    adoptWritten(live.id, result.contents, result.was);\n', '')
+      }),
+      want: 'a landed write is not adopted'
+    },
+    {
+      name: 'the hold never landed, so every accept on the tab is refused for good',
+      source: viewSource({
+        press: PRESS_BODY.replace(
+          "    if (kind === 'rewind' && adopted !== undefined) landHold(rewindHolds.current, result.entry, adopted.savedContents, result.was);\n",
+          ''
+        )
+      }),
+      want: 'is never landed'
+    },
+    {
+      name: 'the hold landed before the adoption, so it records the bytes from before the write',
+      source: viewSource({
+        press: PRESS_BODY.replace(
+          '    adoptWritten(live.id, result.contents, result.was);\n    const adopted = tabOf();\n',
+          '    const adopted = tabOf();\n'
+        ).replace(
+          "    if (kind === 'rewind' && adopted !== undefined) landHold(rewindHolds.current, result.entry, adopted.savedContents, result.was);\n",
+          "    if (kind === 'rewind' && adopted !== undefined) landHold(rewindHolds.current, result.entry, adopted.savedContents, result.was);\n    adoptWritten(live.id, result.contents, result.was);\n"
+        )
+      }),
+      want: 'the hold lands before the adoption'
+    },
+    {
+      name: 'the host focus dropped, so a rewind of the only change strands the keyboard at document.body',
+      source: viewSource({
+        press: PRESS_BODY.replace('    if (onAChange) host.focus({ preventScroll: true });\n', '')
+      }),
+      want: 'never gives the host the keyboard'
+    },
+    {
+      name: 'the host focus after the adoption, which is after the wrapper it was on is gone',
+      source: viewSource({
+        press: PRESS_BODY.replace(
+          '    if (onAChange) host.focus({ preventScroll: true });\n    adoptWritten(live.id, result.contents, result.was);\n',
+          '    adoptWritten(live.id, result.contents, result.was);\n    if (onAChange) host.focus({ preventScroll: true });\n'
+        )
+      }),
+      want: 'takes the keyboard after the adoption'
+    },
+    {
+      name: 'the host focus made unconditional, which pulls the keyboard out of a terminal',
+      source: viewSource({
+        press: PRESS_BODY.replace(
+          '    const active = host.ownerDocument.activeElement;\n    const onAChange = active instanceof HTMLElement && host.contains(active) && active.closest(CHANGE_SELECTOR) !== null;\n    if (onAChange) host.focus({ preventScroll: true });\n',
+          '    host.focus({ preventScroll: true });\n'
+        )
+      }),
+      want: 'without asking whether it was on a change wrapper'
+    },
+    {
+      name: 'the view bounds the index itself, so PR 28’s rule grows back',
+      source: viewSource({
+        effect: MOVE_EFFECT.replace(
+          '  const landing = landingAfterPress(items.map(identityOf), pending);\n',
+          '  const landing = indexAfterRemoval(items.length, pending.at);\n'
+        )
+      }),
+      want: 'the view bounds the index itself'
     },
     {
       name: 'the read deleted, so the armed move is never spent',
-      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace(`  ${PENDING}\n`, '')),
-      caught: true
+      source: viewSource({ effect: MOVE_EFFECT.replace(`  ${PENDING}\n`, '') }),
+      want: 'nothing reads the armed move'
     },
     {
       name: 'the standing guard dropped, so a move made during a rewind is overridden',
-      source: SHAPE(
-        ARM,
-        PRESS_ARM,
-        EFFECT.replace('  const standing = currentRef.current;\n', '')
-      ),
-      caught: true
+      source: viewSource({
+        effect: MOVE_EFFECT.replace('  const standing = currentRef.current;\n', '')
+      }),
+      want: 'still standing on the pressed change'
     },
     {
-      name: 'the still-drawn guard dropped, so a rewind lands on the change it just rewound',
-      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace('  const stillDrawn = ', '  void ')),
-      caught: true
+      name: 'landingAfterPress dropped for a bare index into the picture',
+      source: viewSource({
+        effect: MOVE_EFFECT.replace(
+          '  const landing = landingAfterPress(items.map(identityOf), pending);\n',
+          '  const landing = pending.at;\n'
+        )
+      }),
+      want: 'does not ask landingAfterPress'
+    },
+    {
+      name: 'the wait dropped, so a rewind lands on the change it just rewound',
+      source: viewSource({
+        effect: MOVE_EFFECT.replace("  if (landing === 'wait') return;\n", '')
+      }),
+      want: 'does not honour the wait'
+    },
+    {
+      name: 'the move cleared before the wait is answered, so a trailing picture loses it',
+      source: viewSource({
+        effect: MOVE_EFFECT.replace(
+          "  if (landing === 'wait') return;\n  advanceAfterPress.current = null;\n",
+          "  advanceAfterPress.current = null;\n  if (landing === 'wait') return;\n"
+        )
+      }),
+      want: 'cleared before the wait is answered'
     },
     {
       name: 'the move left armed after it is spent, so a later recompose moves somebody',
-      source: SHAPE(ARM, PRESS_ARM, EFFECT.replaceAll('  advanceAfterPress.current = null;\n', '')),
-      caught: true
+      source: viewSource({
+        effect: MOVE_EFFECT.replaceAll('  advanceAfterPress.current = null;\n', '')
+      }),
+      want: 'never cleared'
     },
     {
-      name: 'the bound dropped, so the last change can walk off the end',
-      source: SHAPE(
-        ARM,
-        PRESS_ARM,
-        EFFECT.replace('  const next = indexAfterRemoval(items.length, pending.at);\n', '')
-      ),
-      caught: true
-    },
-    {
-      name: 'the focus dropped, so the keyboard cannot reach the next press',
-      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace('el.focus();', '')),
-      caught: true
+      name: 'the redrawn picture never asked for the element to take',
+      source: viewSource({
+        effect: MOVE_EFFECT.replace(
+          '  const items = changeElements(host);\n',
+          '  const items = itemsRef.current;\n'
+        )
+      }),
+      want: 'never asks the redrawn picture'
     },
     {
       name: 'the move focused but never made current',
-      source: SHAPE(ARM, PRESS_ARM, EFFECT.replace('  makeCurrent(el);\n', '')),
-      caught: true
+      source: viewSource({ effect: MOVE_EFFECT.replace('  makeCurrent(el);\n', '') }),
+      want: 'never made current'
+    },
+    {
+      name: 'the focus dropped, so the keyboard cannot reach the next press',
+      source: viewSource({ effect: MOVE_EFFECT.replace('  el.focus();', '') }),
+      want: 'never focused'
+    },
+    {
+      name: 'the release deleted, so one landed rewind refuses every later accept',
+      source: viewSource({ release: '' }),
+      want: 'nothing releases the rewind holds'
+    },
+    {
+      name: 'the release moved out of a layout effect, so it is a paint late',
+      source: viewSource({
+        release: RELEASE_EFFECT.replace('useLayoutEffect(() => {', 'useEffect(() => {')
+      }),
+      want: 'released outside a layout effect'
+    },
+    {
+      name: 'the release effect stops watching savedContents',
+      source: viewSource({
+        release: RELEASE_EFFECT.replace('}, [composed, tab.savedContents]);', '}, [composed]);')
+      }),
+      want: 'does not watch savedContents'
+    },
+    {
+      name: 'the repeat test deleted, so a held chord rewinds the whole file',
+      source: viewSource({
+        keydown: KEY_HANDLER.replace('  if (event.repeat && !redlineRepeatRuns(command)) return;\n', '')
+      }),
+      want: 'a repeated keydown runs the command'
+    },
+    {
+      name: 'the repeat consumed before the preventDefault, so it falls through to deleteWordBackward',
+      source: viewSource({
+        keydown: KEY_HANDLER.replace(
+          '  event.preventDefault();\n  if (event.repeat && !redlineRepeatRuns(command)) return;\n',
+          '  if (event.repeat && !redlineRepeatRuns(command)) return;\n  event.preventDefault();\n'
+        )
+      }),
+      want: 'consumed before the preventDefault'
+    },
+    {
+      name: 'the preventDefault deleted altogether',
+      source: viewSource({ keydown: KEY_HANDLER.replace('  event.preventDefault();\n', '') }),
+      want: 'does not preventDefault'
     }
   ];
+
+  // ---- ./redline-current's scanner, proved on planted bodies. --------------
+  const LANDING_BODY =
+    'export function landingAfterPress(drawn, move) {\n' +
+    '  const pressed = move.pressed;\n' +
+    '  const stillDrawn = drawn.some((id) => id !== null && id.off === pressed.off && id.del === pressed.del && id.ins === pressed.ins);\n' +
+    "  if (stillDrawn) return 'wait';\n" +
+    '  if (move.follower !== null) {\n' +
+    "    const shift = move.verb === 'accept' && move.followerAfter ? pressed.ins.length - pressed.del.length : 0;\n" +
+    '    const want = { ...move.follower, off: move.follower.off + shift };\n' +
+    '    const found = drawn.findIndex((id) => id !== null && sameChange(id, want));\n' +
+    '    if (found !== -1) return found;\n' +
+    '  }\n' +
+    '  return indexAfterRemoval(drawn.length, move.at);\n' +
+    '}\n';
+  const LANDING_PLANTS = [
+    { name: 'the shipping shape', source: LANDING_BODY, want: null },
+    {
+      name: 'the wait dropped',
+      source: LANDING_BODY.replace("  if (stillDrawn) return 'wait';\n", '  void stillDrawn;\n'),
+      want: 'never waits'
+    },
+    {
+      name: 'the wait narrowed to sameChange, which parks on an agent’s new change',
+      source: LANDING_BODY.replace(
+        'id.off === pressed.off && id.del === pressed.del && id.ins === pressed.ins',
+        'sameChange(id, pressed)'
+      ),
+      want: 'asks sameChange rather than off, del AND ins'
+    },
+    {
+      name: 'the follower lookup deleted, which is PR 28’s index rule',
+      source: LANDING_BODY.replace(/  if \(move\.follower !== null\) \{[\s\S]*?\n  \}\n/, ''),
+      want: 'never looks for the follower by identity'
+    },
+    {
+      name: 'the accept shift dropped, so change 3 of 4 in a list lands above it',
+      source: LANDING_BODY.replace(
+        "move.verb === 'accept' && move.followerAfter ? pressed.ins.length - pressed.del.length : 0",
+        '0'
+      ),
+      want: 'whatever the verb did'
+    },
+    {
+      name: 'the fallback deleted, so a merged-away follower leaves the person nowhere',
+      source: LANDING_BODY.replace(
+        '  return indexAfterRemoval(drawn.length, move.at);\n',
+        '  return null;\n'
+      ),
+      want: 'has no fallback'
+    },
+    {
+      name: 'the fallback asked before the follower',
+      source:
+        'export function landingAfterPress(drawn, move) {\n' +
+        '  const pressed = move.pressed;\n' +
+        '  const stillDrawn = drawn.some((id) => id !== null && id.off === pressed.off && id.del === pressed.del && id.ins === pressed.ins);\n' +
+        "  if (stillDrawn) return 'wait';\n" +
+        '  const at = indexAfterRemoval(drawn.length, move.at);\n' +
+        '  if (move.follower !== null && move.followerAfter) return at;\n' +
+        '  return at;\n' +
+        '}\n',
+      want: 'asked before the follower'
+    }
+  ];
+
+  // ---- ./live-text's scanner, proved on planted hooks. ---------------------
+  const LIVE_BODY =
+    'export function useLiveTabText(tabId: string, savedContents: string, track: boolean): string {\n' +
+    '  const [modelText, setModelText] = useState<string | null>(() =>\n' +
+    '    track ? (getWorkingModel(tabId)?.getValue() ?? null) : null\n' +
+    '  );\n' +
+    '  useEffect(() => {\n' +
+    '    const model = getWorkingModel(tabId);\n' +
+    '    setModelText(model?.getValue() ?? null);\n' +
+    '  }, [tabId, track]);\n' +
+    '  return modelText ?? savedContents;\n' +
+    '}\n';
+  /** PR 28's own two lines, verbatim but for the comment that stood above them. */
+  const PR28_LIVE_READ =
+    '  const live = track ? (getWorkingModel(tabId)?.getValue() ?? null) : null;\n' +
+    '  return live ?? modelText ?? savedContents;\n';
+  const LIVE_PLANTS = [
+    { name: 'the shipping shape, which is main’s own', source: LIVE_BODY, want: null },
+    {
+      name: 'PR 28’s render-path read put back',
+      source: LIVE_BODY.replace('  return modelText ?? savedContents;\n', PR28_LIVE_READ),
+      want: 'reads the working model on the render path'
+    }
+  ];
+
   let plantsOk = 0;
-  for (const plant of PLANTS) {
-    const hits = advanceFindings(plant.source);
-    if (hits.length > 0 === plant.caught) plantsOk += 1;
-    else {
-      fail(`40. the scanner behaved wrongly on "${plant.name}": ${JSON.stringify(hits)}`);
+  let plantsTotal = 0;
+  let plantsCaught = 0;
+  for (const [label, plants, scan] of [
+    ['view', VIEW_PLANTS, advanceFindings],
+    ['landingAfterPress', LANDING_PLANTS, landingFindings],
+    ['live-text', LIVE_PLANTS, liveTextFindings]
+  ]) {
+    for (const plant of plants) {
+      plantsTotal += 1;
+      if (plant.want !== null) plantsCaught += 1;
+      const hits = scan(plant.source);
+      const ok =
+        plant.want === null ? hits.length === 0 : hits.some((line) => line.includes(plant.want));
+      if (ok) plantsOk += 1;
+      else fail(`40. the ${label} scanner behaved wrongly on "${plant.name}": ${JSON.stringify(hits)}`);
     }
   }
+
+  // ---- ABLATIONS OF THE SHIPPING SOURCE. ----------------------------------
+  // A planted shape proves the scanner CAN fail. These prove it is anchored in
+  // the bytes that really ship: each takes the real file, removes exactly one
+  // clause from the COPY, and must produce that clause's own finding. An
+  // ablation whose edit matched nothing fails too, because a clause that was
+  // re-anchored while its ablation went on matching nothing is a clause nobody
+  // is watching.
+  const digestOf = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+  const digestsBefore = new Map();
+  for (const file of SOURCES.keys()) digestsBefore.set(file, digestOf(file));
+  const ABLATIONS = [
+    {
+      name: 'the identity lookup removed, so only the index is left (PR 28’s rule)',
+      file: CURRENT,
+      find: /  if \(move\.follower !== null\) \{[\s\S]*?\n  \}\n/,
+      to: '',
+      want: 'never looks for the follower by identity'
+    },
+    {
+      name: 'the accept’s own shift removed, so a follower drawn after it is sought at the wrong offset',
+      file: CURRENT,
+      find: "move.verb === 'accept' && move.followerAfter ? pressed.ins.length - pressed.del.length : 0",
+      to: '0',
+      want: 'whatever the verb did'
+    },
+    {
+      name: 'the wait narrowed to sameChange, which parks the move on an agent’s new change',
+      file: CURRENT,
+      find: 'id.off === pressed.off && id.del === pressed.del && id.ins === pressed.ins',
+      to: 'sameChange(id, pressed)',
+      want: 'asks sameChange rather than off, del AND ins'
+    },
+    {
+      name: 'the one-press guard removed from the rewind, so a second chord writes again',
+      file: VIEW,
+      find: '\n          holds: rewindHolds.current\n        }\n      );',
+      to: '\n        }\n      );',
+      want: 'the rewind passes no holds'
+    },
+    {
+      name: 'the one-press guard removed from the accept, so it can take a change mid-rewind',
+      file: VIEW,
+      find: '\n          holds: rewindHolds.current\n        }\n      );',
+      nth: 2,
+      to: '\n        }\n      );',
+      want: 'the accept passes no holds'
+    },
+    {
+      name: 'the host focus removed, so rewinding the only change strands the keyboard',
+      file: VIEW,
+      find: '        if (onAChange) host.focus({ preventScroll: true });\n',
+      to: '',
+      want: 'never gives the host the keyboard'
+    },
+    {
+      name: 'the hold no longer landed after the adoption',
+      file: VIEW,
+      find: /\n *landHold\([^\n]*\);/,
+      to: '',
+      want: 'is never landed'
+    },
+    {
+      name: 'the release effect stops watching savedContents',
+      file: VIEW,
+      find: '  }, [composed, tab.savedContents]);',
+      to: '  }, [composed]);',
+      want: 'does not watch savedContents'
+    },
+    {
+      name: 'the repeat test removed, so a held ⌥⌫ rewinds every change in the file',
+      file: VIEW,
+      find: '          if (event.repeat && !redlineRepeatRuns(command)) return;\n',
+      to: '',
+      want: 'a repeated keydown runs the command'
+    },
+    {
+      name: 'landingAfterPress swapped back for the index, which is PR 28’s move',
+      file: VIEW,
+      find: '    const landing = landingAfterPress(items.map(identityOf), pending);',
+      to: '    const landing = indexAfterRemoval(items.length, pending.at);',
+      want: 'the view bounds the index itself'
+    },
+    {
+      name: 'PR 28’s live-text read at every render put back',
+      file: LIVE,
+      find: '  return modelText ?? savedContents;\n',
+      to: PR28_LIVE_READ,
+      want: 'reads the working model on the render path'
+    }
+  ];
+  let ablationsRed = 0;
+  try {
+    for (const arm of ABLATIONS) {
+      const source = SOURCES.get(arm.file);
+      if (source === undefined) continue;
+      let ablated = source;
+      if (typeof arm.find === 'string') {
+        let at = -1;
+        for (let i = 0; i < (arm.nth ?? 1); i += 1) at = source.indexOf(arm.find, at + 1);
+        if (at !== -1) {
+          ablated = source.slice(0, at) + arm.to + source.slice(at + arm.find.length);
+        }
+      } else {
+        ablated = source.replace(arm.find, arm.to);
+      }
+      if (ablated === source) {
+        fail(
+          `40. the ablation "${arm.name}" found nothing to edit in ${arm.file}, so it proves nothing; re-anchor it`
+        );
+        continue;
+      }
+      const hits = scanOf(arm.file)(ablated);
+      if (hits.some((line) => line.includes(arm.want))) ablationsRed += 1;
+      else {
+        fail(
+          `40. the ablation "${arm.name}" did not turn this rule red on its own clause: ${JSON.stringify(hits)}`
+        );
+      }
+    }
+  } finally {
+    for (const [file, digest] of digestsBefore) {
+      if (digestOf(file) !== digest) {
+        fail(
+          `40. ${file} changed while rule 40 ran; the ablations are made on strings in memory and this rule must never write to the tree`
+        );
+      }
+    }
+  }
+
   say(
-    `40. a press moves on in the same tick: the accept arms inside its accepted guard for one change, the rewind adopts its own bytes and arms after its write and never for an undo, and a layout effect bounded by indexAfterRemoval waits for the pressed change to leave, makes the next one current and focuses it (${String(plantsOk)} of ${String(PLANTS.length)} scanner fixtures behaved, ${String(PLANTS.filter((q) => q.caught).length)} of them must fail)`
+    `40. the press that moves on: the follower is carried by IDENTITY and the index is only landingAfterPress's fallback, one press at a time (the holds passed to both verbs, answered with a sentence, landed after the adoption and released in a layout effect that watches savedContents), the host takes the keyboard BEFORE the adoption, a key repeat runs only next and prev after the preventDefault, and live-text.ts reads no working model on the render path (${String(plantsOk)} of ${String(plantsTotal)} scanner fixtures behaved, ${String(plantsCaught)} of them must fail)`
+  );
+  say(
+    `40. ${String(ablationsRed)} of ${String(ABLATIONS.length)} ablations of the SHIPPING source turned this rule red on their own clause, made on the strings in memory with the three files' sha256 compared in a finally`
   );
 }
 

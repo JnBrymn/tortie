@@ -164,7 +164,7 @@ export function indexOfChange(
  *
  * From nowhere, next is the first change and previous the last; FROM EITHER
  * END IT COMES ROUND TO THE OTHER, so ⌥↓ past the last change lands on the
- * first and ⌥↑ before the first lands on the last. The operator asked for the
+ * first and ⌥↑ before the first lands on the last. PR 28's author asked for the
  * loop on 2026-09-16: "if I keep pressing option down... I want it to flip
  * over and go to the first edit point at the top of the document", and the
  * reverse for ⌥↑, "so that it forms a loop instead of just hitting the end".
@@ -203,22 +203,132 @@ export function stepChange(
 }
 
 /**
- * WHERE A PERSON GOES AFTER A PRESS THAT REMOVED THE CHANGE IT NAMED: the one
- * rule the accept and the rewind share.
+ * PHASE 282. WHAT A LANDED PRESS HANDS ON, recorded from the picture BEFORE
+ * the press (build/p282/SPEC.md §2.1, the Phase 282 entry's mechanism 2).
  *
- * BOTH verbs take exactly the change they name out of the picture — an accept
- * moves the baseline to the inserted bytes at that span, a rewind writes the
- * baseline's own bytes back over the inserted ones — and both leave every
- * other change in the order it was drawn in. So the change that FOLLOWED the
- * pressed one now sits at the index the pressed one sat at, and the answer is
- * that index in the picture AFTER the removal.
+ * PR 28 carried the pressed change's INDEX across the redraw and took the
+ * element at that index afterwards. The review measured that index landing on
+ * the wrong change twice over: ⌥⌫ re-reads the file, so an agent's write
+ * already on disk ABOVE the pressed change added a change in front of it and
+ * the move landed on the change the person had just walked past, which the
+ * next ⌥⌫ in the rhythm would rewrite; and an accept re-cuts neighbours, so
+ * accepting change 3 of 4 in a list landed on a merged bullet above it. A
+ * per-change accept has no undo. So the press records WHICH change came next,
+ * by identity, and the index only as the fallback for a follower that is gone.
+ */
+export interface PressMove {
+  verb: 'accept' | 'rewind';
+  pressed: ChangeIdentity;
+  /** The index the pressed change stood at among the changes drawn at the press. */
+  at: number;
+  /**
+   * The change drawn after the pressed one; the first when the pressed one was
+   * last and not the only one; null when it was the only one.
+   */
+  follower: ChangeIdentity | null;
+  /**
+   * Whether the follower was drawn AFTER the pressed change; false when it
+   * came round to the first.
+   */
+  followerAfter: boolean;
+}
+
+/**
+ * The move a press on `pressed` would hand on, from the identities drawn at
+ * the press; null when the press names nothing drawn, which moves nobody. A
+ * wrapper with no readable identity is `null` in `drawn`, and as a follower it
+ * simply takes the fallback.
+ */
+export function pressMoveOf(
+  verb: 'accept' | 'rewind',
+  drawn: readonly (ChangeIdentity | null)[],
+  pressed: ChangeIdentity | null
+): PressMove | null {
+  if (pressed === null) return null;
+  const at = drawn.findIndex((id) => id !== null && sameChange(id, pressed));
+  if (at === -1) return null;
+  const count = drawn.length;
+  // The loop the arrows keep: past the last, round to the first, and a change
+  // that was the only one hands nothing on.
+  const next = at + 1 < count ? at + 1 : count > 1 ? 0 : null;
+  return {
+    verb,
+    pressed,
+    at,
+    follower: next === null ? null : (drawn[next] ?? null),
+    followerAfter: next !== null && next > at
+  };
+}
+
+/**
+ * WHERE A LANDED PRESS PUTS THE PERSON, asked of the picture after a redraw:
+ * an index into `drawn`, `'wait'` for a picture that has not caught up, or
+ * null for nowhere. Three questions, in this order, and the order is the rule.
  *
- * IT LOOPS, like the two arrows beside it (the operator's ask of 2026-09-16):
- * an index at or past the end — the pressed change was the last one, so the
- * picture is one shorter than it — comes round to the FIRST remaining change
- * rather than stopping. There is deliberately no "and stop" clause, because a
- * run that started in the middle of a document and walked forwards would
- * otherwise leave every change above it stranded.
+ * 1. WAIT while the pressed change is still drawn on `off`, `del` AND `ins`.
+ *    An adoption that refused (the tab trailed disk) leaves the rewound change
+ *    drawn byte for byte until the watcher redraws, about a second. The whole
+ *    triple and NOT `sameChange`, which is what PR 28 waited on: a change at
+ *    the same span with different words is an agent's new change, and waiting
+ *    on it parked the move until the person walked away.
+ * 2. THE FOLLOWER, by `sameChange`. An accept replaces `del` with `ins` in the
+ *    BASELINE, so a follower drawn after it moved by the difference; one that
+ *    came round from the top sits before the accepted span and did not. A
+ *    rewind writes the baseline's own bytes back into the FILE and leaves the
+ *    baseline where it was, and an agent's write elsewhere moves no baseline
+ *    offset either (research 83 policy Z), so nothing shifts. `sameChange` and
+ *    not the triple, because an agent may have rewritten the follower's words
+ *    and it is still the change that came next.
+ * 3. THE INDEX, only when the follower is no longer drawn: merged away, split,
+ *    or there was none. {@link indexAfterRemoval} is that fallback.
+ *
+ * Stated limit, not fixed: when the follower is gone AND an agent's write
+ * above moved the count in the same redraw, the fallback can land one change
+ * off, which is PR 28's rule in the one case nothing better is known.
+ */
+export function landingAfterPress(
+  drawn: readonly (ChangeIdentity | null)[],
+  move: PressMove
+): number | 'wait' | null {
+  const pressed = move.pressed;
+  const stillDrawn = drawn.some(
+    (id) =>
+      id !== null && id.off === pressed.off && id.del === pressed.del && id.ins === pressed.ins
+  );
+  if (stillDrawn) return 'wait';
+  if (move.follower !== null) {
+    const shift =
+      move.verb === 'accept' && move.followerAfter ? pressed.ins.length - pressed.del.length : 0;
+    const want = { ...move.follower, off: move.follower.off + shift };
+    const found = drawn.findIndex((id) => id !== null && sameChange(id, want));
+    if (found !== -1) return found;
+  }
+  return indexAfterRemoval(drawn.length, move.at);
+}
+
+/**
+ * WHERE A PERSON GOES AFTER A PRESS THAT REMOVED THE CHANGE IT NAMED, when the
+ * change that followed it can no longer be found: the FALLBACK of
+ * {@link landingAfterPress}, and nothing else.
+ *
+ * It answers the index the pressed change stood at, in the picture AFTER the
+ * removal, which is right exactly when the press took out the pressed change
+ * and nothing else moved. PR 28 wrote it as the whole rule, on the claim that
+ * both verbs leave every other change in the order it was drawn in, and the
+ * Phase 282 review measured that claim false twice: a rewind RE-READS the
+ * file, so an agent's write already on disk above the pressed change adds a
+ * change in front of it and every later index moves down one; and a redraw
+ * RE-CUTS neighbours, so an accept can merge two changes into one or split one
+ * into two. Either way the element at the old index is a different change, so
+ * the move carries the follower's identity and this is asked only when that
+ * follower is gone.
+ *
+ * IT LOOPS, like the two arrows beside it (PR 28's author's ask of
+ * 2026-09-16): an index at or past the end — the pressed change was the last
+ * one, so the picture is one shorter than it — comes round to the FIRST
+ * remaining change rather than stopping. There is deliberately no "and stop"
+ * clause, because a run that started in the middle of a document and walked
+ * forwards would otherwise leave every change above it stranded.
  *
  * `null` in answers `null` out, so a press that named no change — a refused
  * accept, an undo, or an accept-all — moves nobody; and a picture that holds
