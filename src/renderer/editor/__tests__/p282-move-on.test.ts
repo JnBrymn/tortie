@@ -184,6 +184,60 @@ describe('when to wait, and the fallback', () => {
     expect(landingAfterPress([decoy, moved], { ...accepted, followerAfter: false })).toBe(0);
   });
 
+  /**
+   * PHASE 282'S FIX ROUND. THE FOLLOWER IS FOUND BY ITS OFFSET, BECAUSE THE
+   * RE-CUT MOVES ITS `del`.
+   *
+   * The verifier measured the fallback being reached by an ordinary shape
+   * rather than by the "merged away, split, or there was none" cases the rule
+   * names: accepting a change ABOVE a whole-line deletion peels the trailing
+   * newline off the deletion's group, so the follower comes back at exactly
+   * the offset the accept's shift computes with a `del` one `\n` shorter, and
+   * `sameChange` — which asks `off` AND `del` — refused it. Quietly the
+   * fallback happened to answer the same index; with an agent's line arriving
+   * at the top in the same redraw it answered the AGENT's brand-new change,
+   * and the next ⌥↩ in the rhythm would have accepted a change the person
+   * never looked at, with no undo.
+   */
+  const RECUT_BASE = 'line one here\nsecond has stone in it\nthird line to delete\nfourth stays\n';
+  const RECUT_SHOWN = 'line one here\nsecond has alpha beta in it\n\nfourth stays\n';
+  const recutPress = (
+    shownAfter: string
+  ): { after: (string | null)[]; landed: string | null } => {
+    const before = drawn(RECUT_BASE, RECUT_SHOWN, GEN);
+    const armed = pressMoveOf('accept', before, before[0] as ChangeIdentity);
+    if (armed === null) throw new Error('the press armed nothing');
+    const plan = planAccept({
+      baseline: RECUT_BASE,
+      baselineGeneration: GEN,
+      drawnGeneration: GEN,
+      current: RECUT_SHOWN,
+      truncated: false,
+      pressed: before[0] as ChangeIdentity
+    });
+    if (plan.outcome !== 'accept') throw new Error(plan.why);
+    const after = drawn(plan.baseline, shownAfter, GEN + 1);
+    const landing = landingAfterPress(after, armed);
+    return {
+      after: after.map(label),
+      landed: landing === 'wait' ? 'wait' : landing === null ? null : label(after[landing])
+    };
+  };
+
+  it('the follower whose group LOST ITS TRAILING NEWLINE in the re-cut is still found, quietly', () => {
+    expect(recutPress(RECUT_SHOWN)).toEqual({
+      after: ['"third line to delete"->""'],
+      landed: '"third line to delete"->""'
+    });
+  });
+
+  it("and with an agent's line arriving at the top in the same redraw, the landing is still the follower and never the agent's new change", () => {
+    expect(recutPress(`AGENT ADDED THIS AT THE TOP\n${RECUT_SHOWN}`)).toEqual({
+      after: ['""->"AGENT ADDED THIS AT THE TOP\\n"', '"third line to delete"->""'],
+      landed: '"third line to delete"->""'
+    });
+  });
+
   it('falls back to the index only when the follower is no longer drawn', () => {
     const other: ChangeIdentity = { off: 50, del: 'end', ins: 'END', generation: GEN };
     // The follower was merged away; one change remains, at the index the

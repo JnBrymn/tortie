@@ -247,6 +247,13 @@ export interface TabIo {
    * a dialog — a refusal becomes one stop record and one sentence instead.
    */
   save(id: string, reason?: SaveReason): Promise<boolean>;
+  /**
+   * Walk every worktree tab of this repo: existence, buffer, HEAD, baseline.
+   *
+   * PHASE 282'S FIX ROUND. ONE WALK PER REPO AT A TIME, with at most one more
+   * queued behind it, so two reads of one tab are never in the air together.
+   * The serializer is on the implementation, which says why.
+   */
   refreshRepo(repoPath: string): Promise<void>;
 }
 
@@ -1970,6 +1977,57 @@ export function createTabIo(deps: TabIoDeps): TabIo {
   };
 
   /**
+   * PHASE 282'S FIX ROUND. ONE WALK OF A REPO AT A TIME, with at most one more
+   * queued behind it.
+   *
+   * `refreshRepo` above is fire and forget from ./store's `onRepoChanged`
+   * (`void io.refreshRepo(repoPath)`), the bus that wakes it debounces only
+   * 150 ms (../state/repo-changed), and one walk awaits a directory read, a
+   * file read and a `git show HEAD` PER TAB. So two walks of the same repo
+   * overlapped, and with them two READS OF ONE TAB: the older read answered
+   * first and moved `savedContents`, and the newer one — issued later, so
+   * carrying bytes at least as new — then failed the clause above, was dropped
+   * whole, and left the tab on the older bytes with nothing scheduled to read
+   * again. The verifier drove it through this module and measured the parent
+   * applying the newer read, so it is this phase's own regression.
+   *
+   * THE CLAUSE ABOVE IS RIGHT AND STAYS. What was wrong is that two reads of
+   * one tab could be in the air at once: with one walk at a time, the only
+   * thing that can move `savedContents` under a read is a writer — an
+   * adoption or a save — and that writer leaves the tab holding the NEWEST
+   * bytes, which is exactly the interleaving the clause was written to drop.
+   *
+   * At most ONE walk is queued, because a second and a third would re-read the
+   * same files for the same reason; they join the one already waiting. The
+   * running walk is forgotten in a `finally`, so a walk that throws never
+   * blocks the next one.
+   */
+  const refreshRunning = new Map<string, Promise<void>>();
+  const refreshQueued = new Map<string, Promise<void>>();
+
+  const queuedRefresh = (repoPath: string): Promise<void> => {
+    const running = refreshRunning.get(repoPath);
+    if (running === undefined) {
+      const run = refreshRepo(repoPath).finally(() => {
+        if (refreshRunning.get(repoPath) === run) refreshRunning.delete(repoPath);
+      });
+      refreshRunning.set(repoPath, run);
+      return run;
+    }
+    const waiting = refreshQueued.get(repoPath);
+    if (waiting !== undefined) return waiting;
+    const next = running.catch(() => undefined).then(() => {
+      // Cleared BEFORE the walk starts, so an event that arrives while THIS
+      // walk is running queues a fresh one rather than joining the walk that
+      // is already reading.
+      if (refreshQueued.get(repoPath) === next) refreshQueued.delete(repoPath);
+      return queuedRefresh(repoPath);
+    });
+    refreshQueued.set(repoPath, next);
+    return next;
+  };
+
+  /**
    * A CONFIRMED WRITE'S OWN BYTES, adopted. The guards and the reason are on
    * the interface above; the short version is that this is the read the
    * watcher would have made, minus the round trip.
@@ -1997,6 +2055,8 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     loadImageHead,
     adoptWritten,
     save,
-    refreshRepo
+    // PHASE 282'S FIX ROUND. The serializer above is what callers get: the
+    // walk itself is never re-entered for one repo.
+    refreshRepo: queuedRefresh
   };
 }
