@@ -1,0 +1,52 @@
+<!doctype html>
+<!--
+THESIS: Give Tortie's work a deliberate edge, using the supplied Unpeel reference.
+OWN-WORLD: Existing system typography, codicons, vendor marks and state colors;
+cool charcoal surrounds, restrained hairlines, 12–14px outer corners.
+STORY: Compare the identical workspace in its current shell and three container
+treatments. Switch content and resize to test the framing against real density.
+FIRST VIEWPORT: Study controls above an almost full-window desktop mock: project
+tabs, activity rail, explorer, terminal and sessions in their existing positions.
+FORM: User-pinned, narrow container study; no concept seed or identity replacement.
+All app content is a local visual fixture, never a connection to live sessions.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tortie · Container study</title>
+  <link rel="stylesheet" href="assets/codicon.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="study-toolbar" id="study-toolbar">
+    <a class="study-brand" href="#gallery">Tortie <span>Container study</span></a>
+    <nav class="directions" aria-label="Container direction">
+      <a href="#current" data-direction="current">Current</a>
+      <a href="#inset" data-direction="inset"><span>A</span> Inset workspace</a>
+      <a href="#surround" data-direction="surround"><span>B</span> Quiet surround</a>
+      <a href="#surfaces" data-direction="surfaces"><span>C</span> Separate surfaces</a>
+    </nav>
+    <div class="study-actions">
+      <button data-study="reference">Reference</button>
+      <a href="#gallery">Compare</a>
+      <button data-study="fullscreen" title="Hide study controls (Escape to return)">Canvas only <span>↗</span></button>
+    </div>
+  </header>
+  <main id="main"></main>
+  <footer class="study-footer" id="study-footer">
+    <div class="direction-caption"><strong id="direction-name"></strong><span id="direction-description"></span></div>
+    <label class="scenario-label">Content <select id="scenario" aria-label="Preview content"><option value="screenshot">Your screenshot</option><option value="busy">Long transcript</option><option value="split">Split terminals</option><option value="editor">Terminal + editor</option></select></label>
+    <span class="prototype-label">Local HTML · sample state</span>
+  </footer>
+  <button class="return-study" data-study="fullscreen">Return to study <kbd>esc</kbd></button>
+  <dialog id="reference-dialog" aria-labelledby="reference-title">
+    <div class="dialog-heading"><div><h2 id="reference-title">The reference, and what carries over</h2><p>Unpeel’s quiet frame and inset work surface; Tortie’s existing layout and controls.</p></div><button data-study="close-reference" aria-label="Close reference">×</button></div>
+    <div class="reference-grid"><figure><img src="../references/unpeel.png" alt="Supplied Unpeel screenshot with a quiet navigation surround and rounded inset terminal"><figcaption>Reference · Unpeel</figcaption></figure><figure><img src="../references/tortie-current.png" alt="Supplied Tortie screenshot with project tabs, explorer, terminal and sessions"><figcaption>Starting point · Tortie</figcaption></figure></div>
+    <p class="reference-note">The study changes surfaces, seams, gutters, and outer corners. Project navigation, agent marks, status meanings, terminal type, and control placement stay consistent.</p>
+  </dialog>
+  <div class="toast" role="status" id="toast"></div>
+  <script src="assets/agents.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
