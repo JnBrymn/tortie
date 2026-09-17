@@ -67,7 +67,22 @@ export interface RewindContext {
 }
 
 export type RewindOutcome =
-  | { wrote: string }
+  /**
+   * The write landed, and the THREE strings are one fact told three ways.
+   *
+   * `wrote` is the digest main answered, which is the journal's record of the
+   * write. `contents` is the exact byte string the door put on disk, and `was`
+   * is what the file held when this call read it — the bytes the plan was
+   * computed from and therefore the thing a tab must still be holding to
+   * adopt `contents` without stepping on somebody's typing.
+   *
+   * They are returned rather than left with the caller because THE VIEW
+   * ALREADY KNOWS THE TRUTH about this file and does not need to be told by
+   * the watcher: the redline used to wait for the file watcher's next round
+   * trip to redraw, measured at 1,139 ms against an accept's 35 ms, which is
+   * the operator's own complaint of 2026-09-16.
+   */
+  | { wrote: string; contents: string; was: string }
   | { refused: RewindRefusal };
 
 /** The lowercase hex sha256 of one string, being the bytes the caller read. */
@@ -124,6 +139,8 @@ export async function applyRewind(ctx: RewindContext): Promise<RewindOutcome> {
     return { refused: 'io' };
   }
   const key = rewindRefusalKey(result);
-  if (key === null && result.outcome === 'wrote') return { wrote: result.sha256 };
+  if (key === null && result.outcome === 'wrote') {
+    return { wrote: result.sha256, contents: plan.contents, was: read.contents };
+  }
   return { refused: key ?? 'io' };
 }

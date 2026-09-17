@@ -187,6 +187,25 @@ export interface TabIo {
   /** The same image at HEAD — the BEFORE side of the comparison. */
   loadImageHead(id: string): Promise<void>;
   /**
+   * THE BYTES A CONFIRMED WRITE PUT ON DISK, adopted by the tab that wrote
+   * them (2026-09-16).
+   *
+   * The rewind and the undo write through the one guarded door and know
+   * exactly what it wrote; `contents` is that byte string and `was` is what
+   * the plan read. A tab that is still holding `was` adopts `contents` now,
+   * which is what lets the redline redraw in the same tick rather than after
+   * the file watcher's next round trip — measured at 1,139 ms against an
+   * accept's 35 ms, the operator's own complaint.
+   *
+   * TWO REFUSALS, and both are the difference between "the file holds these
+   * bytes" and "the file held these bytes when the press was made": a tab
+   * that has become DIRTY has a buffer whose text is newer than the plan, and
+   * a tab whose saved contents MOVED has a save or a read of its own to
+   * believe. Either way the watcher is the honest reader and this does
+   * nothing.
+   */
+  adoptWritten(id: string, contents: string, was: string): void;
+  /**
    * Write one tab to disk. Resolves false when nothing was written.
    *
    * PHASE 268. `reason` defaults to `explicit`, so ⌘S and every existing
@@ -1519,6 +1538,23 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     }
   };
 
+  /**
+   * A CONFIRMED WRITE'S OWN BYTES, adopted. The guards and the reason are on
+   * the interface above; the short version is that this is the read the
+   * watcher would have made, minus the round trip.
+   */
+  const adoptWritten = (id: string, contents: string, was: string): void => {
+    const tab = deps.byId(id);
+    if (tab === undefined) return;
+    if (tab.dirty || tab.savedContents !== was) return;
+    deps.patch(id, { savedContents: contents });
+    // The working model moves with it, and it is not optional: with the model
+    // left holding the old text, the next ⌘S would write that old text back
+    // over the bytes this door just wrote, with `savedContents` as its
+    // precondition and therefore nothing to refuse it.
+    resetWorkingModel(id, contents);
+  };
+
   return {
     loadContents,
     persistBaseline,
@@ -1528,6 +1564,7 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     loadRemoteCommitDiff,
     loadImage,
     loadImageHead,
+    adoptWritten,
     save,
     refreshRepo
   };

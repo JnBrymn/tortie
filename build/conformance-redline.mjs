@@ -480,28 +480,34 @@
  *      Its ablation directories are `.p251-chip-*` at the repository root, for
  *      rules 19, 25 and 26's reason.
  *
- *  40. THE ACCEPT MOVES ON (the accept-advance round, 2026-09-16). ⌥↩ used to
- *      leave the person on the
- *      change it had just stopped marking, so approving a run of changes was
- *      ⌥↩ ⌥↓ repeated and every change cost an extra keystroke. The change
- *      that was DRAWN AFTER the accepted one now becomes current and takes
- *      the focus, exactly as ⌥↓ would have put it there. An accept removes
- *      exactly the change it names and leaves every other one in order, so
- *      the follow-on sits at the index the accepted change stood at, and
- *      ./redline-current's `indexAfterAccept` bounds that index so the last
- *      change of a document is the end and never a wrap to the top.
+ *  40. A PRESS MOVES ON IN THE SAME TICK (2026-09-16, extended the same day).
+ *      ⌥↩ stopped marking the change under focus and ⌥⌫ puts it back, and both
+ *      now leave the person on the change that was DRAWN AFTER the one they
+ *      pressed, so a run of approvals or rejections is one chord pressed over
+ *      and over rather than ⌥↩ ⌥↓ repeated. An accept removes exactly the
+ *      change it names and leaves every other one in order, so the follow-on
+ *      sits at the index the pressed change stood at, and past the end the
+ *      picture comes round to its first remaining change rather than
+ *      stranding the changes above it.
+ *
+ *      THE TWO VERBS DIFFER IN ONE WAY THAT MATTERS: an accept moves the
+ *      baseline in memory and redraws in its own tick, while a rewind writes
+ *      the file. Measured in the app at 35 ms against 1,139 ms, and the
+ *      operator's own complaint — so a landed write is ADOPTED by the tab
+ *      that wrote it, which is the line this rule refuses to lose.
  *
  *      IT IS A SCAN BECAUSE THE SUITE CANNOT SEE IT: this tree carries no
  *      jsdom, so nothing in vitest focuses an element, and the index is read
- *      off one picture and spent on the next. The scan reads the accept
- *      callback by MATCHING PARENTHESES and refuses an arming outside the
- *      accepted guard, an arming without the per-change clause — accept-all
- *      leaves no change to move to, and a refusal must not move anybody — an
- *      armed index nothing reads or one read outside a layout effect, and an
+ *      off one picture and spent on the next. The scan reads both callbacks
+ *      by MATCHING PARENTHESES and refuses an arming outside the accepted
+ *      guard, an arming without the per-change clause — accept-all leaves no
+ *      change to move to, and a refusal must not move anybody — a rewind
+ *      that does not adopt its own bytes, an arming not kept to a rewind, an
+ *      armed move nothing reads or one read outside a layout effect, and an
  *      effect that does not ask the redrawn picture, does not bound the
  *      index, never makes the change current, never focuses it, or does not
- *      clear the index it spent. Seven planted shapes beside the shipping
- *      one, and every one of the seven must fail.
+ *      clear the move it spent. Fourteen planted shapes beside the shipping
+ *      one, and every one of the thirteen must fail.
  *
  * Exit 0 when every rule passes, 1 otherwise with each failure named.
  */
@@ -5038,7 +5044,9 @@ function gridOf(css, cls) {
         out.push('the accept arms without the per-change clause, so accept-all or a refusal could move somebody');
       }
     }
-    // 2. The rewind: armed after the write landed, and NEVER for an undo.
+    // 2. The rewind: armed after the write landed, never for an undo, and the
+    //    bytes it wrote ADOPTED by the tab in the same tick (the acceptance
+    //    that keeps the two verbs feeling alike).
     const press = callbackBody(code, 'const press = useCallback(');
     if (press === null) {
       out.push('no `const press = useCallback(` in the view, so a rewind cannot move on');
@@ -5048,6 +5056,9 @@ function gridOf(css, cls) {
       }
       if (!press.includes("kind === 'rewind'")) {
         out.push('the arming is not kept to a rewind, so an undo could move somebody');
+      }
+      if (!press.includes('adoptWritten(')) {
+        out.push('a landed write is not adopted by the tab, so a rewind redraws only when the watcher gets round to it');
       }
     }
     // 3. The effect that spends it, found by the read rather than by name, so
@@ -5097,7 +5108,7 @@ function gridOf(css, cls) {
     for (const line of advanceFindings(readFileSync(VIEW, 'utf8'))) fail(`40. ${line}`);
   }
 
-  // The scanner, proved on twelve plants, eleven of which must be caught.
+  // The scanner, proved on fourteen plants, thirteen of which must be caught.
   const SHAPE = (arm, pressArm, effect) =>
     `const advanceAfterPress = useRef(null);\n` +
     `const accept = useCallback((kind, host) => {\n` +
@@ -5106,7 +5117,9 @@ function gridOf(css, cls) {
     `  const result = await pressRedline(kind, tabOf(), deps(host));\n${pressArm}\n}, [tab.id]);\n` +
     `useLayoutEffect(() => {\n${effect}\n}, [composed]);\n`;
   const ARM = "  if (result.outcome === 'accepted') {\n    if (kind === 'one') advanceAfterPress.current = { at: pressedAt, pressed };\n    hostRef.current?.focus({ preventScroll: true });\n  }";
-  const PRESS_ARM = "  if (kind === 'rewind' && result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };";
+  const PRESS_ARM =
+    "  if (result.outcome === 'wrote') adoptWritten(result.contents, result.was);\n" +
+    "  if (kind === 'rewind' && result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };";
   const EFFECT =
     '  const host = hostRef.current;\n' +
     '  const pending = advanceAfterPress.current;\n' +
@@ -5157,6 +5170,15 @@ function gridOf(css, cls) {
     {
       name: 'the rewind arming deleted, so option-delete stops where it landed',
       source: SHAPE(ARM, '  void result;', EFFECT),
+      caught: true
+    },
+    {
+      name: 'the write not adopted, so the rewind redraws only when the watcher says so',
+      source: SHAPE(
+        ARM,
+        "  if (kind === 'rewind' && result.outcome === 'wrote') advanceAfterPress.current = { at: pressedAt, pressed };",
+        EFFECT
+      ),
       caught: true
     },
     {
@@ -5221,7 +5243,7 @@ function gridOf(css, cls) {
     }
   }
   say(
-    `40. a press moves on: the accept arms inside its accepted guard for one change, the rewind arms after its write and never for an undo, and a layout effect bounded by indexAfterRemoval waits for the pressed change to leave, makes the next one current and focuses it (${String(plantsOk)} of ${String(PLANTS.length)} scanner fixtures behaved, ${String(PLANTS.filter((q) => q.caught).length)} of them must fail)`
+    `40. a press moves on in the same tick: the accept arms inside its accepted guard for one change, the rewind adopts its own bytes and arms after its write and never for an undo, and a layout effect bounded by indexAfterRemoval waits for the pressed change to leave, makes the next one current and focuses it (${String(plantsOk)} of ${String(PLANTS.length)} scanner fixtures behaved, ${String(PLANTS.filter((q) => q.caught).length)} of them must fail)`
   );
 }
 

@@ -116,6 +116,16 @@ function grade(reading, mode) {
     if (r.currentCount !== 1 || r.dels?.[r.currentIndex] !== dels[3]) {
       bad.push('the rewind did not leave the change that followed it current');
     }
+    if (
+      typeof reading.rewindWaitMs !== 'number' ||
+      typeof reading.acceptWaitMs !== 'number' ||
+      reading.rewindWaitMs < 0 ||
+      reading.rewindWaitMs > reading.acceptWaitMs + 500
+    ) {
+      bad.push(
+        `THE TWO VERBS FEEL DIFFERENT: the accept redrew in ${String(reading.acceptWaitMs)} ms and the rewind in ${String(reading.rewindWaitMs)} ms, which is the operator's complaint`
+      );
+    }
     if (r.activeIsChange !== true || r.activeIndex !== r.currentIndex) {
       bad.push('the keyboard is not on the change the rewind moved to');
     }
@@ -161,6 +171,8 @@ if (process.argv.includes('--self-test')) {
   const head = {
     mode: 'head',
     startChanges: 8,
+    acceptWaitMs: 20,
+    rewindWaitMs: 25,
     startDels: ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'],
     acceptsMovedFile: false,
     rewindMovedFile: true,
@@ -182,6 +194,8 @@ if (process.argv.includes('--self-test')) {
     startChanges: 8,
     acceptsMovedFile: false,
     rewindMovedFile: true,
+    acceptWaitMs: 20,
+    rewindWaitMs: 20,
     a1: { currentIndex: 0, currentCount: 1 },
     loopUp: { currentIndex: 0 },
     loopDown: { currentIndex: 7 },
@@ -196,6 +210,7 @@ if (process.argv.includes('--self-test')) {
     ['the accept landed on the wrong change', grade({ ...head, accept1: { ...head.accept1, dels: ['delta'] } }, 'head'), 1],
     ['the rewind did not move on', grade({ ...head, rewind: { ...head.rewind, currentCount: 0, currentIndex: -1 } }, 'head'), 2],
     ['the rewind did not write the file', grade({ ...head, rewindMovedFile: false }, 'head'), 1],
+    ['the rewind is much slower than the accept, which is the complaint', grade({ ...head, rewindWaitMs: 700 }, 'head'), 1],
     ['an accept wrote the file', grade({ ...head, acceptsMovedFile: true }, 'head'), 1],
     ['the arrows stopped marking something on an empty redline', grade({ ...head, emptyStep: { changes: 0, currentCount: 1 } }, 'head'), 1],
     ['the parent shape, graded as the parent', grade(parent, 'parent'), 0],
@@ -382,6 +397,42 @@ const until = async (cdp, expr, ms) => {
     await sleep(120);
   }
 };
+
+/**
+ * HOW LONG THE REDRAW TOOK, in milliseconds, polled at roughly one CDP round
+ * trip. This is the operator's own complaint of 2026-09-16: "when I option
+ * delete instead of option return, the delete takes a little bit of time...
+ * option return is instantaneous". The two verbs are timed the same way here
+ * so the claim is a pair of numbers rather than an impression, and the head
+ * grader holds them against each other.
+ */
+async function msUntil(cdp, n, capMs, from) {
+  const t0 = from ?? Date.now();
+  for (;;) {
+    let ok = false;
+    try {
+      ok = (await cdpEval(cdp, hasChanges(n), 10000)) === true;
+    } catch {
+      ok = false;
+    }
+    if (ok) return Date.now() - t0;
+    if (Date.now() - t0 > capMs) return -1;
+    await sleep(20);
+  }
+}
+
+/**
+ * A chord dispatched WITHOUT the trailing sleep `press` takes, so a stopwatch
+ * can be started at the keydown rather than 300 ms after it. Returns the
+ * moment the keydown went out.
+ */
+async function pressTimed(cdp, { key, code, vk, modifiers }) {
+  const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers };
+  const t0 = Date.now();
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', ...base });
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+  return t0;
+}
 const drive = (cdp, spec) =>
   cdpEval(cdp, `window.__gmuxShotDrive(${JSON.stringify(spec)}).then(() => true)`, 90000);
 const face = (cdp) => cdpEval(cdp, FACE, 20000);
@@ -453,7 +504,7 @@ async function driveHead(cdp) {
   // THE ACCEPT, and the point of the round: a second one with no ⌥↓ between.
   const before = await face(cdp);
   const fileBefore = digest(NOTES);
-  await press(cdp, CHORD.accept);
+  readings.acceptWaitMs = await msUntil(cdp, 7, 5000, await pressTimed(cdp, CHORD.accept));
   await until(cdp, hasChanges(7), 20000);
   readings.accept1 = await face(cdp);
   const afterAccept = digest(NOTES);
@@ -485,13 +536,18 @@ async function driveHead(cdp) {
   // the chord path the operator uses, with no pointer touched anywhere.
   const beforeRewind = await face(cdp);
   const digestBeforeRewind = digest(NOTES);
-  await press(cdp, CHORD.rewind);
+  readings.rewindWaitMs = await msUntil(cdp, 5, 20000, await pressTimed(cdp, CHORD.rewind));
   await until(cdp, hasChanges(5), 20000);
   await until(cdp, `document.querySelector('.ed-redline-change[data-current]') !== null`, 8000);
   readings.rewind = await face(cdp);
   const digestAfterRewind = digest(NOTES);
   readings.rewindMovedFile = digestAfterRewind !== digestBeforeRewind;
   check('H8', 'the rewind wrote the file', readings.rewindMovedFile === true, `digest ${digestBeforeRewind} -> ${digestAfterRewind}`);
+  note(
+    'H8b',
+    'HOW LONG EACH VERB TOOK TO REDRAW, from the key to the picture',
+    `accept ${String(readings.acceptWaitMs)} ms, rewind ${String(readings.rewindWaitMs)} ms`
+  );
   check(
     'H9',
     'THE SECOND ASK: the rewind left the change that followed it current, with the keyboard on it',

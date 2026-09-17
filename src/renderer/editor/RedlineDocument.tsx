@@ -453,6 +453,18 @@ export function RedlineDocument({
           }
         }
       );
+      // THE BYTES ARE ALREADY ON DISK, so the tab adopts them NOW. This is the
+      // operator's own complaint of 2026-09-16 — "when I option delete instead
+      // of option return, the delete takes a little bit of time... option
+      // return is instantaneous" — and it was measured in the app as 1,139 ms
+      // against the accept's 35 ms: an accept moves the baseline in memory,
+      // while a rewind waited for the file watcher's next round trip to
+      // re-read a file the view had just written. The write hands back what it
+      // wrote, so the picture redraws in this tick instead, and the adoption
+      // refuses if the tab moved meanwhile (./tab-io holds both refusals).
+      if (result.outcome === 'wrote') {
+        useEditor.getState().adoptWritten(live.id, result.contents, result.was);
+      }
       // A REWIND MOVES ON TOO, which is the operator's ask of 2026-09-16:
       // "when I press option delete, it should still go to the next available
       // edit point". It is armed HERE, after the write landed, because the
