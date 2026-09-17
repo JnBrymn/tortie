@@ -70,10 +70,19 @@ file grows downward and the log stays last.
 - After parallel work: scan for duplicated 10+ line blocks and extract.
 
 ## How every remaining phase gets built (the operating contract — do not lower this bar)
-Each phase runs as ONE Workflow with the same shape that produced Phases 1-13: **spec -> parallel builders with disjoint file ownership -> integrator -> independent verifier(s) at the phase's tier -> a fix round if any verdict is needs_work -> commit per phase**. Non-negotiables:
+**Read `docs/method/` before authoring any phase workflow**: `HOW-WE-VERIFY-THIS.md` section 1 is the fixed shape and the seven roles, `HOW-WE-BUILT-THIS.md` is the phase loop, `HOW-WE-DROVE-THIS.md` is how the real app is driven. A phase is one of two lanes, and neither may drop a step:
+
+```
+Build lane     Spec -> Build (n builders, disjoint files) -> [Integrate] -> Verify -> [Fix -> Reverify] -> Commit
+Research lane  Investigate -> Attack (adversaries) -> Judge or Synthesize -> Write (one doc) -> Commit
+```
+
+Each phase runs as ONE Workflow with the same shape that produced Phases 1-13: **spec -> parallel builders with disjoint file ownership -> integrator -> independent verifier(s) at the phase's tier -> a fix round if any verdict is needs_work -> AN INDEPENDENT REVERIFY OF THAT FIX -> commit per phase**. Non-negotiables:
 - **Research before building** anything whose mechanism is not already measured, and write it to docs/research/ so the next agent inherits it instead of re-deriving. Several phases (13.5, 13.7, 14, 15) already have their research banked — use it.
 - **Verifiers are independent of builders** and must produce EVIDENCE, not assurance: real app driving, measured numbers, byte-comparisons against ground truth, per-agent matrices where universality is claimed. A verifier that only reads code has not verified.
 - **Fix rounds are part of the phase**, not follow-up. A phase is not done at needs_work.
+- **A fix is never its own proof: Fix -> Reverify, always.** The reverifier is independent of the fixer, re-runs the FAILED ITEMS LIVE plus anything the fix touched, and never accepts a fix report or a green gate as proof. The fix runs ONCE; if the reverify still answers needs_work the workflow stops and the verdict goes to the operator, because a second needs_work on the same problem means the spec is wrong (`docs/method/HOW-WE-VERIFY-THIS.md` section 1 records why the three-round loop was removed). A verifier that returns nothing counts as needs_work, and verdicts are typed (`verdict`, `evidence`, `problems`), never prose. Re-running the battery after a fix round is the main session's job and is NOT the reverify. On 2026-09-17 five phases (277, 278, 279, 281, 282) landed with the step dropped, because the phase had been split into a build workflow and a verify workflow so the main session could run the long gates between them, and the second workflow was written to end at its fix round; in Phase 282 the BUILD round's own fixes had introduced two major defects with every gate green, which is exactly what this step exists to catch. **Splitting a phase across workflows never removes a step from its lane.**
+- **A research phase attacks BEFORE it writes.** Investigators, then adversaries who try to refute the findings, then a judge or a synthesis, then ONE document. A document written first and attacked afterwards has to be rewritten, which is what Phase 280 did.
 - **Tier the verification** per the section below — do not default to maximum, do not skip Tier 3 where it is earned.
 - **Commit per phase, conventional subject.** The subject is `type(scope): summary` (feat, fix, docs, refactor, test, chore, build, ci, perf, style; scope is one lowercase kebab word). The phase label is the FIRST BODY LINE, e.g. `Phase 24: self update`, and the build story stays in the body. No trailers of any kind.
 - **Never leave the queue idle.** When a phase's workflow completes, immediately launch the next batch in the order recorded at the top of docs/BACKLOG.md. Do not wait to be asked. If a verdict blocks, fix it and continue.
