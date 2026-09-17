@@ -54,6 +54,7 @@ function fakeDisk(initial: string) {
       // The focus moves while the press is awaited (the verifier's M1.h/M1.i).
       await Promise.resolve();
       during();
+      const was = disk.text;
       const plan = planRewind({
         baseline: ctx.baseline,
         baselineGeneration: ctx.generation,
@@ -66,7 +67,7 @@ function fakeDisk(initial: string) {
       if (plan.outcome === 'refused') return { refused: plan.why };
       disk.text = plan.contents;
       disk.writes += 1;
-      return { wrote: 'sha' };
+      return { wrote: 'sha', contents: plan.contents, was };
     };
   return { disk, apply };
 }

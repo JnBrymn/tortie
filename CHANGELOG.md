@@ -6,6 +6,10 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 ## Unreleased
 
+### Changed
+
+- In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last.
+
 ### Fixed
 
 - A shell variable name you added in Settings is no longer pushed off its list by names written into the settings file by hand ahead of it. Those names are still ignored, and closing the Settings window no longer drops yours.
@@ -14,6 +18,7 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 - Pressing Save in the "Save changes to…?" question no longer closes a file you typed into while it was saving; it asks again.
 - Typing into a file while the project's changes are being refreshed is no longer thrown away.
 - A file open on another machine, in a folder you allowed editing in, now shows as unsaved when you type into it, so closing it asks first.
+- Rewinding a change in the Redline view redraws as you press it. It used to wait for the file to be noticed on disk, which made ⌥⌫ feel slower than ⌥↩.
 
 ## 0.107.0 (2026-09-16)
 

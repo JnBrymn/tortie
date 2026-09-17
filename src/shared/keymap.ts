@@ -578,11 +578,14 @@ export const KEYMAP = [
   // not in front. The view's own key handler answers them while the keyboard
   // is in it; the Edit menu rows carry the verbs with no chord beside them.
   {
+    // THE TWO ARROWS LOOP (2026-09-16): each end comes round to the other, so
+    // a document with changes in it can always be walked all the way round.
+    // The rule itself is `stepIndex` in src/renderer/editor/redline-current.
     id: 'redline.next',
     keys: [k('Alt+Down')],
     action: 'Next change',
     explain:
-      'In the Redline view, moves the focus to the next change so it can be rewound.',
+      'In the Redline view, moves to the next change, and from the last change back to the first.',
     group: 'editor',
     scope: 'editor',
     assignable: false,
@@ -593,7 +596,8 @@ export const KEYMAP = [
     id: 'redline.prev',
     keys: [k('Alt+Up')],
     action: 'Previous change',
-    explain: 'In the Redline view, moves the focus back to the previous change.',
+    explain:
+      'In the Redline view, moves back to the previous change, and from the first change to the last.',
     group: 'editor',
     scope: 'editor',
     assignable: false,
@@ -605,7 +609,7 @@ export const KEYMAP = [
     keys: [k('Alt+Backspace')],
     action: 'Rewind the change',
     explain:
-      'Puts the change under focus back to what the marking is measured against, and writes the file. Undo brings it back.',
+      'Puts the change under focus back to what the marking is measured against, writes the file, and moves to the next change. Undo brings it back.',
     group: 'editor',
     scope: 'editor',
     assignable: false,
@@ -640,11 +644,17 @@ export const KEYMAP = [
     // redline's single write door depends on. Removing the keystroke removes
     // the danger outright and costs nothing, so Accept All is a button in the
     // redline's own header and a row in the Edit menu, and nothing else.
+    //
+    // THE ACCEPT-ADVANCE ROUND. THE ACCEPT MOVES ON. The change that followed
+    // the accepted one becomes current and takes the focus, so a run of
+    // changes is a run of ⌥↩ presses rather than ⌥↩ ⌥↓ repeated. A person who
+    // wants to stop after one press simply stops; nothing advances on its own
+    // without the press.
     id: 'redline.accept',
     keys: [k('Alt+Enter')],
     action: 'Accept the change',
     explain:
-      'Stops marking the change under focus: the marking is measured from it from now on. The file is not touched.',
+      'Stops marking the change under focus and moves to the next change, so pressing ⌥↩ again accepts that one. The file is not touched.',
     group: 'editor',
     scope: 'editor',
     assignable: false,

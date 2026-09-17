@@ -49,5 +49,14 @@ export function useLiveTabText(
     };
   }, [tabId, track]);
 
-  return modelText ?? savedContents;
+  // THE MODEL IS READ AT THE CALL, and the state above is only the re-render
+  // TRIGGER. The debounce exists to stop a stream of model edits from causing
+  // a render each, and it must not make a render that happened for ANOTHER
+  // reason draw text the model no longer holds. That difference is the
+  // operator's own complaint of 2026-09-16: a rewind writes the file and the
+  // tab adopts the bytes it wrote in the same tick, and with the debounced
+  // snapshot winning the redline would still draw the old text for another
+  // 150 ms while the accept beside it redrew at once.
+  const live = track ? (getWorkingModel(tabId)?.getValue() ?? null) : null;
+  return live ?? modelText ?? savedContents;
 }

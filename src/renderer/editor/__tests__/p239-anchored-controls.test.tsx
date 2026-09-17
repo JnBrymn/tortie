@@ -51,6 +51,18 @@
  *      chip drawn on change 0 where the parent read it gone, over a
  *      171.60 x 30px overlay sitting on the marked-up sentence.
  *
+ *   8. A PRESS MOVES ON (2026-09-16). The change that was drawn after the one
+ *      just accepted or rewound becomes current and takes the focus, so ⌥↩ can
+ *      be pressed again for the next change instead of ⌥↩ ⌥↓ ⌥↩ ⌥↓, and the
+ *      same for ⌥⌫. Both verbs remove exactly the change they name and leave
+ *      the others in order, so the follow-on sits at the index the pressed
+ *      change stood at, and PAST THE LAST ONE IT COMES ROUND TO THE FIRST
+ *      REMAINING — there is no stranded run above the place a person started.
+ *
+ *   9. THE ENDS LOOP (2026-09-16). ⌥↓ past the last change lands on the first
+ *      and ⌥↑ before the first lands on the last, so a document with changes
+ *      in it can always be walked all the way round.
+ *
  * WHAT THIS FILE CANNOT DO, stated rather than hidden: this repository carries
  * no jsdom, so nothing here focuses, hovers or lays anything out. The rectangle
  * readings are the app run's and the parent numbers they are compared against
@@ -78,6 +90,7 @@ const {
   caretMoveOf,
   chipNeedsMeasure,
   identityOf,
+  indexAfterRemoval,
   indexOfChange,
   pressLetsGo,
   sameChange,
@@ -170,10 +183,10 @@ describe('the step computes from the held position, never from the focus', () =>
 
   it.each([
     [0, 1, 1],
-    [0, -1, 0],
+    [0, -1, 8],
     [4, 1, 5],
     [4, -1, 3],
-    [8, 1, 8],
+    [8, 1, 0],
     [8, -1, 7]
   ])('from %i a step of %i lands on %i', (at, delta, want) => {
     expect(stepIndex(9, at, delta as 1 | -1)).toBe(want);
@@ -184,9 +197,56 @@ describe('the step computes from the held position, never from the focus', () =>
     expect(stepIndex(0, 3, -1)).toBeNull();
   });
 
-  it('at either end the position stays where it is, which is what Phase 227 shipped', () => {
-    expect(stepIndex(9, 0, -1)).toBe(0);
-    expect(stepIndex(9, 8, 1)).toBe(8);
+  it('THE ENDS LOOP: past the last comes round to the first, and before the first to the last', () => {
+    // The operator asked for this on 2026-09-16: "I want it to flip over and
+    // go to the first edit point at the top of the document", and backwards
+    // for ⌥↑, "so that it forms a loop instead of just hitting the end".
+    expect(stepIndex(9, 8, 1)).toBe(0);
+    expect(stepIndex(9, 0, -1)).toBe(8);
+    // One change loops onto itself rather than moving, which is what a
+    // document with one change and a loop can mean.
+    expect(stepIndex(1, 0, 1)).toBe(0);
+    expect(stepIndex(1, 0, -1)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8 and 9. A press hands the next change on, and the ends loop.
+// ---------------------------------------------------------------------------
+
+describe('a press that removed a change hands the next one on', () => {
+  it('the change that followed the pressed one sits at the same index in a picture one shorter', () => {
+    // Nine changes, press the fourth: eight remain and what was drawn fifth
+    // is now fourth, which is where the index the accept read still points.
+    expect(indexAfterRemoval(8, 3)).toBe(3);
+    // And from the top, so a press on the first change lands on the second.
+    expect(indexAfterRemoval(8, 0)).toBe(0);
+  });
+
+  it('THE LAST CHANGE LOOPS: the picture comes round to its first remaining change', () => {
+    // A run that started in the middle of a document and walked forwards to
+    // the end would otherwise leave every change above it stranded.
+    expect(indexAfterRemoval(8, 8)).toBe(0);
+    expect(indexAfterRemoval(1, 1)).toBe(0);
+  });
+
+  it('nothing pressed, or nothing left, moves nobody', () => {
+    // A refused press, an undo, or accept-all, which names no change at all;
+    // and a picture the removal emptied has no first change to come round to.
+    expect(indexAfterRemoval(8, null)).toBeNull();
+    expect(indexAfterRemoval(0, 0)).toBeNull();
+    expect(indexAfterRemoval(0, null)).toBeNull();
+  });
+
+  it('THE ABLATION: at + 1 would pass over the change that follows', () => {
+    // A rule written as "one further along" answers 4 where the picture
+    // answers 3: the change a person gets next would be the one after the
+    // one that followed, and a second ⌥↩ would accept the wrong phrase.
+    expect(indexAfterRemoval(8, 3)).not.toBe(4);
+  });
+
+  it('THE ABLATION the loop closes: stopping at the end would strand the changes above', () => {
+    expect(indexAfterRemoval(8, 8)).not.toBeNull();
   });
 });
 

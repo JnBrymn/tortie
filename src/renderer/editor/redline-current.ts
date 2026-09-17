@@ -162,9 +162,17 @@ export function indexOfChange(
 /**
  * The next index a step lands on, pure and without a DOM.
  *
- * From nowhere, next is the first change and previous the last; at either end
- * the position stays where it is, which is what Phase 227 shipped and what the
- * app run reads. Null only when the document holds no change at all.
+ * From nowhere, next is the first change and previous the last; FROM EITHER
+ * END IT COMES ROUND TO THE OTHER, so ⌥↓ past the last change lands on the
+ * first and ⌥↑ before the first lands on the last. The operator asked for the
+ * loop on 2026-09-16: "if I keep pressing option down... I want it to flip
+ * over and go to the first edit point at the top of the document", and the
+ * reverse for ⌥↑, "so that it forms a loop instead of just hitting the end".
+ * The two chords are the only way to move without acting, so a document with
+ * changes in it can always be walked all the way round.
+ *
+ * Null only when the document holds no change at all, which is the state the
+ * two ends would wrap THROUGH rather than into.
  *
  * IT TAKES THE HELD POSITION AND NEVER `document.activeElement`, which is the
  * fix for the swallowed first press (research 99 section 2.2).
@@ -176,7 +184,11 @@ export function stepIndex(
 ): number | null {
   if (count <= 0) return null;
   if (at === null) return delta === 1 ? 0 : count - 1;
-  return Math.min(count - 1, Math.max(0, at + delta));
+  // `+ count` keeps the sum non-negative, so the remainder is the wrapped
+  // index rather than JavaScript's signed one: ⌥↑ from 0 answers count - 1,
+  // not -1. One change loops onto itself rather than moving, which is what a
+  // document with one change and a loop can mean.
+  return (at + delta + count) % count;
 }
 
 /** The wrapper a step lands on, or null when there is nothing to step to. */
@@ -188,6 +200,38 @@ export function stepChange(
   const items = changeElements(host);
   const next = stepIndex(items.length, indexOfChange(items, id), delta);
   return next === null ? null : (items[next] ?? null);
+}
+
+/**
+ * WHERE A PERSON GOES AFTER A PRESS THAT REMOVED THE CHANGE IT NAMED: the one
+ * rule the accept and the rewind share.
+ *
+ * BOTH verbs take exactly the change they name out of the picture — an accept
+ * moves the baseline to the inserted bytes at that span, a rewind writes the
+ * baseline's own bytes back over the inserted ones — and both leave every
+ * other change in the order it was drawn in. So the change that FOLLOWED the
+ * pressed one now sits at the index the pressed one sat at, and the answer is
+ * that index in the picture AFTER the removal.
+ *
+ * IT LOOPS, like the two arrows beside it (the operator's ask of 2026-09-16):
+ * an index at or past the end — the pressed change was the last one, so the
+ * picture is one shorter than it — comes round to the FIRST remaining change
+ * rather than stopping. There is deliberately no "and stop" clause, because a
+ * run that started in the middle of a document and walked forwards would
+ * otherwise leave every change above it stranded.
+ *
+ * `null` in answers `null` out, so a press that named no change — a refused
+ * accept, an undo, or an accept-all — moves nobody; and a picture that holds
+ * nothing after the removal has no first change to come round to.
+ */
+export function indexAfterRemoval(
+  /** How many changes the picture holds AFTER the removal. */
+  count: number,
+  /** The index the pressed change stood at BEFORE the removal, or null. */
+  at: number | null
+): number | null {
+  if (at === null || count <= 0) return null;
+  return at % count;
 }
 
 /**

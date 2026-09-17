@@ -928,11 +928,12 @@ await withElectron(
           const focused = await cdpEval(cdp, focusHost);
           if (focused !== true) finding(`${key}: the scroller would not take the keyboard, so the chords drove nothing`);
           await sleep(200);
-          // BACK TO THE FIRST CHANGE BEFORE EACH WALK. `stepIndex` CLAMPS at
-          // the last change rather than wrapping, which is the product's own
-          // rule, so a walk that started where the previous pane's walk ended
-          // read one change and stopped. This is what makes the reading below
-          // "over every change" rather than over whichever one is current.
+          // BACK TO THE FIRST CHANGE BEFORE EACH WALK. `stepIndex` LOOPS now
+          // (the operator's ask of 2026-09-16), so a walk that started where
+          // the previous pane's walk ended cannot read "over every change" by
+          // pressing down alone; walking up lands on the first within one lap.
+          // This is what makes the reading below "over every change" rather
+          // than over whichever one is current.
           for (let k = 0; k < 40; k += 1) {
             await press(cdp, ALT_UP);
             await sleep(60);

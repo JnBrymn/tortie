@@ -328,6 +328,16 @@ interface EditorState {
    */
   acceptBaseline(id: string, contents: string, at: number): void;
   /**
+   * THE BYTES A CONFIRMED WRITE PUT ON DISK (2026-09-16). A rewind or an undo
+   * wrote this file through the one guarded door and knows exactly what it
+   * wrote, so the tab adopts those bytes and redraws in the same tick instead
+   * of waiting for the file watcher's next round trip. `was` is what the plan
+   * read, and the adoption refuses when the tab has moved since — a keystroke
+   * or a save — because then the watcher is the honest reader. ./tab-io's
+   * `adoptWritten` holds both refusals.
+   */
+  adoptWritten(id: string, contents: string, was: string): void;
+  /**
    * MonacoHost calls this after it has revealed, selected and flashed the
    * range — a landing happens once per request, never again on the next
    * re-render or mode toggle.
@@ -1412,6 +1422,10 @@ export const useEditor = create<EditorState>((set, get) => {
       // awaited here — an accept redraws now and the receipt lands when it
       // lands.
       void io.persistBaseline(id);
+    },
+
+    adoptWritten(id, contents, was) {
+      io.adoptWritten(id, contents, was);
     },
 
     clearPendingSelection(id) {

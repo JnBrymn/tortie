@@ -77,8 +77,19 @@ export type PressResult =
   /** Nothing was under focus, or nothing to undo: no read, no write, no word. */
   | { outcome: 'nothing' }
   | { outcome: 'refused'; why: RewindRefusal }
-  /** The write landed; `entry` is the identity it was made from. */
-  | { outcome: 'wrote'; sha256: string; entry: RewindJournalEntry };
+  /**
+   * The write landed; `entry` is the identity it was made from, and
+   * `contents`/`was` are the bytes main put on disk and the bytes the plan
+   * read, which the view hands the tab so it can redraw now instead of
+   * waiting for the watcher (./redline-write says why).
+   */
+  | {
+      outcome: 'wrote';
+      sha256: string;
+      contents: string;
+      was: string;
+      entry: RewindJournalEntry;
+    };
 
 /**
  * One rewind or undo, in press order: the dirty refusal, the identity read
@@ -118,5 +129,11 @@ export async function pressRedline(
   // have moved while the write was awaited; that change was not rewound.
   if (kind === 'rewind') recordRewind(tab.id, pressed);
   else popRewind(tab.id, pressed);
-  return { outcome: 'wrote', sha256: outcome.wrote, entry: pressed };
+  return {
+    outcome: 'wrote',
+    sha256: outcome.wrote,
+    contents: outcome.contents,
+    was: outcome.was,
+    entry: pressed
+  };
 }
