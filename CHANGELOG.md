@@ -10,6 +10,10 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 - In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last.
 
+### Fixed
+
+- Rewinding a change in the Redline view redraws as you press it. It used to wait for the file to be noticed on disk, which made ⌥⌫ feel slower than ⌥↩.
+
 ## 0.107.0 (2026-09-16)
 
 This release is about a project Tortie did not recognise as its own. A folder opened through a symbolic link, or spelled with different capitals than the disk uses, refused every save and quietly broke most of what the file tree does; open one folder both ways and you got two tabs with your sessions divided between them. Tortie now asks the filesystem which folder a path names rather than comparing the spelling. Alongside that, the variables an agent needs are named once for every agent instead of once each, the list of them scrolls and takes several at a time, and starting a session no longer waits a second on your login shell.
