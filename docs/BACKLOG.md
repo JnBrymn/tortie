@@ -29584,6 +29584,97 @@ spawns; and `conformance:credentials` and `conformance:logins` green after any f
 - No release.
 
 
+## Phase 282.1 — the reverify the save surface is owed (operator, 2026-09-17) QUEUED
+
+**Subject.** `test(editor): the save surface's fix rounds, re-verified` (provisional: if nothing changes,
+the phase lands as its running-log line and whatever test it corrected).
+
+**First body line.** `Phase 282.1: the save surface's fix rounds, re-verified`
+
+**Semver.** None unless a defect is found.
+
+**Tier 3 for the first two items, Tier 2 for the third, verified per item.** Items 1 and 2 are the code
+that decides whether a person's typing reaches disk and whether the editor follows an agent's edits,
+which is "can it lose or corrupt the person's work". Item 3 fails closed and writes a settings file.
+
+**Charter.** The operator, 2026-09-17, after CLAUDE.md was corrected (`19c317ef`) to carry
+`Verify -> [Fix -> Reverify]` from `docs/method/HOW-WE-VERIFY-THIS.md` §1: of the phases that landed that
+day with a fix round nobody independent re-verified, these three share the save surface and sit on top
+of each other, so they are one reverify. Phase 282's own history is the reason: its BUILD round's fixes
+introduced two major defects with every gate green, and only independent verifiers found them; the fix
+round that answered them then landed with no independent look.
+
+### The three items, and exactly what each fix round changed
+
+1. **Phase 282's last fix round, `117e7a85`** ("a hold lets go, and one walk per project reads the file"),
+   answering `wf_1f20006e-079`'s attack (needs_work) and re-derive (needs_work):
+   - `src/renderer/editor/redline-press.ts`: `releaseHolds` takes a required `dirty` and releases every
+     LANDED hold when the tab is dirty (a hold still in the air is never released by a redraw);
+     `src/renderer/editor/RedlineDocument.tsx`'s release effect passes `tab.dirty` and lists it as a
+     dependency.
+   - `src/renderer/editor/tab-io.ts`: `refreshRepo` is SERIALIZED per repository through `queuedRefresh`
+     (`refreshRunning`, forgotten in a `finally`; at most one more queued in `refreshQueued`); the walk
+     itself is unchanged; `createTabIo` returns `refreshRepo: queuedRefresh`.
+   - `src/renderer/editor/redline-current.ts`: `landingAfterPress` clause 2 matches the follower by
+     BASELINE OFFSET alone, on the header's claim that offsets are strictly increasing in a drawn picture.
+   - Tests: `p282-overlapping-refresh.test.ts` (real files, real descriptors held after the open),
+     additions to `p282-one-press.test.ts` and `p282-move-on.test.ts`; `conformance:redline` rule 40's
+     dirty-flag clause; `build/p282/SPEC.md` §10.
+   - Never independently checked: whether the queue can starve or deadlock (a walk that throws, a project
+     closed mid-walk, two repositories, a tick arriving while one is queued), whether releasing every
+     landed hold on `dirty` lets a second chord act on a change whose rewind is still in the air, and
+     whether two drawn changes can ever share an offset.
+2. **Phase 277's fix round, `29f47742`** ("a write clears only the text it wrote"), answering its verifiers,
+   who drove three regressions the first build had introduced: `withSaveSlot` answers `false` for the
+   `auto` reason when the slot is held; `drainQueue` checks `slots.has(id) || getWorkingModel(id) !== slot.model`
+   and runs `saveOnce(id, 'explicit')`; `promptDirtyClose` re-asks when `live.dirty`; `markDirty` refuses a
+   remote tab only when `tabIsReadOnly` says so; `refreshRepo` reads the live tab after its read
+   (`src/renderer/editor/tab-io.ts`, `auto-save.ts`, `store.ts`). The main session then rewrote
+   `build/conformance-save.mjs` itself (rules 1 and 11 retargeted to `saveOnce`, rule 1c exact, rules 18
+   to 24) and added arms 6 to 18 to `build/p268/ablation.mjs`, unreviewed.
+   - Never independently checked: the retargeted gate rules (a gate rewritten by the session that also
+     wrote the fix is not independent), and the interaction with item 1's serialized `refreshRepo`, which
+     sits on top of 277's live-tab read.
+3. **Phase 278's fix round, `85b76948`** ("a confirmed variable name survives a filled cap"):
+   `saveSettingsWindowBounds` in `src/main/settings/store.ts` re-reads the file and replaces only the
+   bounds, filtered to launchable ids, and the entry counting was corrected. The auditor's own fixture
+   passes unedited, which covers the headline; the re-read-then-write path is what nobody checked.
+   - Never independently checked: a settings write racing a Settings-window bounds save (a name confirmed
+     between the re-read and the write), and a malformed file at the re-read.
+
+### The mechanism
+
+A reverify builds nothing first. Per item, two independent verifiers at that item's tier (an attack and a
+re-derive), typed verdicts; then ONE fix round if any says `needs_work`; then the same verifiers re-run
+only the failed items, live; then stop. A second `needs_work` returns to the operator.
+
+- **Item 1, attack:** drive the shipping `queuedRefresh` with real files and held descriptors (the shape
+  `p282-overlapping-refresh.test.ts` uses) through: a walk that throws mid-way; `closeProject` during a
+  walk; two repositories ticking at once; three ticks while one runs (exactly one more must run, and the
+  newest bytes must win); a rename during a walk. Drive `releaseHolds` with a hold in the air while the
+  tab goes dirty, then a second chord. Search the shipping composer over generated documents for two
+  drawn changes sharing an offset. **Re-derive:** an independent model of the one-walk-per-repo rule
+  and of the landing, compared with the shipping functions over generated inputs.
+- **Item 2, attack:** interleavings over the shipping save pipeline as Phase 277's own tests do, with
+  item 1's serialization in place: a refresh queued behind a walk while an auto save is due; `drainQueue`
+  after the model was swapped; close during a held slot. **Re-derive:** every `conformance:save` rule
+  the main session rewrote (1, 1c, 11, 18 to 24) re-read against the shipping source by a verifier who
+  did not write them, with one ablation per rule shown red; the auditor's fixture
+  `docs/audits/fixtures/2026-09-14/auto-save-interleavings.test.ts.fixture` copied in and run again.
+- **Item 3, attack:** a settings write between the bounds save's re-read and its write; a file that fails
+  to parse at the re-read; a bounds save for a window whose id is not launchable. **Measure the parent:**
+  the auditor's fixture `env-cap-disclosure.test.ts.fixture` at `b4569686` and at HEAD.
+- **Gates after any fix:** typecheck, build, test, smoke:t1, `conformance:save`, `ablation:p268`,
+  `conformance:redline`; `probe:p277`, `probe:p268` and `probe:redlinemoveon` run by the main session.
+
+### What is NOT in this phase
+
+- No new behaviour, no widening of any of the three phases, no change to the tap, the redline's verbs or
+  the settings seal beyond what a reproduced finding demands.
+- Not Phase 283's unexplained auto-save write, which stays its own entry.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -30331,3 +30422,5 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 284 STARTED, the quiet surround, Tier 2 for the surface and Tier 3 for the geometry.** He confirmed it in his own words: "start a phased workflow for the quiet inset work … it can override my previously rule. and drain it" — the rule being the one unbroken band hairline and research 75's kept edges, which this phase rewrites in the same commit. The study is committed first, without the one capture of another company's product. Then spec, builders with disjoint ownership, an integrator, the main session's gates and app runs, an attack and a re-derivation, and a fix round.
 
 - 2026-09-17, **PHASE 281.1 QUEUED, the reverify the Claude meter's fix round is owed, Tier 3.** He chose it after CLAUDE.md was corrected (`19c317ef`) to carry the lane `Verify -> [Fix -> Reverify]` from docs/method: Phase 281 landed with its fix round unreverified, plus two later edits nobody independent read (SPEC §8.2, where the main session wrote down the vendor verifier's findings after the fix round's brief had cut them off, and `probe:p281`, the app run that reads his real keychain). The reverify re-runs exactly those items: the corrected `security` fakes against the real program on a guarded scratch keychain, the locked-keychain claim, the vendor rows §8.2 states as limits, §8.2 itself against the verifier's journal and the installed bundle, and the probe's safety by reading and by one run with the Claude switch off. Then one fix if needed, then the same verifiers on the failed items, then stop. Runs after 284; the real-keychain run is not repeated without his approval.
+
+- 2026-09-17, **PHASE 282.1 QUEUED, the reverify the save surface is owed, Tier 3 for two items and Tier 2 for one.** He asked for both reverify subphases. This one re-runs, independently and live, the fix rounds that landed today without a reverify and share the save surface: Phase 282's last fix round `117e7a85` (the hold released on a dirty tab, one `refreshRepo` walk per project, the follower matched by baseline offset), Phase 277's fix round `29f47742` (the three regressions its first build introduced, and the `conformance:save` rules the main session rewrote itself), and Phase 278's settings-window bounds re-read. Attack and re-derive per item, one fix if needed, the same verifiers on the failed items, then stop. Runs after 284 and 281.1.
