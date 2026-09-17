@@ -29171,6 +29171,313 @@ wrong.
 - No new gate rule until a reading names the clause it would pin.
 - No release.
 
+## Phase 284 — the quiet surround: one outline around the work, and the chrome around it goes quiet (operator, 2026-09-17)
+
+**Subject.** `feat(chrome): the work gets the one outline, and the surround goes quiet`
+
+**First body line.** `Phase 284: the quiet surround`
+
+**Semver.** Minor. Every window looks different, and nothing a person can do changes.
+
+**Tier 2 for the surface, Tier 3 for the geometry, and the round is verified per item.** The look is a
+rendered surface with no new state, which is one app run. But an 8px gutter changes the box every xterm
+sits in, so every visible session gets a tmux resize, and "how a surface mounts, splits or resizes" is the
+session surface: that half earns the resize proof `probe:sessionfocus` already carries. He asked for it
+himself, so the parent measurement is mandatory whatever the tier.
+
+**Charter.** The operator, 2026-09-17, in a Codex session and then here: "i love the queit surround", and
+"queue a phase on the backlog to first 1) look at what we did in codex session
+`/Users/gdc/.codex/sessions/2026/09/17/rollout-2026-09-17T15-38-58-01a0b0e1-1c4b-7103-b787-9cf18578e747.jsonl`
+and then 2) implement the quiet surround style to our app". The study is `design/` in his checkout,
+UNTRACKED: `design/README.md`, `design/directions.md`, `design/system/container-map.md`,
+`design/system/verification.md`, `design/prototypes/{index.html,styles.css,app.js,assets/}` and two
+captures under `design/references/`. Open `design/prototypes/index.html` and select **B · Quiet surround**
+(hash `#surround`, which is also the default); its rules are `design/prototypes/styles.css:180-197` under
+the comment "B. The terminal gets the single complete outline".
+
+### What the Codex session did, read before this entry was written so the phase does not re-derive it
+
+- **The ask, in his words** (19:40Z, with a capture of Tortie and a capture of a product called Unpeel as
+  the reference): "can we run a design study on the tortie interface similar to what we've done in
+  /users/gdc/runstory/design and use HTML to mock up a few variations that could make [Tortie] similar to
+  this [reference], just from an overall container of each part of the app perspective while not changing
+  any of the functionality?", then "its mostly about look and feel".
+- **What it built**: one DOM and one fixture drawn four ways, switched by `data-variant` on `.tortie` from
+  the URL hash. **Current** (flush edges, continuous dividers), **A · Inset workspace** (one 12px frame
+  round Explorer, work and Sessions together), **B · Quiet surround** (the work alone gets a complete
+  outline) and **C · Separate surfaces** (three framed panels with 8px gaps). Six things vary and nothing
+  else: the ground behind the app, the work surface, outer corners, border continuity, container gutters
+  and the selection treatment.
+- **What he chose**: B, and he said nothing about A or C. Codex recommended B as "closest to your
+  reference".
+- **It changed no file under `src/` or `resources/`.** It is a study and nothing shipped.
+- **It was never committed.** His last message was "can we commit all of this work please", and that turn
+  died in 728 ms with `unauthorized` because the Codex login had lapsed. That is why `design/` is
+  untracked.
+- **The study states its own limits.** `design/system/container-map.md:3`: "These are study values, not
+  replacements for the production design tokens." And `:33`: applying one "would need to preserve that
+  agreement [the canvas shared with the terminal and editor themes], carry the treatment through existing
+  light/appearance settings, and check resize handles, focused splits, menus, and clipping at rounded
+  edges." `design/directions.md:19` names B's trade-off: "quieter sidebar boundaries: resize hit areas and
+  keyboard focus must remain discoverable in an eventual implementation."
+
+### What B is, exactly
+
+`design/prototypes/styles.css:180-197`, against the study's baseline:
+
+- The ground behind everything goes from `#0e0f13` to a slightly blue charcoal `#141a22`, and the work
+  surface from `#131417` to a neutral `#1a1a1d`. Frame and work differ by HUE and CHROMA and not by
+  lightness (1.007:1).
+- **Only the work area gets an outline**: `1px solid #3c3e43` with a **14px radius**, clipped by
+  `overflow: hidden`. There is no shadow anywhere in the study.
+- The workspace gains an **8px gap** between Explorer, work and Sessions and **8px of bottom and right
+  inset**. No top or left inset.
+- The titlebar, the activity rail, Explorer and the session panel each LOSE their hairline; every panel
+  header's bottom rule goes transparent.
+- The selected session row loses its 2px marker bar and gains a soft fill with a 1px inset outline and a
+  7px radius; the active activity item loses its bar and gains a filled 7px chip.
+- The titlebar grows from 38px to 44px.
+- The study has NO light base and reads no production token: every value in the block is a literal.
+
+### Where the app draws this today, read from the tree at `15dfd2bd`
+
+- **The pane has no frame at all.** `src/renderer/terminal/terminal.css:25-33` (`.gmux-terminal-pane`) and
+  `:53-56` (`.xterm` padding, on `.xterm` because the fit addon subtracts only that element's padding);
+  `src/renderer/terminal/scroll/scrollbar.css:11-15` pins the scroll lane to the pane's right edge, where a
+  rounded corner would clip it.
+- **The region and the shell**: `src/renderer/app/TerminalRegion.tsx:619` (`main.center`),
+  `src/renderer/app/App.tsx:326-370` (`.shell-body` → rail, activity bar, sidebar, `.work-area` holding
+  `SessionStrip` and `.work-row` with `TerminalRegion` and the editor, then `SessionDock`),
+  `src/renderer/app/work-area.css:28-46`.
+- **The hairlines B removes**: titlebar `src/renderer/styles/app.css:27-39`, activity bar `:353-362` with
+  its 2px active bar at `:418-426`, sidebar `:466-475` with its resizer `:481-505`, the view header
+  `:517-531`, the dock `:973-983` with its resizer `:985-998`, the selected row `:1125-1138`, the editor's
+  left border `src/renderer/editor/editor.css:10-19`, and the usage seam
+  `src/renderer/app/usage-meter.css:96,206`.
+- **The band**: `.term-header` `app.css:708-717` with `--bandline`, the focused band turning `--accent` at
+  `:719-721`, and the active tab's "melt" at `:784-789`, the one sanctioned break in the hairline.
+- **The width model**: `src/renderer/state/chrome-geometry.ts:456-498` (`workAreaWidth`) and `:512-538`
+  (`terminalLayoutWidth`) have no term for a gutter or an inset.
+
+### The rulings this phase reverses, and says so
+
+`DESIGN.md:7` makes the terminal and the chrome "the same material"; `:246` separates regions "by
+hairlines, not shadows"; `:281` and `docs/DESIGN-SPEC.md:29` and `:786` (S12.9) require ONE unbroken 1px
+hairline across the 36px band with exactly one sanctioned interruption; `DESIGN.md:301-302` give the
+selected row and the active activity item a 2px `--accent` bar; and `docs/research/75-chrome-visual-language.md:3-8`
+records him asking to keep "the edges, which he likes". **He has now asked for the opposite, on
+2026-09-17, in his own words, and this phase follows the newer ask.** It rewrites `DESIGN.md` §0, §1.9 and
+§2.2, `DESIGN-SPEC` S1, S4 and S12.9 and adds a dated note to research 75 in the SAME commit, so the
+authorities describe what ships. `DESIGN.md:7`'s refusal of "a light frame around a dark terminal" stands:
+B's surround is darker than the work on the dark base, and the light base must keep that relation.
+
+### The mechanism
+
+1. **Commit the study first**, as he asked Codex to: `design/` as it stands. `design/references/unpeel.png`
+   is a capture of someone else's product and this repository is public, so that one file is his call; the
+   default is to commit the study without it and say so.
+2. **Tokens, not literals.** `conformance:hue` rule 26 refuses a colour literal outside the theme files,
+   and a new neutral does not turn with the Appearance controls unless it joins `HUE_TOKENS`
+   (`src/renderer/theme/presets.ts:126-130`) and the ramp orders. So: the surround is `--bg-sidebar`,
+   which `tokens.css:16` already describes as "the frame steps under the work"; the work surface stays
+   `--bg-canvas`, which keeps `src/shared/__tests__/canvas-color-single-source.test.ts` and the window's
+   pre-paint fill true; the one outline is `--border-strong` and the selected row's outline
+   `--border-active`; fills are `--bg-active`. The spec photographs that against the study on both bases.
+   Only if it cannot carry B's look does a new neutral join the hue lists, and then `conformance:hue`
+   (about 13 minutes) is in the battery.
+3. **The radius.** There is no 14px token; the largest is `--r-lg` at 10px, which `DESIGN.md:228`
+   reserves for modals. `conformance:hue` rule 25 hashes the dark `:root` block of `tokens.css` byte for
+   byte (`build/conformance-hue.mjs:1674-1698`, digest `dc5f1cd8…`), so ANY declaration added there turns
+   it red. The spec chooses between a `--r-frame` declared outside that block and a deliberate re-pin
+   named in the commit body, the Phase 218 precedent.
+4. **The ground behind the corners.** `.shell` is `--bg-canvas` (`app.css:10-15`), so the gutters and the
+   area behind a rounded corner would read as canvas. `.shell-body` takes the surround.
+5. **The outline is an overlay**, never an inset shadow: `app.css:2400-2407` records that xterm's canvas
+   and the header backgrounds paint over one, and Phase 40's `::after` with `pointer-events: none` is the
+   precedent. The clip sits on an ancestor of the scroll lane, the editor overlay and its scrim
+   (`editor.css:27-35, 97-100`) and `SplitDropOverlay`, and the flying copy in
+   `src/renderer/app/focus-copy.ts:400-414` wears the same clip so session focus does not flash square
+   corners.
+6. **Geometry is declared, never animated.** The 8px gap and inset go into `workAreaWidth` and
+   `terminalLayoutWidth` so the model and the rendered width agree. Every visible session is resized ONCE
+   at first paint and never during a flight; `DESIGN.md:388-389` and S12.7 stand.
+7. **The strip and the focus signals.** `.work-area` contains `SessionStrip`, so the rounded work surface
+   would clip the first tab and the band hairline at its top corners. The spec decides where the strip
+   sits and keeps both signals a person relies on: the band turning `--accent` when a terminal has the
+   keyboard, and the active tab melting into the terminal.
+8. **Resizers stay discoverable.** `.sidebar-resizer` and `.dock-resizer` overhang a divider that no
+   longer exists. Their 5px hit areas move into the gutter, keep the `--border-strong` hover and keep a
+   visible `:focus-visible` state (`app.css:498-505` is the precedent).
+9. **The titlebar stays 38px unless the spec's photograph shows B needs 44.** Three places pin 38:
+   `src/renderer/app/focus-mode.css:106-112`, `src/renderer/app/__tests__/focus-mode.test.ts:336` and
+   `src/renderer/overview/overview.css:25`. If it moves, all three move in the same commit.
+10. **Tests that pin today's chrome are rewritten, never deleted**:
+    `src/renderer/app/split/__tests__/focus-affordance.test.ts:26-27,90-97,116-121` (it reads `app.css`
+    from the S4A marker to the END of the file and allows exactly one `--accent-soft` line and no colour
+    literal there, so new frame rules go ABOVE that marker), `work-area.test.ts:94-100`,
+    `focus-mode.test.ts:243-275,336`, `p1811-mini-clothes.test.ts:100` (the usage seam must keep a
+    `border-top:`) and `focus-copy.test.ts:436`.
+11. **No setting and no menu change.** The treatment is unconditional, so `gate:contract` and the native
+    menus are untouched.
+
+### The proof, run rather than read
+
+- **Parent and HEAD photographs**, same window and fixture, on the dark base, the light base and one
+  turned hue, beside the study's B.
+- **`probe:p284`**, one Electron, reading rectangles and computed styles rather than pixels: the work
+  surface is inset 8px on the right and the bottom and separated by 8px from both sidebars; its computed
+  radius is 14px; exactly ONE complete outline exists in the window; the titlebar, activity bar, sidebar
+  and dock have no border on the side facing the work; the outline's contrast against BOTH grounds is no
+  lower than today's hairline (1.297:1); the scroll lane, a split, the editor overlay and a drop zone sit
+  inside the clip; both resizers still answer hover and `:focus-visible`; and with a terminal focused the
+  band still reads `--accent`. It raises `HELPER_USER_FLOOR` from 141 to 142.
+- **The resize proof**: `probe:sessionfocus` (no visible leaf is resized during the flight and each is
+  resized exactly once after the swap), `probe:p1811` (the strip's tab list and meter across a ladder of
+  widths) and `probe:p167` if a split's geometry moves.
+- **Independent method one, an attack**: a verifier who did not build it hunts for a second outline, a
+  square corner, a clipped scrollbar or first tab, a resizer that cannot be found by keyboard, a colour
+  literal, and a session resized twice, at the 240px `TERMINAL_FLOOR`, in focus mode, in a four-way split,
+  with the editor in fill and overlay modes, and with both sidebars collapsed.
+- **Independent method two, re-derive**: the verifier computes the expected terminal width from
+  `chrome-geometry.ts` for ten window sizes and compares it with the rendered xterm columns.
+- **Gates**: typecheck, build, test, smoke:t1, and `conformance:hue` if any file on its path list moved.
+
+### What is NOT in this phase
+
+- No change to what anything DOES: no layout, control, shortcut, panel order or session behaviour moves.
+- No setting, toggle or theme switch for the treatment, and no option A or C.
+- No colour literal outside the theme files, no shadow and no animation on any terminal container.
+- No light frame around a dark terminal (`DESIGN.md:7`).
+- No change to the terminal's own palette, the editor theme or the Appearance controls' behaviour.
+- No release.
+
+
+## Phase 285 — a probe goes red because he used his own machine (operator, 2026-09-17)
+
+**Subject.** `fix(harness): a probe fails for what it could have done to his server, never for what he did`
+
+**First body line.** `Phase 285: the census that blames him`
+
+**Semver.** None. It changes `build/` and the development notes, and no shipping byte.
+
+**Tier 3.** It is the guard on the one thing a probe must never do, which is touch his private tmux
+server, where his live agent sessions run. Loosening it wrongly is how a probe creates sessions on his
+server and nobody notices, which has already happened twice. He reported the false red himself, so the
+parent measurement is mandatory.
+
+**Charter.** The operator, 2026-09-17, quoting Phase 282's re-run table back: "queue a phase to address
+and resolve this". That table had two readings that were not the code's fault. One is already queued as
+**Phase 283** (`probe:p268`'s arm G, seen once under load and never again). This entry is the other: in
+that same battery `npm run probe:p277` passed all four of its arms and still exited 1 with the single
+finding "the operator's own tmux server changed under this run", because his `-L gmux` session count went
+from 52 to 53 while it ran. He had started a session of his own.
+
+### What was read before this entry was written, so no round re-derives it
+
+- **The check is a bare count.** `build/p277/probe-p277-save.mjs:277-281` counts the lines of
+  `tmux -L gmux list-sessions` before the run, and `:812-814` fails the run on any difference. No ids and
+  no names, so it cannot tell a session the probe made from one he made.
+- **About 130 scripts under `build/` carry the same hand-written count**, in five families of wording:
+  "the operator's own tmux server changed under this run" (5 files, `p268` and `p277` among them),
+  `check('X1', 'operator sessions on -L gmux unmoved', …)` (16), "the operator's session count moved from
+  X to Y" (48), "held N session(s) before this probe and M after it" (the p101 to p130 family) and "went
+  from X sessions to Y. This probe must never touch it" (11). Every probe in Phase 282's battery has one:
+  `build/probe-p237-typing.mjs:584-587`, `build/probe-redline-move-on.mjs:1365-1370`,
+  `build/p268/probe-p268-autosave.mjs:781`.
+- **This was already diagnosed and fixed once, in ONE file, and never spread.**
+  `build/probe-p165-paint.mjs:213-220`: "Phase 171 replaced a bare count. The count moved from 48 to 49
+  during a run on 2026-08-30 because the operator opened a session of his own while the probe ran, and the
+  probe called that a failure. A session this run created would be in THIS RUN'S manifest, so that is the
+  test for a leak; a session that vanished is always a failure." It reads
+  `list-sessions -F '#{session_id}\t#{session_name}\t#{@gmux-id}'` and asks the run's own scratch
+  `manifest.db` whether it knows the id (`:221-246`, rules at `:786-806`). Its one hole: a fresh session
+  with an EMPTY `@gmux-id` is only noted.
+- **The shared helper has a census too, by NAME, and it is off for most probes.**
+  `build/electron-run.mjs:539-550` (`liveSessionNames`) and `:568-591` (`censusFinding`) take the set
+  difference of names around one launch. Its header states the limit outright (`:561-562`): "the operator
+  starting or ending a session by hand while a probe runs fails that probe, loudly and by name." And
+  `:934-938` reads the census ONLY when the launch named a scratch socket: of 117 own-census probes that
+  launch through the helper, 43 pass `tmuxSocket: null` and 51 omit the key, so 94 get the bare count
+  alone. `probe:p277` is one of them (`probe-p277-save.mjs:517`).
+- **Why the check exists, and it must keep doing this.** Phase 261, `docs/BACKLOG.md:26733-26743`: twice a
+  probe launched without a harness mode, the socket override was ignored, and the app "ran against his
+  live `-L gmux` server and created sessions on it: `shell-1-5`, `cursor-1-2` and `claude-1-4` on
+  2026-08-18, then `shell-1-6` and `claude-1-4` on 2026-08-19 … Prose has now been measured at 0 of 2, so
+  the fix is mechanical". `build/electron-run.mjs:322` calls the census "the operator's own ritual made
+  mechanical".
+- **What a read-only query can tell apart**, measured on his server (tmux 3.6a, 58 sessions):
+  `list-sessions -F` reads `#{session_id}`, `#{session_created}`, `#{session_path}` and `#{session_name}`
+  on 58 of 58 rows and `#{@gmux-id}` on 57 (the one without is `gmux-control`, unstamped by design). A
+  Tortie session's manifest row is written BEFORE the spawn (`src/main/sessions/create-local.ts:661-677`)
+  and its `@gmux-id` is stamped just after it (`:729-745`), so a session a probe's app made is in THAT
+  run's `<userDataDir>/gmux/manifest.db`, which sits under the harness directory and which the helper's
+  teardown does not remove, and its start directory is under the run's scratch root. The pane environment
+  needs `show-environment`, a second verb, and `gate:electron` rule 5f allows the helper `list-sessions`
+  alone (`build/assert-electron-teardown.mjs:1098-1112`).
+
+### The rule
+
+**A probe fails for what it could have done to his server, never for what he did.**
+
+### The mechanism
+
+1. **One reader, in the helper, by identity.** `build/electron-run.mjs` reads
+   `list-sessions -F '#{session_id}\t#{@gmux-id}\t#{session_created}\t#{session_path}\t#{session_name}'`
+   and keys rows by `$-id`, so a rename of his is no change at all. `list-sessions` stays the only verb
+   aimed at `-L gmux`, so rule 5f holds.
+2. **The judgement, per fresh `$-id`.** (a) FAIL when its `@gmux-id` is in this launch's scratch
+   `manifest.db`, or its start directory resolves under the run's scratch root (mind `/tmp` against
+   `/private/tmp`): that is the 2026-08-18 shape, attributed with certainty. (b) FAIL when it is still
+   unstamped after one re-read a second later: a probe-side `new-session` aimed at the wrong socket, or an
+   app killed inside the stamp window, which closes `probe-p165-paint`'s hole. (c) Otherwise it is his: it
+   is printed by id and name as a NOTE, and the run exits 0.
+3. **A session that went stays fatal**, as `probe-p165-paint.mjs:795` and
+   `build/update-rehearsal.mjs:3406-3418` both keep it, because the helper cannot attribute a
+   disappearance and a probe killing his session is the worst thing it can do. The cost is known and
+   smaller: his CLOSING a session mid-run still reddens a probe. Flipping that to a note when the launch's
+   own socket announcement was correct is his call, and the entry does not make it for him.
+4. **The census is unconditional.** The `tmuxSocket !== null` guard at `:934-938` goes, so the 94 probes
+   that name no socket get it too.
+5. **The hand-written counts go.** The probes this repository still runs — everything in CLAUDE.md's probe
+   table and the Phase 237 and Phase 260 to 282 families, `p237`, `p268`, `p277` and `redline-move-on`
+   first — lose their bare comparison and print the two numbers instead. The rest are held by a CEILING in
+   `gate:electron`: the count of scripts under `build/` that still turn a bare operator count into a
+   failure may only fall, so the sweep can finish over later rounds without a new bare count ever
+   arriving.
+6. **The gate moves with it**, in the same commit: arms 5d and 5h and their fixtures
+   (`build/assert-electron-teardown.mjs:1306-1329`, `:860-1090`, the ablation at `:1180`) describe the
+   identity census, with one ablation per clause of the judgement, each red on its own clause.
+7. **The notes say what is true**: `DEVELOPMENT.md:99, 225, 238, 254, 292, 309-310, 386-387, 470` stop
+   saying "a moved count is a failure".
+
+### The proof, run rather than read
+
+- **Parent measurement, on a SCRATCH socket and never on his.** A fixture server is planted with an
+  operator-shaped fresh session during a launch: stamped with a foreign id and started under a home-like
+  path. At the parent the run is RED; at HEAD it prints a note and exits 0.
+- **The attack, independent method one**, on that same scratch socket: a session whose id IS in the
+  scratch manifest (must fail), an unstamped fresh session (must fail after the re-read), a fresh session
+  under the scratch root (must fail), a vanished session (must fail), a rename (no finding), and his shape
+  (a note). Then the verifier tries to build a probe-made session the judgement would call his.
+- **Re-derive, independent method two**: the verifier writes its own reading of `list-sessions -F` and its
+  own judgement from the rule above, and compares every row against the helper's over the same fixtures.
+- **One real run**: `npm run probe:p277`, with him free to open a session while it runs, exits 0 and
+  names his session in a note.
+- **Gates**: `gate:electron` with the new arms and the ceiling, `gate:background`, `gate:checks`,
+  typecheck, build, and the census unit suites.
+
+### What is NOT in this phase
+
+- No verb but `list-sessions` is ever aimed at `-L gmux`, and nothing is written to it, by the helper, a
+  probe or a verifier. Every fixture session lives on a scratch socket the run made and ends in a
+  `finally`.
+- No weakening of the socket refusal or the announcement check (`electron-run.mjs:389-525`). This phase
+  changes what the census CONCLUDES, never whether it runs.
+- Not Phase 283. `probe:p268`'s arm G is a different reading with its own entry.
+- No rewrite of all 130 scripts in one commit; the ceiling is what makes the rest safe to leave.
+- No shipping byte and no release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29910,3 +30217,7 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 281 LANDED, the Claude meter reads the item Claude Code reads, `79c6c8fe`, version 0.107.0 unmoved, no tag, pushed.** **Proved in his own app, with his approval, after a turn in a default-login claude session**: one run at the parent and one at HEAD, never at once, two polls a minute apart — the parent drew no numbers and logged `usage.read.failed claude signed-out` twice, HEAD drew both windows and the plan word on both polls and logged nothing. Every read, presence check, attribute read, write, staged write and delete of a Claude Code item now carries `-a` with the vendor's own account rule and asks the ONE name its service rule gives; the plain-name fallback under `CLAUDE_CONFIG_DIR`, which the Phase 280 verifier drove into drawing one account's numbers under another's name, is gone; `security.ts` refuses a vendor name with no account without spawning; and only exit 44 draws the sign-in line, so a keychain that cannot be read keeps the last numbers stale. The write side moved with it: a switch used to commit `add -U -a "unknown"` onto the stray, and now writes where Claude Code reads. **The scratch-keychain verifier measured what no model knew**: `add -U` moves the updated item BEHIND every other item of that name, so each Claude Code refresh puts its own item back behind the stray — which is why the stray kept winning — and both fake `security` models were corrected. **It also repaired conformance:logins**: since Phase 200 its ablated copies had been dying on an import error that the gate counted as red, so none of those 16 ablations had proved anything. The first app run proved nothing and said so: a scratch `HOME` makes `security` answer 44 for every item, because the keychain search list resolves through the home directory, so `probe:p281` uses his own `HOME` with the credentials domain on its file store. Stated limits: a chosen login under `CLAUDE_SECURESTORAGE_CONFIG_DIR`, `CLAUDE_CODE_CUSTOM_OAUTH_URL`, items an earlier build wrote under a copied account, and the `-i` 4,032-character write.
 
 - 2026-09-17, **PHASE 282 LANDED, the press that moves on (PR 28, JnBrymn), `d8debd9d` + `3ea54ad9` + `117e7a85`, version 0.107.0 unmoved, no tag, pushed; PR 28 closed.** His feature landed under his name and the two fix rounds under the operator's: in the Redline view ⌥↩ and ⌥⌫ now move to the change that followed the one pressed, ⌥↓ and ⌥↑ come round at the ends, and a rewind redraws in 25 ms instead of waiting about 1.1 s for the watcher. **A four-lens review over the branch merged onto main found one BLOCKING defect and six more, each reproduced twice by different methods**: typing in the Redline view came out scrambled and a save wrote it to disk (`probe:p237` failed five checks with the branch's `live-text.ts` line in and passes with it out, measured in the app); the move carried an INDEX, so an agent's write above the pressed change sent the next ⌥⌫ onto a change the person had kept; a redraw that merged neighbours did the same with no outside write; a second chord inside the write acted on the change being rewound; rewinding the only change dropped the keyboard so ⌥⇧⌫ did nothing; a keystroke in transit was invisible to the adoption; and a watcher read crossing the rename rolled the tab back in 37 of 500 interleavings. **The verification round then found three more in the fixes themselves**: a hold that one keystroke could freeze for the life of the mount, after which every accept on that tab was refused; a baseline clause that dropped the NEWER of two overlapping reads, so the editor stopped following an agent's edits (refreshRepo is now one walk per project); and a landing fallback reached by an ordinary re-cut that could land on the agent's new change. conformance:save gains rules 25 to 27c, ablation:p268 goes 18 to 27 arms, conformance:redline rule 40 is rewritten with 11 ablations of the shipping source, and probe:redlinemoveon gains five arms. The floor is 141, counting both this round's probe and Phase 281's. One reading is unexplained and queued as Phase 283: `probe:p268` arm G failed once under load and in eight further runs did not.
+
+- 2026-09-17, **PHASE 284 QUEUED, the quiet surround (operator), Tier 2 for the surface and Tier 3 for the geometry.** He ran a design study in a Codex session and chose option B: "i love the queit surround". The work area alone gets one complete 14px-rounded outline, 8px gutters open between it and both sidebars, and the titlebar, activity bar, sidebar, dock and panel headers lose their hairlines; the selected session row trades its 2px bar for a soft outlined fill. The study is `design/` in his checkout, UNTRACKED, because the Codex turn that was asked to commit it died with a lapsed login; the phase commits it first. **It reverses rulings he set earlier and says so**: the one unbroken band hairline (`DESIGN.md:281`, S12.9) and research 75's "the edges, which he likes", which it rewrites in the same commit. It ships on existing tokens so it turns with the Appearance controls, declares the gutters in `chrome-geometry.ts`, draws the outline as an overlay because xterm paints over an inset shadow, and proves every visible session is resized exactly once.
+
+- 2026-09-17, **PHASE 285 QUEUED, a probe goes red because he used his own machine (operator), Tier 3.** In Phase 282's battery `probe:p277` passed all four arms and still exited 1 with "the operator's own tmux server changed under this run": his `-L gmux` count went 52 to 53 because he opened a session of his own. About 130 scripts under `build/` fail on that same bare count, the shared helper's census compares NAMES and is off for 94 of the 117 probes that launch through it, and the exact fix was already made once, in `probe-p165-paint.mjs` by Phase 171 after the same thing happened on 2026-08-30, and never spread. **The rule: a probe fails for what it could have done to his server, never for what he did** — a fresh session is a failure when this run's own scratch manifest knows its id, when it started under the run's scratch root, or when it stays unstamped; otherwise it is his and is printed as a note. A session that WENT stays fatal. The other reading in that table, `probe:p268`'s arm G, is already Phase 283.
