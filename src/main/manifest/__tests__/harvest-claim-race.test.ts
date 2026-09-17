@@ -196,16 +196,45 @@ function fireEventAt(index: number, path: string): void {
   subscribers[index]?.cb(null, [{ type: 'create', path }]);
 }
 
+/** One real event-loop turn. setImmediate is deliberately NOT faked. */
+function turn(): Promise<void> {
+  return new Promise((r) => {
+    setImmediate(r);
+  });
+}
+
+/** Is an fs request of this thread still out on the thread pool? */
+function fsInFlight(): boolean {
+  return process.getActiveResourcesInfo().some((name) => name.startsWith('FSReq'));
+}
+
 /**
  * Let thread-pool fs completions and the promise chains behind them run.
  * setImmediate is deliberately NOT faked, so each round is a real event-loop
  * turn; timers stay exactly where the script left them.
+ *
+ * IT WAITS FOR THE FS REQUESTS THEMSELVES, NOT FOR A NUMBER OF TURNS. It used
+ * to be twenty-four turns and nothing else, which is a guess about how long a
+ * thread pool takes, and on an idle machine twenty-four turns is under a
+ * millisecond. On a starved CI runner a readdir was still out when the script
+ * advanced the grace clock, so the timer it was waiting for was armed AFTER
+ * the clock had already moved and nothing ever moved it again: the promise
+ * never settled and the test hung to its budget. That is not slowness and no
+ * budget fixes it. It lost the 0.105.0 signed build a run at 5,014 ms and
+ * gates run 35261110827 at 15,025 ms, the budget each time. Keeping every
+ * pool thread busy with pbkdf2 before each flush reproduces it on any machine:
+ * 4 of this file's 14 tests hang, this one first.
+ *
+ * So: wait until no fs request is in flight, run the turns for the promise
+ * chains behind them, and go round again if those chains started more fs
+ * work. The spin is bounded so a request that never completes fails the
+ * test's own assertions rather than hanging here.
  */
 async function flushIo(rounds = 24): Promise<void> {
-  for (let i = 0; i < rounds; i += 1) {
-    await new Promise((r) => {
-      setImmediate(r);
-    });
+  for (let pass = 0; pass < 50; pass += 1) {
+    for (let spin = 0; spin < 200_000 && fsInFlight(); spin += 1) await turn();
+    for (let i = 0; i < rounds; i += 1) await turn();
+    if (!fsInFlight()) return;
   }
 }
 
