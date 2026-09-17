@@ -28975,6 +28975,150 @@ New in this phase:
 - No release.
 
 
+## Phase 282 — the press that moves on (PR 28, JnBrymn, 2026-09-16; integrated by the operator's ask, 2026-09-17)
+
+**Subject.** `fix(editor): a press moves on to the change that came next, and typing stays whole`
+
+**First body line.** `Phase 282: the press that moves on`
+
+**Semver.** Minor. ⌥↩ and ⌥⌫ in the Redline view now move to the next change, and ⌥↓ and ⌥↑ loop at the
+ends, which is new behaviour a person will notice. The fixes change no other surface.
+
+**Tier 3.** The rewind half writes the person's file, and the adoption this PR adds moves `savedContents`
+and replaces the working model, which are the ⌘S precondition and the person's buffer. "Can it lose or
+corrupt the person's work?" is yes, and the Phase 280-era review measured that it can.
+
+**Charter.** Pull request 28 (https://github.com/gregce/tortie/pull/28), six commits `f6108e9d..aa0e58f2` by
+John Berryman (JnBrymn) on top of `c1fe5fd3`, and the operator's ask of 2026-09-17: "queue a build phase
+with that branch, make all of the fixes with our standard build workflow, then commit to that PR as you go
+and ultimately close and integrate it after it's been verified". The requests quoted in the PR's commits
+and comments are the PR author's, not the operator's, and this phase credits them that way.
+`build/p277/SPEC.md` binds the save half: Phase 277 built its save surface on the ruling that the redline
+write patches no tab field, and this PR is the first thing that does.
+
+### What was measured before this entry was written, so no round re-derives it
+
+A four-lens review ran over `origin/main` with the PR merged (`3616a934`, local only), and every finding
+below was reproduced by its reviewer and then again by an independent skeptic using a different method.
+
+- **The battery is green and says nothing about the defects.** typecheck, build, 14,598 tests,
+  conformance:save, conformance:redline (rule 40 is the PR's), conformance:redline-write, ablation:p268 18
+  of 18, smoke:t1, probe:p277 4 of 4, and the PR's own probe:redlinemoveon 19 of 19 (accept 11 ms, rewind
+  26 ms). None of them types into the Redline view while the PR's live-text change is in.
+- **BLOCKING: typing in the Redline view is scrambled.** `src/renderer/editor/live-text.ts` now returns
+  `getWorkingModel(tabId)?.getValue()` at render. `useRedlineTyping` writes the model after an await, so the
+  next keystroke's render reads a model one keystroke behind, the typing effect takes it for an outside
+  write, and the characters land out of order; ⌘S or auto save writes that to disk. **Measured in the app**:
+  `npm run probe:p237` on the merged tree fails 5 checks (the typed word is not an insertion, the caret is
+  wrong, Enter reads `"rely\n lathro"`), and the same tree with only `live-text.ts` put back to main passes
+  every check, while probe:redlinemoveon still reads 19 of 19 with the rewind at 25 ms. The line buys no
+  speed: `adoptWritten` and the typing hook's own model listener already redraw at once.
+- **MAJOR: ⌥⌫ can land on the change BEFORE the rewound one.** The move carries the pressed change's INDEX
+  (`advanceAfterPress` in `src/renderer/editor/RedlineDocument.tsx`, spent through `indexAfterRemoval` in
+  `redline-current.ts`). `applyRewind` re-reads the file, so an agent's write already on disk above the
+  pressed change shifts every later index down one, and the move lands on a change the person had walked
+  past; the next ⌥⌫ in the rhythm the PR exists for rewrites it. Reproduced with the shipping modules and
+  again by mounting the real `RedlineDocument` in Chromium.
+- **MINOR: a redraw that merges or splits neighbours** makes the same index wrong without any outside write
+  (accepting change 3 of 4 in a list lands on a merged bullet above it; accepting the last can fail to
+  wrap). A per-change accept has no undo.
+- **MINOR: a second chord inside the rewind's write** acts on the change being rewound: ⌥⌫ then ⌥↩ accepts
+  it, the rewind still lands, and the change is drawn backwards with nothing said.
+- **MINOR: rewinding the only remaining change drops the keyboard** to `document.body`, so ⌥⇧⌫ (the undo the
+  face names) does nothing until a click. The accept path refocuses the host; the rewind path does not.
+- **MINOR: a watcher read that opened the file before the rewind's rename and answers after the adoption**
+  rolls `savedContents` and the buffer back to the pre-rewind bytes (37 of 500 interleavings over real main
+  handlers; 0 of 500 without the adoption). `refreshRepo`'s Phase 277 guard checks cleanliness and model
+  identity, and the adoption passes both.
+- **MINOR: a keystroke still in transit is invisible to `adoptWritten`.** `useRedlineTyping`
+  (`src/renderer/editor/redline-edits.ts`, the dispatch near :229-248) marks the tab dirty only after
+  `await ensureWorkingModel`, which is a real chunk load the first time in a session. A rewind inside that
+  await is adopted, then the buffer is set to the pre-rewind text plus the keystroke, and ⌘S (or auto save)
+  writes the agent's text back over the rewind with no question. Main has a narrower version (only when
+  the chunk load outlasts the watcher's round trip); the adoption widens it to the rewind's own round trip.
+- **MINOR: `HELPER_USER_FLOOR` is 139 with 140 helper users** after the merge, because Phase 277 and this PR
+  each raised 138 to 139 (`build/assert-electron-teardown.mjs:212`).
+- **MINOR: the PR credits its author's requests to "the operator"** in the running log, commit bodies, 28
+  lines across `src/` and `build/` comments, and records the author's machine's `-L gmux` session count as
+  his.
+- **NIT: no gate reads `adoptWritten`'s refusals.** Removing either clause leaves conformance:save and
+  conformance:redline green; only the PR's own vitest (which feeds `dirty` in as a literal) goes red.
+- **NIT: CHANGELOG.md and docs/BACKLOG.md conflict with main, and no commit carries a phase label.**
+
+What holds, measured: the loop in `stepIndex` with one, two and many changes; 610 presses over 60 real
+consecutive versions of this repository's own markdown landed correctly (609 moved, 1 waited harmlessly); a
+refused press, an undo and accept-all arm nothing; a move the person makes during a rewind is kept; and no
+line of Phase 277's save pipeline changed in the merge.
+
+### The mechanism
+
+Work happens on the PR's own branch, `JnBrymn/tortie:feat/redline-accept-advance` (maintainer edits
+allowed), in a scratch worktree, starting with `origin/main` merged into it.
+
+1. **Put `live-text.ts` back** to main's `return modelText ?? savedContents;`, and drop the comment and the
+   commit-body claim that justified it.
+2. **Carry the follower's IDENTITY, not its index.** Before the press, record the change drawn after the
+   pressed one (or the first, when the pressed one was last and not the only one). After the redraw, find
+   that identity: a rewind leaves the baseline where it was, so its `off`, `del` and `ins` are stable; an
+   accept shifts `off` by `ins.length - del.length` when the follower came after the pressed change. Fall
+   back to `indexAfterRemoval` only when the follower is no longer drawn. Correct `indexAfterRemoval`'s
+   comment, which claims both verbs leave every other change in order.
+3. **One press at a time.** From a rewind's press until its result is handled, a per-change accept or rewind
+   on that tab does not act on the change being rewound. The spec decides between waiting for the move and
+   acting on the change it lands on, and dropping the press with a sentence; a silent backwards change is
+   refused either way.
+4. **The rewind keeps the keyboard.** When a rewind or undo writes and the keyboard is inside a change
+   wrapper, focus the host before the adoption, exactly as the accept does.
+5. **`refreshRepo` refuses a read that raced a newer baseline**: its clean-reload arm in
+   `src/renderer/editor/tab-io.ts` also requires `savedContents` unchanged since before the read, beside
+   Phase 277's model-identity check.
+6. **Typing is visible before its await.** `useRedlineTyping` marks the tab dirty synchronously when an edit
+   is dispatched, builds the model from `savedContents` read after the await, and never applies a `wanted`
+   text computed from a picture the view has since replaced.
+7. **Gates.** conformance:save gains rules that read `adoptWritten` by matching braces (the dirty and `was`
+   refusals before `deps.patch` and `resetWorkingModel`), `refreshRepo`'s new clause, and the synchronous
+   dirty mark's order in the typing path, each with an arm in `build/p268/ablation.mjs`. conformance:redline
+   rule 40 describes the identity move and the one-press rule. `HELPER_USER_FLOOR` becomes 140 with both
+   probes named. CLAUDE.md's conformance:save row names `adoptWritten`.
+8. **Credit.** Every "the operator's ask" or "his" that is the PR author's becomes "PR 28's author" or
+   "JnBrymn"; the session count is the author's machine.
+9. **CHANGELOG.** One `## Unreleased`: the PR's Changed bullet above main's Fixed list, and its rewind item
+   appended to that list.
+
+### The proof, run rather than read
+
+- **Parent measurement.** At the PR's head (with main merged), the hostile tests for findings 2 to 7 go red;
+  at HEAD they pass. `probe:p237` fails at the PR's head and passes at HEAD.
+- **App runs**, by the main session: `probe:redlinemoveon` extended with an outside write above the current
+  change landing just before ⌥⌫ (the move lands on the change that followed), a rewind of the last change
+  followed by ⌥⇧⌫ (the change comes back), ⌥⌫ ⌥↩ pressed back to back (no change is drawn backwards), and
+  a typing burst in the Redline view; plus `probe:p237`, `probe:p277` and `probe:p268`.
+- **Independent method one, the attack.** A verifier who did not build it tries to make a press land on the
+  wrong change or lose a keystroke: an agent write mid-press, chords faster than the write, typing before
+  Monaco's chunk has loaded, a watcher read crossing the rename.
+- **Independent method two, re-derive.** A verifier writes its own layouts (merges, splits, slid
+  insertions, tables, lists, the only change, the last change) and its own oracle for "the change that came
+  next", and compares every landing.
+- **Gates.** typecheck, build, test, smoke:t1, conformance:save, conformance:redline,
+  conformance:redline-write, ablation:p268 with the new arms each red on its own rule, gate:electron at 140.
+
+### Landing
+
+The fixes are committed to the PR branch as they pass, so the PR shows the work. Once verified, the phase
+lands on main as linear commits, the house's shape: the PR author's change as one commit authored by him,
+with a `Phase 282:` first body line and his requests credited to him, followed by this phase's fixes and the
+running-log line. The PR is then closed with a note in the operator's voice linking the landed commits.
+
+### What is NOT in this phase
+
+- No new chord, no change to what ⌥↩ or ⌥⌫ act on, and no move for an undo (⌥⇧⌫ puts a change back and
+  leaves the person where they are) or for accept-all.
+- No loop across files or tabs: the loop stays inside one document's picture.
+- No change to the guarded write door, the rewind journal, the baseline's durability or Phase 277's save
+  rules beyond the two guards named above.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29708,3 +29852,5 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **THE 0.105.0 ARCHITECTURE AUDIT IS CLOSED: all four findings fixed, proved by the auditor's own fixtures at `2cf078c8`.** In a fresh scratch tree both fixtures were copied in unedited and run: `auto-save-interleavings` passes 4 of 4 and `env-cap-disclosure` passes 2 of 2, against 1 of 4 and 1 of 2 at `b4569686`; the copies and the tree were removed. **F1 and F2** closed by Phase 277 (a write clears only the text it wrote; a timer cannot outlive its policy), **F3** closed by Phase 278 (its cap half) and Phase 270 (its remote half), **F4** closed by Phase 279. The audit scored 32/36 at `6eb35f73`; a re-audit would re-score. **The drain is finished except Phase 281**, which is queued and waits on his approval of one attributes-only keychain lookup. No release was cut; one would carry 277, 278 and 279.
 
 - 2026-09-17, **PHASE 281 STARTED, the Claude meter reads the item Claude Code reads, Tier 3.** He ran the approved attributes-only lookup himself, `security find-generic-password -a "$USER" -s "Claude Code-credentials"` with no `-w` and no `-g`: **exit 0**, one item under his own account in the login keychain, created 2026-07-29T21:35:35Z and last written **2026-09-17T11:16:33Z**, a week after the stray `unknown` item appeared. So Claude Code's own item exists and is live, research 126's cause is confirmed rather than deduced, and the stop condition did not fire. Built as two workflows so the main session runs the long gates between them: spec, two builders with disjoint ownership (the usage domain and the credentials domain), an integrator and two gate authors, then the full battery, then a hostile scratch-keychain verifier, a wrong-account attack and a fix round. The one run that needs him again is the app run at the parent and at HEAD after a turn in a claude session.
+
+- 2026-09-17, **PHASE 282 QUEUED, the press that moves on (PR 28, JnBrymn), Tier 3.** He asked for the pull request to be built as a queued phase on its own branch, fixed with the standard workflow, committed to the PR as it goes, and closed and integrated once verified. The PR makes ⌥↩ and ⌥⌫ in the Redline view move to the next change and ⌥↓ ⌥↑ loop, and a review over main with it merged found one BLOCKING defect, **typing in the Redline view comes out scrambled**, confirmed in the app (`probe:p237` fails 5 checks with the PR and passes with its one `live-text.ts` line put back), one MAJOR (the move carries an index, so an agent write above the change sends ⌥⌫ back onto a change the person kept) and six MINOR (merged neighbours, a second chord during the write, the keyboard dropped after the last rewind, a watcher read rolling a rewind back, a keystroke in transit, the helper floor at 139 of 140) plus credit written as the operator's. The full battery was green throughout, which is why each finding was reproduced twice by different methods before it was written here.
