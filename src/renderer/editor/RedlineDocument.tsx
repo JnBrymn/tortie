@@ -70,27 +70,28 @@ import { useRedlineTyping } from './redline-edits';
 import { changesOf } from './rewind';
 import type { RedlineChange } from './rewind';
 import {
+  CHANGE_SELECTOR,
   CURRENT_ATTRIBUTE,
   changeElements,
   chipNeedsMeasure,
   currentElement,
   identityOf,
-  indexAfterRemoval,
-  indexOfChange,
+  landingAfterPress,
   pressLetsGo,
+  pressMoveOf,
   sameChange,
   stepChange
 } from './redline-current';
-import type { ChangeIdentity } from './redline-current';
+import type { ChangeIdentity, PressMove } from './redline-current';
 import { RedlineChip } from './redline-chip';
 import { railBarFor, roomFor } from './redline-room';
 import type { RailBar, RedlineRoom } from './redline-room';
 import { installRedlineCommands } from './redline-commands';
 import type { RedlineCommand } from './redline-commands';
 import { applyRewind } from './redline-write';
-import { pressRedline } from './redline-press';
+import { landHold, pressRedline, releaseHolds } from './redline-press';
 import { pressAccept } from './redline-accept';
-import type { PressedChange } from './redline-press';
+import type { RewindHold } from './redline-press';
 import { undoableRewind } from './redline-journal';
 import {
   markRedlineHintSeen,
@@ -100,6 +101,7 @@ import {
 import {
   redlineAcceptRefusalSentence,
   redlineChangeCount,
+  redlineHeldSentence,
   redlineRefusalSentence,
   redlineUndoNote,
   redlineUndoRefusalSentence
@@ -245,6 +247,22 @@ export function redlineCommandOf(event: {
 }
 
 /**
+ * PHASE 282. Whether a REPEATED keydown of this command runs it: a walk does,
+ * a verb does not (build/p282/SPEC.md §1.6).
+ *
+ * A held key fires a repeated keydown every 30 to 50 ms. Before PR 28 the
+ * second one found nothing current and did nothing; with the move-on every
+ * repeat lands on the next change, so a held ⌥⌫ became "rewind every change in
+ * the file, writing it once per change", and a held ⌥↩ became the accept-all
+ * chord src/shared/keymap.ts's `redline.accept` entry removed on purpose. Undo
+ * is a verb too: each repeat of ⌥⇧⌫ would pop and write another rewind. ⌥↓ and
+ * ⌥↑ repeat, because walking writes nothing.
+ */
+export function redlineRepeatRuns(command: RedlineCommand): boolean {
+  return command === 'next' || command === 'prev';
+}
+
+/**
  * Which change the chip is drawn for. THE CURRENT CHANGE WINS OVER THE
  * POINTER, and that is a truthfulness rule rather than a taste: ⌥⌫ acts on the
  * change the view holds as current, so a chip drawn on a change under the
@@ -286,10 +304,18 @@ export function RedlineDocument({
   // THE PRESS THAT MOVES ON, 2026-09-16. WHERE THE NEXT ACCEPT OR REWIND
   // LANDS. Both verbs take the change they name out of the picture, so the
   // change that follows it belongs to a picture that does not exist until
-  // React has drawn it; this holds the index, and the change that was pressed,
-  // across that commit. It is armed by a landed per-change accept or a landed
-  // rewind and consumed by the layout effect below, which is the only reader.
-  const advanceAfterPress = useRef<{ at: number; pressed: PressedChange } | null>(null);
+  // React has drawn it; this holds the move across that commit. It is armed by
+  // a landed per-change accept or a landed rewind and consumed by the layout
+  // effect below, which is the only reader. PHASE 282 made what it holds the
+  // FOLLOWER's identity rather than an index (./redline-current `PressMove`).
+  const advanceAfterPress = useRef<PressMove | null>(null);
+  // PHASE 282. ONE PRESS AT A TIME. Every rewind this mount pressed whose
+  // change the picture may still draw (./redline-press `RewindHold`), handed
+  // to both press modules, which own where in the order it is asked. It is a
+  // ref PER MOUNT and never module state: a hold must end with the view that
+  // drew its picture, and a module map would outlive the mount and hand a
+  // remount a hold whose release depends on a redraw it never saw.
+  const rewindHolds = useRef<RewindHold[]>([]);
   // PHASE 236. `chipRef` is held here so the pointer handler below can tell
   // "the pointer moved onto the chip" from "the pointer left the change".
   // The BOX the chip is placed against was `.ed-redline-view` until Phase 251
@@ -341,8 +367,13 @@ export function RedlineDocument({
   const [currentEl, setCurrentEl] = useState<HTMLElement | null>(null);
   // A new tab is a new document and a new place in it: the resting face draws
   // no control (Phase 236's rule, which this phase keeps).
+  //
+  // PHASE 282. And no hold: this component is reused across tabs
+  // (./EditorPanel draws it with no `key`), and a hold is a claim about the
+  // picture of the tab it was pressed on.
   useEffect(() => {
     setCurrent(null);
+    rewindHolds.current = [];
   }, [tab.id]);
   // PHASE 236. Which change the chip is drawn for; the rule is
   // `chipAnchorFor` above, and the current change wins over the pointer.
@@ -412,11 +443,12 @@ export function RedlineDocument({
       const live = useEditor.getState().tabs.find((t) => t.id === tab.id);
       if (live === undefined) return;
       // The change the press will act on, read once as an ELEMENT, exactly as
-      // the accept below reads it: the same two clauses, and the index so a
-      // rewind can hand the next change on once its write has landed.
+      // the accept below reads it: the same two clauses. PHASE 282: and the
+      // change drawn after it, by identity, so a rewind can hand that change
+      // on once its write has landed whatever the redraw did to the indices.
       const pressedEl = pressedElement(host);
       const pressed = pressedEl === null ? null : identityOf(pressedEl);
-      const pressedAt = indexOfChange(changeElements(host), pressed);
+      const move = pressMoveOf('rewind', changeElements(host).map(identityOf), pressed);
       const result = await pressRedline(
         kind,
         {
@@ -450,36 +482,67 @@ export function RedlineDocument({
                 ? redlineUndoRefusalSentence(why, live.name)
                 : redlineRefusalSentence(why, live.name);
             useApp.getState().toast('info', say);
-          }
+          },
+          // PHASE 282. ONE PRESS AT A TIME: a second ⌥⌫ on the change this
+          // view is still rewinding answers `held` before it reads a byte.
+          holds: rewindHolds.current
         }
       );
-      // THE BYTES ARE ALREADY ON DISK, so the tab adopts them NOW. This is the
-      // operator's own complaint of 2026-09-16 — "when I option delete instead
-      // of option return, the delete takes a little bit of time... option
-      // return is instantaneous" — and it was measured in the app as 1,139 ms
-      // against the accept's 35 ms: an accept moves the baseline in memory,
-      // while a rewind waited for the file watcher's next round trip to
+      // PHASE 282. The press that was not made says so, and moves nobody. It
+      // is `info` like every refusal here: nothing went wrong, the first press
+      // is still landing, and one more press once it has is the whole cost.
+      if (result.outcome === 'held') {
+        useApp.getState().toast('info', redlineHeldSentence('rewind', live.name));
+        return;
+      }
+      // THE BYTES ARE ALREADY ON DISK, so the tab adopts them NOW. This is PR
+      // 28's author's own complaint of 2026-09-16 — "when I option delete
+      // instead of option return, the delete takes a little bit of time...
+      // option return is instantaneous" — and it was measured in the app as
+      // 1,139 ms against the accept's 35 ms: an accept moves the baseline in
+      // memory, while a rewind waited for the file watcher's next round trip to
       // re-read a file the view had just written. The write hands back what it
       // wrote, so the picture redraws in this tick instead, and the adoption
       // refuses if the tab moved meanwhile (./tab-io holds both refusals).
       if (result.outcome === 'wrote') {
+        // PHASE 282. THE REWIND KEEPS THE KEYBOARD, as the accept below does,
+        // and BEFORE the adoption because the adoption is what redraws. The
+        // review measured the defect: a rewind of the ONLY remaining change
+        // removes the wrapper the keyboard was on, Chromium sends focus to
+        // `document.body`, the scroller's key handler is on the scroller so a
+        // keydown at body never reaches it, and ⌥⇧⌫ — the undo the face names
+        // — did nothing until a click. The accept's line is unconditional
+        // because an accept can only come from this view; a rewind or an undo
+        // can come from the Edit menu while the keyboard is in a terminal, so
+        // the host takes the keyboard only from a change wrapper this view is
+        // about to replace.
+        const active = host.ownerDocument.activeElement;
+        const onAChange =
+          active instanceof HTMLElement &&
+          host.contains(active) &&
+          active.closest(CHANGE_SELECTOR) !== null;
+        if (onAChange) host.focus({ preventScroll: true });
         useEditor.getState().adoptWritten(live.id, result.contents, result.was);
+        // PHASE 282. The hold lands with what the tab holds NOW, read after the
+        // adoption, so a refused adoption lands it on the trailing bytes that
+        // still draw the change, and the release effect below lets it go on
+        // the redraw that does not. `entry` is the very object the press
+        // pushed, so this lands exactly that hold.
+        const adopted = useEditor.getState().tabs.find((t) => t.id === live.id);
+        if (kind === 'rewind' && adopted !== undefined) {
+          landHold(rewindHolds.current, result.entry, adopted.savedContents, result.was);
+        }
       }
-      // A REWIND MOVES ON TOO, which is the operator's ask of 2026-09-16:
+      // A REWIND MOVES ON TOO, which is PR 28's author's ask of 2026-09-16:
       // "when I press option delete, it should still go to the next available
       // edit point". It is armed HERE, after the write landed, because the
-      // picture a rewind changes arrives through the watcher rather than in
-      // this tick, and the layout effect below is what spends it once the
-      // pressed change is really gone from the drawn picture. An UNDO arms
+      // picture a rewind changes may still arrive through the watcher rather
+      // than in this tick, and the layout effect below is what spends it once
+      // the pressed change is really gone from the drawn picture. An UNDO arms
       // nothing: it puts a change back, and the next place to be is where the
       // person already is.
-      if (
-        kind === 'rewind' &&
-        result.outcome === 'wrote' &&
-        pressed !== null &&
-        pressedAt !== null
-      ) {
-        advanceAfterPress.current = { at: pressedAt, pressed };
+      if (kind === 'rewind' && result.outcome === 'wrote' && move !== null) {
+        advanceAfterPress.current = move;
       }
       bumpJournal();
     },
@@ -497,7 +560,7 @@ export function RedlineDocument({
    * D.3 measured on a 3,670px document, but the state moves whatever the focus
    * does.
    *
-   * THE TWO ENDS LOOP, which is the operator's ask of 2026-09-16: past the
+   * THE TWO ENDS LOOP, which is PR 28's author's ask of 2026-09-16: past the
    * last change ⌥↓ comes round to the first, and before the first ⌥↑ comes
    * round to the last, so a document with changes in it can always be walked
    * all the way round.
@@ -521,24 +584,25 @@ export function RedlineDocument({
   //
   // THE PRESS THAT MOVES ON. ⌥↩ used to leave the person on the change it had
   // just stopped marking, so approving a run of changes was ⌥↩ ⌥↓ ⌥↩ ⌥↓ — one
-  // extra keystroke per change for a gesture the operator makes in a run; ⌥⌫
-  // had the same shape and he asked for it too. The change that was DRAWN
-  // AFTER the pressed one now becomes current and takes the focus, exactly as
-  // ⌥↓ would have put it there, so ⌥↩ again accepts the next change and ⌥⌫
-  // again rewinds it; and past the last one the picture comes round to its
-  // first remaining change, which is the loop the two arrows keep.
+  // extra keystroke per change for a gesture PR 28's author makes in a run;
+  // ⌥⌫ had the same shape and PR 28's author asked for it too. The change that
+  // was DRAWN AFTER the pressed one now becomes current and takes the focus,
+  // exactly as ⌥↓ would have put it there, so ⌥↩ again accepts the next change
+  // and ⌥⌫ again rewinds it; and past the last one the picture comes round to
+  // its first remaining change, which is the loop the two arrows keep.
   const accept = useCallback(
     (kind: 'one' | 'all', host: HTMLElement): void => {
       const live = useEditor.getState().tabs.find((t) => t.id === tab.id);
       if (live === undefined) return;
-      // The change the press will act on, read once as an ELEMENT so the view
-      // can also ask where it stood among the changes drawn. The index is read
-      // off the picture BEFORE the press because the accepted change is gone
-      // from the picture after it, and an accept removes exactly that one and
-      // leaves every other change in order.
+      // The change the press will act on, read once as an ELEMENT, and the
+      // move it would hand on, read off the picture BEFORE the press because
+      // the accepted change is gone from the picture after it. PHASE 282: the
+      // move names the change drawn after it by IDENTITY, because an accept
+      // re-cuts neighbours and the index it stood at can name another change
+      // once it is gone.
       const pressedEl = pressedElement(host);
       const pressed = pressedEl === null ? null : identityOf(pressedEl);
-      const pressedAt = indexOfChange(changeElements(host), pressed);
+      const move = pressMoveOf('accept', changeElements(host).map(identityOf), pressed);
       const result = pressAccept(
         kind,
         {
@@ -565,9 +629,19 @@ export function RedlineDocument({
               .getState()
               .toast('info', redlineAcceptRefusalSentence(why, live.name));
           },
-          now: () => Date.now()
+          now: () => Date.now(),
+          // PHASE 282. While a rewind on this tab has not left the picture,
+          // every accept here answers `held` (./redline-accept says why a
+          // different change is refused too).
+          holds: rewindHolds.current
         }
       );
+      // PHASE 282. Said, and nothing else: no move is armed and the keyboard
+      // stays where it is, because nothing was taken out of the picture.
+      if (result.outcome === 'held') {
+        useApp.getState().toast('info', redlineHeldSentence('accept', live.name));
+        return;
+      }
       // THE KEYBOARD STAYS IN THE VIEW, and this line is a defect the
       // `probe:p167` drive found rather than a nicety. An accept removes the
       // change wrapper the keyboard was on, and Chromium sends focus to
@@ -582,17 +656,16 @@ export function RedlineDocument({
       // schedules the render, so the wrapper is no longer the focused element
       // by the time it is removed and there is nothing to fall out of.
       //
-      // THE REWIND REACHES THE SAME PLACE through the arming in ./press above,
-      // and this is what used to be its stated limit. Its recompose arrives
-      // through the watcher rather than in this tick, so the keyboard would be
-      // dropped when the wrapper it was on is replaced; the layout effect
-      // below focuses the change the rewind moved to, in the same commit as
-      // that recompose, so the next chord lands.
+      // THE REWIND REACHES THE SAME PLACE through `press` above: the layout
+      // effect below focuses the change the rewind moved to, in the same commit
+      // as its recompose. PHASE 282 closed what that left open, being a rewind
+      // of the ONLY change, which has no change to move to: `press` now focuses
+      // the host before its adoption, exactly as this line does.
       if (result.outcome === 'accepted') {
         // Armed only for a landed per-change accept: a refusal must not move
         // the person, and accept-all leaves no change to move to.
-        if (kind === 'one' && pressed !== null && pressedAt !== null) {
-          advanceAfterPress.current = { at: pressedAt, pressed };
+        if (kind === 'one' && move !== null) {
+          advanceAfterPress.current = move;
         }
         hostRef.current?.focus({ preventScroll: true });
       }
@@ -752,10 +825,12 @@ export function RedlineDocument({
   // THE PRESS THAT MOVES ON. THE MOVE AN ACCEPT OR A REWIND ARMED, taken after
   // the redraw and never inside the press: the change that follows the pressed
   // one belongs to the picture AFTER the removal, and that picture does not
-  // exist until React has drawn it. The index was read off the picture before
-  // the press and the press removes exactly the change it names, so the element
-  // at that index now is the change that was drawn next; past the end, the
-  // picture comes round to its first remaining change.
+  // exist until React has drawn it. PHASE 282: the move carries the FOLLOWER's
+  // identity and ./redline-current `landingAfterPress` finds it again, falling
+  // back to the index only when it is gone. PR 28 took the element at the
+  // pressed change's old index, and the review measured that landing on the
+  // change BEFORE the rewound one when an agent's write above was already on
+  // disk, and on a merged bullet above an accepted change in a list.
   //
   // The two acts are the ones ⌥↓ performs, in its own order, so a change a
   // person accepted or rewound and one they stepped to leave the view in the
@@ -771,10 +846,11 @@ export function RedlineDocument({
   // still be standing on the change the press acted on — a move made while a
   // rewind's redraw was in flight is theirs, and the armed move is dropped
   // rather than overriding it. The second is that the picture must have LET
-  // THAT CHANGE GO: an accept removes it in this tick, while a rewind's
-  // picture arrives through the watcher, and until it does the element at the
-  // index is still the pressed change — so the move waits rather than stepping
-  // onto the change it just rewound.
+  // THAT CHANGE GO: an accept removes it in this tick, while a rewind whose
+  // adoption refused is redrawn only by the watcher, and until it is the
+  // pressed change is still drawn byte for byte — so the move waits rather
+  // than stepping past it. PHASE 282 moved that second guard INTO
+  // `landingAfterPress`, as its `'wait'`, and made it ask all three fields.
   useLayoutEffect(() => {
     const host = hostRef.current;
     const pending = advanceAfterPress.current;
@@ -785,18 +861,28 @@ export function RedlineDocument({
       return;
     }
     const items = changeElements(host);
-    const stillDrawn = items.some((el) => {
-      const id = identityOf(el);
-      return id !== null && sameChange(id, pending.pressed);
-    });
-    if (stillDrawn) return;
+    const landing = landingAfterPress(items.map(identityOf), pending);
+    if (landing === 'wait') return;
     advanceAfterPress.current = null;
-    const next = indexAfterRemoval(items.length, pending.at);
-    const el = next === null ? null : (items[next] ?? null);
+    const el = landing === null ? null : (items[landing] ?? null);
     if (el === null) return;
     makeCurrent(el);
     el.focus();
   }, [composed, generation, makeCurrent]);
+  // PHASE 282. THE HOLDS LET GO after the redraw that no longer draws their
+  // change, and only then (./redline-press `releaseHolds` owns the rule). Its
+  // own effect, and `tab.savedContents` is a dependency as well as the
+  // picture: a watcher read can move the bytes without moving the composed
+  // picture — a dirty buffer is drawn instead — and the release's second
+  // clause, bytes somebody wrote after the rewind, must still be asked.
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    releaseHolds(
+      rewindHolds.current,
+      host === null ? [] : changeElements(host).map(identityOf),
+      tab.savedContents
+    );
+  }, [composed, tab.savedContents]);
   // PHASE 251. THE ROOM THE PAGE HAS, and the token that re-measures the rail
   // bar when the panel is dragged. It observes the SCROLLER rather than the
   // view, because the scroller is exactly the box the page lives in, so the
@@ -982,7 +1068,15 @@ export function RedlineDocument({
         onKeyDown={(event) => {
           const command = redlineCommandOf(event);
           if (command === null) return;
+          // BEFORE the repeat test, and not optional: an unprevented ⌥⌫ in the
+          // `plaintext-only` document is Chromium's `deleteWordBackward`, so a
+          // consumed repeat that fell through would delete a word of the
+          // person's text through ./redline-edits.
           event.preventDefault();
+          // PHASE 282. A KEY REPEAT IS NOT A PRESS (`redlineRepeatRuns`). It is
+          // consumed without a sentence, because the press was answered on its
+          // first keydown and a toast per repeat would be one every 30 to 50 ms.
+          if (event.repeat && !redlineRepeatRuns(command)) return;
           runCommand(command);
         }}
         // PHASE 236. React's onFocus is focusin, so it sees a change taking

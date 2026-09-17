@@ -80,7 +80,7 @@ export type RewindOutcome =
    * ALREADY KNOWS THE TRUTH about this file and does not need to be told by
    * the watcher: the redline used to wait for the file watcher's next round
    * trip to redraw, measured at 1,139 ms against an accept's 35 ms, which is
-   * the operator's own complaint of 2026-09-16.
+   * PR 28's author's own complaint of 2026-09-16.
    */
   | { wrote: string; contents: string; was: string }
   | { refused: RewindRefusal };

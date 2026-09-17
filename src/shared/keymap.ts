@@ -578,9 +578,11 @@ export const KEYMAP = [
   // not in front. The view's own key handler answers them while the keyboard
   // is in it; the Edit menu rows carry the verbs with no chord beside them.
   {
-    // THE TWO ARROWS LOOP (2026-09-16): each end comes round to the other, so
-    // a document with changes in it can always be walked all the way round.
-    // The rule itself is `stepIndex` in src/renderer/editor/redline-current.
+    // THE TWO ARROWS LOOP, PR 28's author's ask of 2026-09-16: each end comes
+    // round to the other, so a document with changes in it can always be
+    // walked all the way round. The rule itself is `stepIndex` in
+    // src/renderer/editor/redline-current. A held arrow still repeats (Phase
+    // 282): walking writes nothing, so a repeat of it is a walk and not a verb.
     id: 'redline.next',
     keys: [k('Alt+Down')],
     action: 'Next change',
@@ -605,6 +607,11 @@ export const KEYMAP = [
     menuAction: 'redline-prev'
   },
   {
+    // THE REWIND MOVES ON TOO, PR 28's author's ask of 2026-09-16. PHASE 282
+    // made it one press: a held ⌥⌫ rewinds one change, because a key repeat of
+    // a verb is not a press, and a second ⌥⌫ on the change still being rewound
+    // is refused with a sentence rather than read and written again
+    // (build/p282/SPEC.md §1). Phase 282 changed no word of the explanation.
     id: 'redline.rewind',
     keys: [k('Alt+Backspace')],
     action: 'Rewind the change',
@@ -645,11 +652,19 @@ export const KEYMAP = [
     // the danger outright and costs nothing, so Accept All is a button in the
     // redline's own header and a row in the Edit menu, and nothing else.
     //
-    // THE ACCEPT-ADVANCE ROUND. THE ACCEPT MOVES ON. The change that followed
-    // the accepted one becomes current and takes the focus, so a run of
-    // changes is a run of ⌥↩ presses rather than ⌥↩ ⌥↓ repeated. A person who
-    // wants to stop after one press simply stops; nothing advances on its own
-    // without the press.
+    // THE ACCEPT-ADVANCE ROUND, PR 28's author's ask of 2026-09-16. THE
+    // ACCEPT MOVES ON. The change that followed the accepted one becomes
+    // current and takes the focus, so a run of changes is a run of ⌥↩ presses
+    // rather than ⌥↩ ⌥↓ repeated. A person who wants to stop after one press
+    // simply stops; nothing advances on its own without the press.
+    //
+    // PHASE 282. A HELD ⌥↩ IS STILL ONE PRESS. Once the accept moved on, every
+    // key repeat landed on the next change, so holding ⌥↩ became the accept
+    // all chord the ruling above removed, by another road; the view now runs a
+    // repeated keydown for the two arrows only. And no accept is made on a tab
+    // from a rewind's press there until the picture stops drawing the change
+    // it rewound: the accept would move the baseline under that change and draw
+    // it backwards, so it is refused with a sentence (build/p282/SPEC.md §1.2).
     id: 'redline.accept',
     keys: [k('Alt+Enter')],
     action: 'Accept the change',

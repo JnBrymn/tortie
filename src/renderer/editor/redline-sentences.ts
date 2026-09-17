@@ -184,6 +184,35 @@ export function redlineUndoRefusalSentence(
 }
 
 /**
+ * PHASE 282. THE PRESS THAT WAS NOT MADE, because a rewind on this tab has not
+ * finished leaving the picture (build/p282/SPEC.md §1, the Phase 282 entry's
+ * mechanism 3).
+ *
+ * It is NOT a refusal word. `RewindRefusal` is what a plan or the channel
+ * answers about a press that was made; this is the press not being made at
+ * all, so it is its own outcome and its own two sentences, and the
+ * `Record<RewindRefusal, string>` maps above stay total over exactly what they
+ * were. The review drove ⌥⌫ then ⌥↩ inside a rewind's write: the accept took
+ * the change being rewound, the rewind still landed, and the change was drawn
+ * backwards with nothing said. A silent drop would be the same defect with
+ * less damage, so the drop says why.
+ *
+ * ONE ACCEPT SENTENCE for a per-change accept and for accept-all, because both
+ * are refused for the same reason and a per-change accept may name a different
+ * change from the one being rewound — so the sentence says "a change", never
+ * "that change".
+ */
+const HELD_SENTENCES: Record<'rewind' | 'accept', string> = {
+  rewind: 'That change in {name} is already being rewound.',
+  accept: 'A change in {name} is still being rewound, so nothing was accepted.'
+};
+
+/** One plain sentence for a press held back by a rewind still in flight. */
+export function redlineHeldSentence(verb: 'rewind' | 'accept', name: string): string {
+  return HELD_SENTENCES[verb].replace('{name}', name);
+}
+
+/**
  * PHASE 251. THE CHANGE COUNT, in the rail bar beside `Accept all`.
  *
  * Research 114 §6.4 puts a counter in the bar and this is its words. It is

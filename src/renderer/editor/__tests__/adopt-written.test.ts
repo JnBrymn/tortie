@@ -2,7 +2,7 @@
  * THE BYTES A CONFIRMED WRITE PUT ON DISK, adopted by the tab that wrote them
  * (2026-09-16).
  *
- * The operator's complaint: "when I option delete instead of option return,
+ * PR 28's author's complaint: "when I option delete instead of option return,
  * the delete takes a little bit of time... option return is instantaneous."
  * The app run put a number on it — 1,139 ms for the rewind against 35 ms for
  * the accept (`npm run probe:redlinemoveon`, arm H8b) — and the cause was that
@@ -27,9 +27,18 @@
  * run's and not this file's; the working model is stubbed, so what is pinned
  * is that the patch and the model move TOGETHER and that neither moves when it
  * must not. The real model's real effect on a redline is the app run's too.
+ *
+ * PHASE 282. THE DIRTY REFUSAL IS ALSO DRIVEN FROM A REAL KEYSTROKE. The arms
+ * above hand `dirty: true` in as a literal, and a literal cannot say WHEN a
+ * keystroke makes a tab dirty. That was the defect: `useRedlineTyping` marked
+ * the tab only after its first model had loaded, so a keystroke still in
+ * transit was invisible to this refusal and a rewind landing inside the chunk
+ * load was adopted under it. The last describe types through the shipping
+ * hook (./p282-typing-rig) and asks the refusal with nothing handed in.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AGENT, HEAD, mountTypingRig } from './p282-typing-rig';
 
 /**
  * Monaco does not run here. The stub answers no model and records every
@@ -42,6 +51,21 @@ const reset = vi.hoisted(() => vi.fn());
 vi.mock('../monaco-loader', () => ({
   getWorkingModel: () => null,
   resetWorkingModel: reset
+}));
+
+/**
+ * The typing arm's caret, which needs a DOM: the next keystroke lands where the
+ * view last put the caret back. The stubbed arms above never import it.
+ */
+const caret = vi.hoisted(() => ({ at: 0 }));
+vi.mock('../redline-caret', async (orig) => ({
+  ...(await orig<typeof import('../redline-caret')>()),
+  spanOfInput: () => ({ anchor: caret.at, focus: caret.at }),
+  readCurrentSelection: () => ({ anchor: caret.at, focus: caret.at }),
+  restoreCurrentSelection: (_root: unknown, want: { focus: number }) => {
+    caret.at = want.focus;
+  },
+  changeAtCaret: () => null
 }));
 
 vi.stubGlobal('window', {
@@ -151,5 +175,58 @@ describe('a confirmed write is adopted in the tick it lands', () => {
     }).not.toThrow();
     expect(patches).toEqual([]);
     expect(reset).not.toHaveBeenCalled();
+  });
+});
+
+describe('a keystroke typed through the real typing hook is what the dirty refusal sees', () => {
+  let unmount: (() => Promise<void>) | null = null;
+  afterEach(async () => {
+    await unmount?.();
+    unmount = null;
+  });
+  // The rig needs the REAL model registry, which is the one module this file
+  // stubs above. The stub is dropped for the fresh module graph the rig loads.
+  const mount = (opts: { holdChunk: boolean; modelFirst: boolean }) => {
+    vi.doUnmock('../monaco-loader');
+    return mountTypingRig({ caret, ...opts });
+  };
+  /** `adoptWritten`'s arguments for a rewind of the agent's one change. */
+  const REWOUND = HEAD;
+  const was = AGENT;
+  const KEY_AT = AGENT.indexOf('Beta') + 4;
+  const typed = `${AGENT.slice(0, KEY_AT)}X${AGENT.slice(KEY_AT)}`;
+
+  it('A KEYSTROKE STILL WAITING ON THE CHUNK IS NOT OVERWRITTEN: the adoption refuses before the model exists', async () => {
+    caret.at = KEY_AT;
+    const rig = await mount({ holdChunk: true, modelFirst: false });
+    unmount = rig.unmount;
+    await rig.type('X');
+    expect(rig.model()).toBeNull();
+    await rig.adopt(REWOUND, was);
+    expect({ saved: rig.tab().savedContents, dirty: rig.tab().dirty }).toEqual({ saved: AGENT, dirty: true });
+    // And the keystroke is the buffer once the chunk lands, built on the bytes
+    // the tab still holds.
+    await rig.releaseChunk();
+    expect({ saved: rig.tab().savedContents, model: rig.model(), dirty: rig.tab().dirty }).toEqual({
+      saved: AGENT,
+      model: typed,
+      dirty: true
+    });
+  });
+
+  it('CONTROL: a keystroke into a model a File view made refuses the adoption too', async () => {
+    // Green at 9217ae0d as well: with a model already there the hook's
+    // continuation is a microtask, so the tab is dirty by the time anything
+    // can adopt. The arm above is the one the literal could not stand for.
+    caret.at = KEY_AT;
+    const rig = await mount({ holdChunk: false, modelFirst: true });
+    unmount = rig.unmount;
+    await rig.type('X');
+    await rig.adopt(REWOUND, was);
+    expect({ saved: rig.tab().savedContents, model: rig.model(), dirty: rig.tab().dirty }).toEqual({
+      saved: AGENT,
+      model: typed,
+      dirty: true
+    });
   });
 });

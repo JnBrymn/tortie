@@ -204,12 +204,20 @@ const HELPER = 'electron-run.mjs';
  * scratch `~/.zshrc` eleven ways a real editor writes a file and reads back
  * which GENERATION of an invented sentinel each pane received.
  *
+ * PHASE 282 RAISED IT FROM 139 TO 140, for the two helper users that each
+ * counted themselves as the 139th: build/p277/probe-p277-save.mjs (`probe:p277`,
+ * Phase 277's app run for the save that clears newer typing) and
+ * build/probe-redline-move-on.mjs (`probe:redlinemoveon`, PR 28's app run for
+ * the press that moves on). The two rounds were in flight at once and each
+ * raised 138 to 139, so after the merge the gate read 140 users against a floor
+ * of 139 and either probe could have been deleted with it green.
+ *
  * RAISE IT WHEN YOU ADD ONE, in the same commit, and that is not optional
  * bookkeeping. Adding a probe cannot turn this gate red, so a floor left where
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-const HELPER_USER_FLOOR = 139;
+const HELPER_USER_FLOOR = 140;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

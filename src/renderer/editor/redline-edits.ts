@@ -177,8 +177,8 @@ export function useRedlineTyping(args: {
     [doc]
   );
 
-  // A new tab is a new document. FIRST, so the outside-write effect below
-  // sees the seeded state rather than the last tab's.
+  // A new tab is a new document. FIRST, so the edit and outside-write effects
+  // below see the seeded state rather than the last tab's.
   useEffect(() => {
     lastLive.current = liveText;
     written.current = 0;
@@ -191,23 +191,25 @@ export function useRedlineTyping(args: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
-  // The buffer changed under the view. Only a CHANGE is an event: the value
-  // merely differing is what a tab whose model this hook has not yet created
-  // looks like, and dispatching on that would fight the person's own typing.
-  useEffect(() => {
-    if (lastLive.current === liveText) return;
-    lastLive.current = liveText;
-    dispatch({ kind: 'outside', text: liveText, caret: caretNow() });
-  }, [liveText, caretNow, dispatch]);
-
   // The person's own edits reach the buffer. The model is created on the
   // first one and never on a mount; a keystroke that lands while the chunk is
   // still loading is not lost, because what is written is the LATEST current
   // side rather than the edit that asked for the write.
+  //
+  // PHASE 282: DECLARED ABOVE THE OUTSIDE-WRITE EFFECT, and below the tab
+  // effect, which stays first. Effects run in the order they are declared,
+  // this one reads `lastLive` as the picture the edit was typed on, and the
+  // outside-write effect is what moves `lastLive`. In a render that carries
+  // both an edit and a new live text, the edit was typed on the text from
+  // BEFORE that render, so it has to be read before the other effect moves it.
+  // Declared the other way round, a keystroke drawn in one render with a
+  // rewind's adoption wrote the agent's text back over the rewind on the next
+  // ⌘S (p282-keystroke-in-transit.test.ts, its fourth arm).
   useEffect(() => {
     if (!editable || state.edits === written.current) return;
     written.current = state.edits;
     wanted.current = state.text;
+    const typedOn = lastLive.current;
     const had = getWorkingModel(tabId) !== null;
     // WHERE ONE UNDO STEP ENDS. A run of typing is one ⌘Z, which is what every
     // editor does and what monaco does in File mode; a keystroke that does NOT
@@ -226,13 +228,34 @@ export function useRedlineTyping(args: {
       Date.now() - previous.when < TYPING_RUN_MS &&
       Math.abs(at - previous.at) <= 1;
     lastEdit.current = at === null ? null : { at, when: Date.now() };
+    // PHASE 282: THE KEYSTROKE IS VISIBLE BEFORE ITS AWAIT. The tab was marked
+    // dirty only after `ensureWorkingModel`, and the first keystroke of a
+    // session makes that a real chunk load. A rewind that landed inside it was
+    // adopted by ./tab-io's `adoptWritten`, which refuses a dirty tab and saw a
+    // clean one, and the continuation then applied the pre-rewind text plus
+    // the keystroke; ⌘S had `savedContents` as its precondition and wrote the
+    // agent's text back over the rewind with nothing to ask
+    // (p282-keystroke-in-transit.test.ts). Dirty now, the adoption, the clean
+    // arm of `refreshRepo` and `pressRedline`'s dirty refusal all see the
+    // keystroke still in transit. The mark is provisional: the continuation
+    // re-derives it from the model, and it goes through `markDirty`, never a
+    // patch, so the auto save timer is armed exactly as a File view's first
+    // keystroke arms it.
+    if (live !== undefined && !live.dirty) useEditor.getState().markDirty(tabId, true);
     void (async () => {
+      // PHASE 282: THE MODEL IS BUILT FROM THE BYTES THE TAB HOLDS AFTER THE
+      // AWAIT, read by the loader once the chunk is in. Captured before it, a
+      // chunk load that outlasted a whole rewind built the model from a file
+      // that was no longer on disk.
       const model = await ensureWorkingModel(
         tabId,
-        live?.savedContents ?? state.text,
+        () => useEditor.getState().tabs.find((t) => t.id === tabId)?.savedContents ?? typedOn,
         path
       );
       if (model === null) {
+        // There is no buffer for the keystroke to be in, so the provisional
+        // mark above is withdrawn before the sentence says so.
+        useEditor.getState().markDirty(tabId, false);
         useApp
           .getState()
           .toast('error', 'The editor failed to load, so this edit was not kept.');
@@ -240,14 +263,44 @@ export function useRedlineTyping(args: {
       }
       if (!had) setModelTick((n) => n + 1);
       const want = wanted.current;
-      if (want === null) return;
-      applyModelText(model, want, !continues);
       const now = useEditor.getState().tabs.find((t) => t.id === tabId);
-      if (now !== undefined) {
-        useEditor.getState().markDirty(tabId, want !== now.savedContents);
+      if (want === null || now === undefined) return;
+      // PHASE 282: NEVER A TEXT TYPED ON A PICTURE THAT WAS REPLACED. `want` is
+      // the whole current side computed on `typedOn`; applied over bytes that
+      // moved during the chunk load it writes the old file back with the
+      // keystroke in it, and the model would make that the buffer ⌘S saves.
+      // So the model keeps the bytes it was just built from and dirty is
+      // re-derived from it. `!had` scopes this to the one await that is a
+      // chunk load: with a model already there the gap is a microtask, and no
+      // watcher reply or IPC answer lands inside it. The cost is the keystroke
+      // the replaced picture carried, which the face already dropped when the
+      // outside write arrived. With the dirty mark above, ONE shape reaches
+      // this arm through the adoption: a keystroke and an adoption drawn in the
+      // same render, the adoption having run while the keystroke was still
+      // React state that nothing had marked (p282-keystroke-in-transit.test.ts
+      // drives it under `act`; with the effect order reversed it wrote the
+      // agent's text back over the rewind). Every other path Phase 282 found
+      // refuses first, because the adoption and the refresh both refuse a
+      // dirty tab and a save with no model writes nothing, so this is also the
+      // tripwire for the next path that moves `savedContents` under a dirty
+      // tab.
+      if (!had && now.savedContents !== typedOn) {
+        useEditor.getState().markDirty(tabId, model.getValue() !== now.savedContents);
+        return;
       }
+      applyModelText(model, want, !continues);
+      useEditor.getState().markDirty(tabId, want !== now.savedContents);
     })();
   }, [editable, state.edits, state.text, tabId, path]);
+
+  // The buffer changed under the view. Only a CHANGE is an event: the value
+  // merely differing is what a tab whose model this hook has not yet created
+  // looks like, and dispatching on that would fight the person's own typing.
+  useEffect(() => {
+    if (lastLive.current === liveText) return;
+    lastLive.current = liveText;
+    dispatch({ kind: 'outside', text: liveText, caret: caretNow() });
+  }, [liveText, caretNow, dispatch]);
 
   // Once this hook has made a model, ./live-text's subscription predates it
   // and the view would never hear a reload. This one is installed on the

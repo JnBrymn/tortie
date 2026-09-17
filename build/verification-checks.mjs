@@ -1047,7 +1047,8 @@ export const CHECKS = [
   // timer, onFocusChange lands at the blur, and the File menu action moves the
   // mode both ways. It spawns no agent and spends no token.
   electron('probe:p268'),
-  // PHASE 268's attack. It breaks conformance:save four ways, one clause each,
+  // PHASE 268's attack. It breaks conformance:save one clause at a time, the
+  // count living in the script rather than here,
   // and proves each reddens the rule that owns it — then restores the tree in
   // a finally block. It launches no Electron and starts no process but node.
   pure('ablation:p268'),
@@ -1292,8 +1293,8 @@ export const CHECKS = [
   // and opens no keychain, and touches `-L gmux` in one place only, a read
   // only session count taken before and after.
   electron('probe:p237'),
-  // THE PRESS THAT MOVES ON, 2026-09-16. The operator's three asks: ⌥↩ on a
-  // change should forward to the next one, ⌥⌫ should do the same, and both
+  // THE PRESS THAT MOVES ON, 2026-09-16. PR 28's author's three asks: ⌥↩ on
+  // a change should forward to the next one, ⌥⌫ should do the same, and both
   // arrows should loop at the ends instead of stopping. ONE launch on a
   // scratch profile, a scratch HOME and its own socket over a repository it
   // builds itself, with eight changes written by a synchronous /bin/sh. It
@@ -1303,11 +1304,20 @@ export const CHECKS = [
   // it, a SECOND ⌥↩ with no ⌥↓ accepts the next one, the arrows still loop
   // after a press, and the file's digest separates the verbs — an accept
   // moves no byte and a rewind writes. Its arms are graded the other way
-  // round at the build the operator reported, which is why
+  // round at the build PR 28's author reported, which is why
   // `ACCEPT_ADVANCE_PARENT=1` must report the defect instead of the feature.
-  // No agent, no token, no keychain; `-L gmux` counted before and after rather
-  // than touched. `node build/probe-redline-move-on.mjs --self-test` proves the
-  // two graders on eleven fixtures and launches nothing.
+  // PHASE 282 added five arms in the same launch, each over changes it writes
+  // itself: O, an outside write above the current change on disk the moment
+  // before ⌥⌫, and the move lands on the change that followed; L, ⌥⌫ on the
+  // only change keeps the keyboard in the view and ⌥⇧⌫ brings it back; C, ⌥⌫
+  // and ⌥↩ back to back draw nothing backwards and a refused accept says the
+  // one-press sentence; R, a held ⌥⌫ rewinds one change; T, a word and Enter
+  // at 30 ms a key then ⌘S leaves exactly that on disk. They are graded the
+  // other way round at PR 28's head (`ACCEPT_ADVANCE_PARENT=282`).
+  // No agent, no token, no keychain; the -L gmux sessions of the machine that
+  // runs it counted before and after rather than touched.
+  // `node build/probe-redline-move-on.mjs --self-test` proves the graders and
+  // the arms' own fixture texts on thirty-seven fixtures and launches nothing.
   electron('probe:redlinemoveon'),
   // PHASE 238's MEASURE STEP. It answers one question with a number: how many
   // ordinary acts it takes to lose a baseline that only memory holds, which is
