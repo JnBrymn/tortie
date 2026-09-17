@@ -8,7 +8,7 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 ### Changed
 
-- In the Redline view, ⌥↩ moves to the next change after accepting the one you were on, so approving a run of changes is a run of ⌥↩ presses rather than alternating with ⌥↓. The last change is the end of the run: it does not wrap back to the top.
+- In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last.
 
 ## 0.107.0 (2026-09-16)
 
