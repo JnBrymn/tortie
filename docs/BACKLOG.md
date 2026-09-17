@@ -28986,7 +28986,7 @@ ends, which is new behaviour a person will notice. The fixes change no other sur
 
 **Tier 3.** The rewind half writes the person's file, and the adoption this PR adds moves `savedContents`
 and replaces the working model, which are the ⌘S precondition and the person's buffer. "Can it lose or
-corrupt the person's work?" is yes, and the Phase 280-era review measured that it can.
+corrupt the person's work?" is yes, and the review of 2026-09-17 below measured that it can.
 
 **Charter.** Pull request 28 (https://github.com/gregce/tortie/pull/28), six commits `f6108e9d..aa0e58f2` by
 John Berryman (JnBrymn) on top of `c1fe5fd3`, and the operator's ask of 2026-09-17: "queue a build phase
@@ -29038,8 +29038,8 @@ below was reproduced by its reviewer and then again by an independent skeptic us
   the chunk load outlasts the watcher's round trip); the adoption widens it to the rewind's own round trip.
 - **MINOR: `HELPER_USER_FLOOR` is 139 with 140 helper users** after the merge, because Phase 277 and this PR
   each raised 138 to 139 (`build/assert-electron-teardown.mjs:212`).
-- **MINOR: the PR credits its author's requests to "the operator"** in the running log, commit bodies, 28
-  lines across `src/` and `build/` comments, and records the author's machine's `-L gmux` session count as
+- **MINOR: the PR credits its author's requests to "the operator"** in the running log, commit bodies, and
+  comments across `src/` and `build/`, and records the author's machine's `-L gmux` session count as
   his.
 - **NIT: no gate reads `adoptWritten`'s refusals.** Removing either clause leaves conformance:save and
   conformance:redline green; only the PR's own vitest (which feeds `dirty` in as a literal) goes red.
