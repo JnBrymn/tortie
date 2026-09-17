@@ -480,6 +480,29 @@
  *      Its ablation directories are `.p251-chip-*` at the repository root, for
  *      rules 19, 25 and 26's reason.
  *
+ *  40. THE ACCEPT MOVES ON (the accept-advance round, 2026-09-16). ⌥↩ used to
+ *      leave the person on the
+ *      change it had just stopped marking, so approving a run of changes was
+ *      ⌥↩ ⌥↓ repeated and every change cost an extra keystroke. The change
+ *      that was DRAWN AFTER the accepted one now becomes current and takes
+ *      the focus, exactly as ⌥↓ would have put it there. An accept removes
+ *      exactly the change it names and leaves every other one in order, so
+ *      the follow-on sits at the index the accepted change stood at, and
+ *      ./redline-current's `indexAfterAccept` bounds that index so the last
+ *      change of a document is the end and never a wrap to the top.
+ *
+ *      IT IS A SCAN BECAUSE THE SUITE CANNOT SEE IT: this tree carries no
+ *      jsdom, so nothing in vitest focuses an element, and the index is read
+ *      off one picture and spent on the next. The scan reads the accept
+ *      callback by MATCHING PARENTHESES and refuses an arming outside the
+ *      accepted guard, an arming without the per-change clause — accept-all
+ *      leaves no change to move to, and a refusal must not move anybody — an
+ *      armed index nothing reads or one read outside a layout effect, and an
+ *      effect that does not ask the redrawn picture, does not bound the
+ *      index, never makes the change current, never focuses it, or does not
+ *      clear the index it spent. Seven planted shapes beside the shipping
+ *      one, and every one of the seven must fail.
+ *
  * Exit 0 when every rule passes, 1 otherwise with each failure named.
  */
 
@@ -4939,6 +4962,186 @@ function gridOf(css, cls) {
       );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// THE ACCEPT-ADVANCE ROUND, 2026-09-16, rule 40: THE ACCEPT MOVES ON.
+//
+// ⌥↩ stops marking the change under focus and, from this round, leaves the
+// person on the change that was DRAWN AFTER it, so a run of approvals is a run
+// of ⌥↩ presses rather than ⌥↩ ⌥↓ repeated. The index is read off the picture
+// BEFORE the press — an accept removes exactly the change it names and leaves
+// every other one in order, so the follow-on sits at that same index — and it
+// is spent by a layout effect on the picture React draws AFTER the baseline
+// moved, which is the only moment that picture exists.
+//
+// NOTHING IN THE COMMIT BATTERY COULD SEE IT. This tree's vitest environment is
+// `node` and there is no jsdom, so no test focuses an element and none can read
+// the state a recompose leaves behind; `p239-anchored-controls.test.tsx` pins
+// `indexAfterAccept` itself, which is the arithmetic, and this rule pins the
+// WIRING, which is where a later round would drop it. It is the same instrument
+// rule 20 uses: a scan of the shipping source with its scanner proved on
+// fixtures this file writes.
+//
+// THE PER-CHANGE CLAUSE IS PART OF THE RULE and it is not tidiness. An
+// accept-all leaves no change to move to, and a refused accept must not move
+// the person at all — an arming written outside the accepted guard, or without
+// the `kind === 'one'` clause, moves somebody on a press that did nothing.
+// ---------------------------------------------------------------------------
+{
+  const VIEW = 'src/renderer/editor/RedlineDocument.tsx';
+  const REF = 'advanceAfterAccept';
+  const ACCEPTED_GUARD = "result.outcome === 'accepted'";
+  /**
+   * What is wrong with this source's accept-advance wiring, or an empty list.
+   * The accept callback is found by name and read by MATCHING PARENTHESES from
+   * `useCallback(`, the way rule 20 reads it, so a line scan cannot mistake
+   * the rewind callback's own references for this one's.
+   */
+  const advanceFindings = (source) => {
+    const code = stripComments(source);
+    const acceptAt = code.indexOf('const accept = useCallback(');
+    if (acceptAt === -1) return ['no `const accept = useCallback(` in the view'];
+    const acceptOpen = code.indexOf('(', acceptAt + 'const accept = useCallback'.length - 1);
+    const acceptClose = closeOf(code, acceptOpen);
+    if (acceptClose === -1) return ['the accept callback is not closed'];
+    const accept = code.slice(acceptOpen, acceptClose + 1);
+    const guard = accept.indexOf(ACCEPTED_GUARD);
+    if (guard === -1) return ['the accept callback has no accepted guard for the move to be armed inside'];
+    const brace = accept.indexOf('{', guard);
+    const guardBody = brace === -1 ? null : blockAt(accept, brace);
+    const out = [];
+    if (guardBody === null || !guardBody.includes(`${REF}.current =`)) {
+      out.push('the accept never arms the move to the next change inside the accepted guard');
+    }
+    if (guardBody !== null && !guardBody.includes("kind === 'one'")) {
+      out.push('the move is armed without the per-change clause, so accept-all or a refusal could move somebody');
+    }
+    // The effect that spends it, found by the read rather than by name, so the
+    // nearest layout effect above the read is the one judged.
+    const read = code.indexOf(`const at = ${REF}.current;`);
+    if (read === -1) {
+      out.push('nothing reads the armed index, so the change that follows an accept is never taken');
+      return out;
+    }
+    const effectAt = code.lastIndexOf('useLayoutEffect(', read);
+    if (effectAt === -1) {
+      out.push('the armed index is read outside a layout effect, so it is spent before the redraw');
+      return out;
+    }
+    const effectOpen = code.indexOf('(', effectAt);
+    const effectClose = closeOf(code, effectOpen);
+    const effect = effectClose === -1 ? '' : code.slice(effectOpen, effectClose + 1);
+    if (!effect.includes(`const at = ${REF}.current;`)) {
+      out.push('the layout effect above the read is not the one that takes the armed index');
+    }
+    if (!effect.includes(`${REF}.current = null;`)) {
+      out.push('the armed index is never cleared, so a later recompose moves somebody for no reason');
+    }
+    if (!effect.includes('changeElements(')) {
+      out.push('the move never asks the redrawn picture for the element to take');
+    }
+    if (!effect.includes('indexAfterAccept(')) {
+      out.push('the move does not bound the index, so accepting the last change could walk off the end');
+    }
+    if (!effect.includes('makeCurrent(')) {
+      out.push('the next change is never made current, so the controls stay on the change that was accepted');
+    }
+    if (!effect.includes('.focus(')) {
+      out.push('the next change is never focused, so the keyboard cannot reach the next ⌥↩');
+    }
+    return out;
+  };
+
+  if (!existsSync(VIEW)) fail(`40. ${VIEW} is not there, so rule 40 proves nothing`);
+  else {
+    for (const line of advanceFindings(readFileSync(VIEW, 'utf8'))) fail(`40. ${line}`);
+  }
+
+  // The scanner, proved on eight plants, seven of which must be caught.
+  const SHAPE = (arm, effect) =>
+    `const advanceAfterAccept = useRef(null);\n` +
+    `const accept = useCallback((kind, host) => {\n` +
+    `  const result = pressAccept(kind, tabOf(), deps(host));\n${arm}\n}, [tab.id]);\n` +
+    `useLayoutEffect(() => {\n${effect}\n}, [composed]);\n`;
+  const ARM = "  if (result.outcome === 'accepted') {\n    if (kind === 'one') advanceAfterAccept.current = pressedAt;\n    hostRef.current?.focus({ preventScroll: true });\n  }";
+  const EFFECT =
+    '  const host = hostRef.current;\n' +
+    '  const at = advanceAfterAccept.current;\n' +
+    '  if (host === null || at === null) return;\n' +
+    '  advanceAfterAccept.current = null;\n' +
+    '  const items = changeElements(host);\n' +
+    '  const next = indexAfterAccept(items.length, at);\n' +
+    '  const el = next === null ? null : (items[next] ?? null);\n' +
+    '  if (el === null) return;\n' +
+    '  makeCurrent(el);\n' +
+    '  el.focus();';
+  const PLANTS = [
+    { name: 'the shipping shape', source: SHAPE(ARM, EFFECT), caught: false },
+    {
+      name: 'the arming deleted, so the accept stops where it landed',
+      source: SHAPE(
+        "  if (result.outcome === 'accepted') {\n    hostRef.current?.focus({ preventScroll: true });\n  }",
+        EFFECT
+      ),
+      caught: true
+    },
+    {
+      name: 'the arming outside the accepted guard, which moves somebody on a refusal',
+      source: SHAPE(
+        "  if (result.outcome === 'accepted') {\n    hostRef.current?.focus({ preventScroll: true });\n  }\n  if (kind === 'one') advanceAfterAccept.current = pressedAt;",
+        EFFECT
+      ),
+      caught: true
+    },
+    {
+      name: 'the per-change clause dropped, so accept-all arms a change that is gone',
+      source: SHAPE(
+        "  if (result.outcome === 'accepted') {\n    advanceAfterAccept.current = pressedAt;\n    hostRef.current?.focus({ preventScroll: true });\n  }",
+        EFFECT
+      ),
+      caught: true
+    },
+    {
+      name: 'the read deleted, so the armed index is never spent',
+      source: SHAPE(ARM, EFFECT.replace('  const at = advanceAfterAccept.current;\n', '')),
+      caught: true
+    },
+    {
+      name: 'the index left armed after it is spent, so a later recompose moves somebody',
+      source: SHAPE(ARM, EFFECT.replace('  advanceAfterAccept.current = null;\n', '')),
+      caught: true
+    },
+    {
+      name: 'the bound dropped, so the last change can walk off the end',
+      source: SHAPE(
+        ARM,
+        EFFECT.replace('  const next = indexAfterAccept(items.length, at);\n', '')
+      ),
+      caught: true
+    },
+    {
+      name: 'the focus dropped, so the keyboard cannot reach the next press',
+      source: SHAPE(ARM, EFFECT.replace('el.focus();', '')),
+      caught: true
+    },
+    {
+      name: 'the move focused but never made current',
+      source: SHAPE(ARM, EFFECT.replace('  makeCurrent(el);\n', '')),
+      caught: true
+    }
+  ];
+  let plantsOk = 0;
+  for (const plant of PLANTS) {
+    const hits = advanceFindings(plant.source);
+    if (hits.length > 0 === plant.caught) plantsOk += 1;
+    else {
+      fail(`40. the scanner behaved wrongly on "${plant.name}": ${JSON.stringify(hits)}`);
+    }
+  }
+  say(
+    `40. the accept hands the next change on: the index is armed inside the accepted guard for one change and spent by a layout effect that bounds it, makes it current and focuses it (${String(plantsOk)} of ${String(PLANTS.length)} scanner fixtures behaved, ${String(PLANTS.filter((q) => q.caught).length)} of them must fail)`
+  );
 }
 
 if (failures.length > 0) {

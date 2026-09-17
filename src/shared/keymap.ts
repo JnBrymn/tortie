@@ -640,11 +640,17 @@ export const KEYMAP = [
     // redline's single write door depends on. Removing the keystroke removes
     // the danger outright and costs nothing, so Accept All is a button in the
     // redline's own header and a row in the Edit menu, and nothing else.
+    //
+    // THE ACCEPT-ADVANCE ROUND. THE ACCEPT MOVES ON. The change that followed
+    // the accepted one becomes current and takes the focus, so a run of
+    // changes is a run of ⌥↩ presses rather than ⌥↩ ⌥↓ repeated. A person who
+    // wants to stop after one press simply stops; nothing advances on its own
+    // without the press.
     id: 'redline.accept',
     keys: [k('Alt+Enter')],
     action: 'Accept the change',
     explain:
-      'Stops marking the change under focus: the marking is measured from it from now on. The file is not touched.',
+      'Stops marking the change under focus and moves to the next change, so pressing ⌥↩ again accepts that one. The file is not touched.',
     group: 'editor',
     scope: 'editor',
     assignable: false,

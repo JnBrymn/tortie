@@ -71,9 +71,12 @@ import { changesOf } from './rewind';
 import type { RedlineChange } from './rewind';
 import {
   CURRENT_ATTRIBUTE,
+  changeElements,
   chipNeedsMeasure,
   currentElement,
   identityOf,
+  indexAfterAccept,
+  indexOfChange,
   pressLetsGo,
   sameChange,
   stepChange
@@ -195,6 +198,30 @@ export type { PressedChange } from './redline-press';
  * included (research 83 B.8a).
  */
 export function focusedChange(host: HTMLElement): PressedChange | null {
+  const el = pressedElement(host);
+  if (el === null) return null;
+  const off = Number(el.dataset['changeOff']);
+  const generation = Number(el.dataset['changeGen']);
+  if (!Number.isInteger(off) || !Number.isInteger(generation)) return null;
+  return {
+    off,
+    del: el.dataset['changeDel'] ?? '',
+    ins: el.dataset['changeIns'] ?? '',
+    generation
+  };
+}
+
+/**
+ * The change wrapper a press acts on, as an ELEMENT: the one the controls
+ * belong to, and with nothing current, the one holding the keyboard or the
+ * caret. It is `focusedChange`'s own read, answered as an element so a press
+ * can ask WHERE the change it is about to act on stood among the changes
+ * drawn, which is what the accept-advance round needs to hand the next
+ * change on.
+ */
+function pressedElement(host: HTMLElement): HTMLElement | null {
+  const marked = currentElement(host);
+  if (marked !== null) return marked;
   const active = host.ownerDocument.activeElement;
   // PHASE 237. With the document editable a person's attention is where the
   // CARET is, and a caret inside a change is the same claim a focused wrapper
@@ -205,16 +232,7 @@ export function focusedChange(host: HTMLElement): PressedChange | null {
     (active instanceof HTMLElement
       ? active.closest<HTMLElement>('.ed-redline-change')
       : null) ?? changeAtCaret(host);
-  if (el === null || !host.contains(el)) return null;
-  const off = Number(el.dataset['changeOff']);
-  const generation = Number(el.dataset['changeGen']);
-  if (!Number.isInteger(off) || !Number.isInteger(generation)) return null;
-  return {
-    off,
-    del: el.dataset['changeDel'] ?? '',
-    ins: el.dataset['changeIns'] ?? '',
-    generation
-  };
+  return el !== null && host.contains(el) ? el : null;
 }
 
 /**
@@ -280,6 +298,13 @@ export function RedlineDocument({
   // other side of the same pair.
   const shownRef = useRef(shownText);
   shownRef.current = shownText;
+  // THE ACCEPT-ADVANCE ROUND, 2026-09-16. WHERE THE NEXT ⌥↩ LANDS. An accept
+  // removes the change it names from the picture, so the change that follows
+  // it is a change of the picture that does not exist until React has drawn
+  // it; this holds the index across that one commit. It is armed by a landed
+  // per-change accept and consumed by the layout effect below, which is the
+  // only reader.
+  const advanceAfterAccept = useRef<number | null>(null);
   // PHASE 236. `chipRef` is held here so the pointer handler below can tell
   // "the pointer moved onto the chip" from "the pointer left the change".
   // The BOX the chip is placed against was `.ed-redline-view` until Phase 251
@@ -472,10 +497,27 @@ export function RedlineDocument({
   // window for the focus to move in; ./redline-accept owns the decision and
   // the store's `acceptBaseline` owns the one advance, which also PINS the
   // tab, because an accept on the preview tab dies on the next Explorer click.
+  //
+  // THE ACCEPT-ADVANCE ROUND. AND IT MOVES ON. ⌥↩ used to leave the person on
+  // the change it had just stopped marking, so approving a run of changes was
+  // ⌥↩ ⌥↓ ⌥↩ ⌥↓ — one extra keystroke per change for a gesture the operator
+  // makes in a run. The change that was DRAWN AFTER the accepted one now
+  // becomes current and takes the focus, exactly as ⌥↓ would have put it
+  // there, so ⌥↩ again accepts the next change.
   const accept = useCallback(
     (kind: 'one' | 'all', host: HTMLElement): void => {
       const live = useEditor.getState().tabs.find((t) => t.id === tab.id);
       if (live === undefined) return;
+      // The change the press will act on, read once as an ELEMENT so the view
+      // can also ask where it stood among the changes drawn. The index is read
+      // off the picture BEFORE the press because the accepted change is gone
+      // from the picture after it, and an accept removes exactly that one and
+      // leaves every other change in order.
+      const pressedEl = pressedElement(host);
+      const pressedAt = indexOfChange(
+        changeElements(host),
+        pressedEl === null ? null : identityOf(pressedEl)
+      );
       const result = pressAccept(
         kind,
         {
@@ -493,10 +535,7 @@ export function RedlineDocument({
           // rewind above does: two verbs on one chip that acted on two
           // different changes would be the research 99 section 7.1 defect
           // wearing this phase's name.
-          focused: () => {
-            const marked = currentElement(host);
-            return marked === null ? focusedChange(host) : identityOf(marked);
-          },
+          focused: () => (pressedEl === null ? null : identityOf(pressedEl)),
           advance: (contents, at) => {
             useEditor.getState().acceptBaseline(live.id, contents, at);
           },
@@ -526,7 +565,15 @@ export function RedlineDocument({
       // arrives through the watcher rather than in this tick, so the fix is
       // not the same line, and it is Phase 227's surface rather than this
       // one's; it is recorded here so a later round finds it written down.
+      // The accept-advance round moved the ACCEPT on and deliberately left the
+      // rewind where it is: a rewind's picture arrives when the file write
+      // lands, so the same index would have to wait across an unbounded gap
+      // and would move the person on some later recompose if the write never
+      // changed the picture at all.
       if (result.outcome === 'accepted') {
+        // Armed only for a landed per-change accept: a refusal must not move
+        // the person, and accept-all leaves no change to move to.
+        if (kind === 'one') advanceAfterAccept.current = pressedAt;
         hostRef.current?.focus({ preventScroll: true });
       }
     },
@@ -682,6 +729,35 @@ export function RedlineDocument({
       remeasure();
     }
   }, [current, composed]);
+  // THE ACCEPT-ADVANCE ROUND. THE MOVE AN ACCEPT ARMED, taken after the
+  // recompose and never inside the press: the change that follows the accepted
+  // one belongs to the picture AFTER the baseline moved, and that picture does
+  // not exist until React has drawn it. The index was read off the picture
+  // before the press and an accept removes exactly the change it names, so the
+  // element at that index now is the change that was drawn next.
+  //
+  // The two acts are the ones ⌥↓ performs, in its own order, so a change a
+  // person accepted and one they stepped to leave the view in the same state.
+  // An index past the end means the accepted change was the last one: nothing
+  // moves, and the keyboard is already back on the scroller from the accept
+  // itself.
+  //
+  // The generation is a dependency as well as the picture, because an accept
+  // that lands on bytes the baseline already held leaves the composed string
+  // untouched while the generation still moves; without it the armed index
+  // would ride on until some later recompose moved the person for no reason.
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    const at = advanceAfterAccept.current;
+    if (host === null || at === null) return;
+    advanceAfterAccept.current = null;
+    const items = changeElements(host);
+    const next = indexAfterAccept(items.length, at);
+    const el = next === null ? null : (items[next] ?? null);
+    if (el === null) return;
+    makeCurrent(el);
+    el.focus();
+  }, [composed, generation, makeCurrent]);
   // PHASE 251. THE ROOM THE PAGE HAS, and the token that re-measures the rail
   // bar when the panel is dragged. It observes the SCROLLER rather than the
   // view, because the scroller is exactly the box the page lives in, so the

@@ -191,6 +191,35 @@ export function stepChange(
 }
 
 /**
+ * WHERE A PERSON GOES AFTER AN ACCEPT (the accept-advance round, 2026-09-16):
+ * the change that was drawn after the one that was accepted.
+ *
+ * An accept removes the change it names from the picture — the baseline takes
+ * the inserted bytes at that span, so the marking is measured from there — and
+ * leaves every other change in the order it was drawn in. So the change that
+ * FOLLOWED the accepted one now sits at the index the accepted one sat at, and
+ * the answer is that index in the picture AFTER the accept.
+ *
+ * IT IS A FUNCTION RATHER THAN A LINE IN THE VIEW because of the one decision
+ * in it: an index at or past the end means the accepted change was the last
+ * one, and the answer is `null` rather than a wrap. ⌥↩ on the last change is
+ * done; wrapping would silently start accepting the document again from the
+ * top, which is a second pass over prose a person just approved.
+ *
+ * `null` in also answers `null` out, so an accept that named no change — a
+ * refused press, or an accept-all — moves nobody.
+ */
+export function indexAfterAccept(
+  /** How many changes the picture holds AFTER the accept. */
+  count: number,
+  /** The index the accepted change stood at BEFORE the accept, or null. */
+  at: number | null
+): number | null {
+  if (at === null) return null;
+  return at < count ? at : null;
+}
+
+/**
  * The attribute the current change wears, so the mark and the anchor are the
  * SAME element and cannot disagree. It is set by the view's own render from
  * `sameChange`, so it comes back on its own after a recompose; nothing mutates

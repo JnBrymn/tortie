@@ -4,6 +4,12 @@ Each commit appears once under Added, Changed or Fixed. Every bullet stays on on
 
 The operator set the style on 2026-08-23 by rewriting every entry, and it binds every entry after. An item is one or two sentences. It says what a person can now do or what no longer goes wrong, in plain words, and then stops. A limit that a person will hit goes in the same item in one clause, e.g. "Saves have no undo", and a limit nobody will hit stays in the commit body. No measured numbers unless the number is the point. No build story, no file names, no gate names. The lead paragraph says what the release is about in two or three sentences and lists nothing.
 
+## Unreleased
+
+### Changed
+
+- In the Redline view, ⌥↩ moves to the next change after accepting the one you were on, so approving a run of changes is a run of ⌥↩ presses rather than alternating with ⌥↓. The last change is the end of the run: it does not wrap back to the top.
+
 ## 0.107.0 (2026-09-16)
 
 This release is about a project Tortie did not recognise as its own. A folder opened through a symbolic link, or spelled with different capitals than the disk uses, refused every save and quietly broke most of what the file tree does; open one folder both ways and you got two tabs with your sessions divided between them. Tortie now asks the filesystem which folder a path names rather than comparing the spelling. Alongside that, the variables an agent needs are named once for every agent instead of once each, the list of them scrolls and takes several at a time, and starting a session no longer waits a second on your login shell.

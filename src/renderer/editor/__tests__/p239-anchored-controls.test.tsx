@@ -51,6 +51,14 @@
  *      chip drawn on change 0 where the parent read it gone, over a
  *      171.60 x 30px overlay sitting on the marked-up sentence.
  *
+ *   8. THE ACCEPT MOVES ON (the accept-advance round, 2026-09-16). The change
+ *      that was drawn after the
+ *      one just accepted becomes current and takes the focus, so ⌥↩ can be
+ *      pressed again for the next change instead of ⌥↩ ⌥↓ ⌥↩ ⌥↓. An accept
+ *      removes exactly the change it names and leaves the others in order, so
+ *      the follow-on sits at the index the accepted change stood at. The end
+ *      of the document is the end: there is no wrap to the top.
+ *
  * WHAT THIS FILE CANNOT DO, stated rather than hidden: this repository carries
  * no jsdom, so nothing here focuses, hovers or lays anything out. The rectangle
  * readings are the app run's and the parent numbers they are compared against
@@ -78,6 +86,7 @@ const {
   caretMoveOf,
   chipNeedsMeasure,
   identityOf,
+  indexAfterAccept,
   indexOfChange,
   pressLetsGo,
   sameChange,
@@ -187,6 +196,41 @@ describe('the step computes from the held position, never from the focus', () =>
   it('at either end the position stays where it is, which is what Phase 227 shipped', () => {
     expect(stepIndex(9, 0, -1)).toBe(0);
     expect(stepIndex(9, 8, 1)).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. The accept moves on.
+// ---------------------------------------------------------------------------
+
+describe('the accept hands the next change on', () => {
+  it('the change that followed the accepted one sits at the same index in a picture one shorter', () => {
+    // Nine changes, accept the fourth: eight remain and what was drawn fifth
+    // is now fourth, which is where the index the accept read still points.
+    expect(indexAfterAccept(8, 3)).toBe(3);
+    // And from the top, so a press on the first change lands on the second.
+    expect(indexAfterAccept(8, 0)).toBe(0);
+  });
+
+  it('THE LAST CHANGE IS THE END: no wrap to the top of the document', () => {
+    // An accepted last change leaves nothing after it, and a wrap would
+    // silently start accepting the prose a person just approved all over
+    // again from the top.
+    expect(indexAfterAccept(8, 8)).toBeNull();
+    expect(indexAfterAccept(0, 0)).toBeNull();
+  });
+
+  it('nothing accepted moves nobody', () => {
+    // A refused press, or accept-all, which names no change at all.
+    expect(indexAfterAccept(8, null)).toBeNull();
+    expect(indexAfterAccept(0, null)).toBeNull();
+  });
+
+  it('THE ABLATION: at + 1 would pass over the change that follows', () => {
+    // A rule written as "one further along" answers 4 where the picture
+    // answers 3: the change a person gets next would be the one after the
+    // one that followed, and a second ⌥↩ would accept the wrong phrase.
+    expect(indexAfterAccept(8, 3)).not.toBe(4);
   });
 });
 
