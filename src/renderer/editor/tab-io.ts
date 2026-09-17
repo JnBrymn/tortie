@@ -48,6 +48,28 @@
  * is correct — it is what stops the watcher overwriting a person's typing —
  * and it is what makes the warning necessary rather than what the warning
  * replaces.
+ *
+ * PHASE 277 GAVE THE FOUR SUCCESS ARMS ONE COMPLETION RULE, and it is audit
+ * F1. Every one of them patched the literal `{ savedContents: value, dirty:
+ * false }` without asking what the buffer holds NOW, so an acknowledgement for
+ * text the person had already typed past said the tab was clean. That literal
+ * predates Phase 268; the timer only made it easy to reach and added a
+ * consequence, because ./auto-save cancels a pending timer on the clean edge.
+ * `completeSave` below is the one place a save clears a tab: the baseline
+ * always moves to the bytes that were written, and `dirty` is ASKED of the
+ * model rather than asserted. It is also where the tab's LIFETIME is checked,
+ * because a tab id is an absolute path and a close-and-reopen hands the same
+ * id to a different buffer.
+ *
+ * AND SAVES ARE SERIALISED PER BUFFER HERE, not in the scheduler.
+ * `withSaveSlot` holds one slot per open buffer and remembers at most one
+ * follow-up, and only ever a person's, so a ⌘S and a timer can no longer submit
+ * two writes against the same frozen precondition and have the loser told the
+ * file "changed on disk" about a writer that does not exist. A timer that finds
+ * the slot held is answered false and ./auto-save re-arms it, so it asks the
+ * policy and the dialog again rather than writing a whole save later without
+ * asking. ./auto-save keeps no in-flight set of its own; that was a second
+ * truth about one fact, kept in the module ⌘S cannot see.
  */
 
 import { REMOTE_FILE_MAX_BYTES } from '@shared/ipc';
@@ -66,7 +88,11 @@ import type {
   OpenFileCommitRef,
   OpenFileRemoteRef
 } from '../state/open-file';
-import { getWorkingModel, resetWorkingModel } from './monaco-loader';
+import {
+  getWorkingModel,
+  resetWorkingModel,
+  type WorkingModel
+} from './monaco-loader';
 import type { BaselineState } from './baseline';
 import { nextBaseline } from './baseline';
 // PHASE 243. The durable half of the baseline, decided purely next door. The
@@ -772,6 +798,74 @@ export function createTabIo(deps: TabIoDeps): TabIo {
   };
 
   /**
+   * PHASE 277, audit F1. THE ONE PLACE A SAVE CLEARS A TAB.
+   *
+   * `savedContents` is a fact about the FILE: the write answered `wrote`, so
+   * the file holds `value` and the baseline moves, always. `dirty` is a fact
+   * about the BUFFER, and it is not ours to assert — it is asked of the model,
+   * with the same question MonacoHost.tsx:311 asks on every keystroke
+   * (`model.getValue() !== current.savedContents`), so this product holds one
+   * definition of dirty rather than two that agree until they do not.
+   *
+   * WHAT IT STOPS, MEASURED AT b4569686. Each of the four success arms below
+   * moved `savedContents` and then asserted a CLEAN tab from a literal, with no
+   * question put to the buffer at all. The
+   * auditor's fixture (docs/audits/fixtures/2026-09-14) drives the sequence: a
+   * save of `first edit` is in flight, the person types `first edit plus newer
+   * typing`, a second timer is armed, and then the FIRST acknowledgement
+   * arrives and says the tab is clean. `notePatched` in ./auto-save reads
+   * that clean edge and cancels the pending timer, so the reading is a newer
+   * model, older saved text, `dirty:false` and 0 pending timers.
+   *
+   * From there the tab is unsaved work that nothing in the product knows is
+   * unsaved. `closeTab` in ./store prompts only when `dirty` is true, so
+   * the question that exists to save a person's work is never asked. The
+   * eviction filter in `openFromRequest` drops a clean, untouched tab whole,
+   * model and all. And `refreshRepo` below reloads a tab only `if (!tab.dirty)`
+   * — that skip is what stops the watcher writing an agent's bytes over a
+   * person's typing, and a falsely clean tab walks straight through it, which
+   * is a quieter loss than any close.
+   *
+   * AND THE LIFETIME COMES FIRST. A tab id is an absolute path
+   * (`tabIdFor` in ./tab-identity), so closing a file and reopening it hands the id
+   * straight back, and before this the previous lifetime's acknowledgement
+   * patched the NEW tab: measured `{"saved":"first edit","dirty":false}` over a
+   * buffer holding what the file says now. `model` is the instance this save
+   * read `value` from; `forceCloseTab` disposes it and drops the key
+   * (./monaco-loader `disposeModels`), and reopening creates a fresh one, so
+   * two lifetimes of one path are two objects and `===` is the whole test. If
+   * the key now holds a different instance, or none, the tab this write
+   * belonged to is gone and there is nothing here to say about the one that
+   * took its place.
+   *
+   * THE COST IS ONE RETAINED REFERENCE for the length of one write, and that is
+   * all this identity costs. The three alternatives are refused by name in
+   * build/p277/SPEC.md §1.2: `model.id` answers the same question in a Monaco
+   * vocabulary this codebase uses nowhere else, `getAlternativeVersionId()`
+   * would give this product a second definition of dirty for the sake of an
+   * O(1) compare of a buffer a person has just stopped typing into, and a
+   * generation counter on `EditorTab` is new durable state for a fact the model
+   * already holds.
+   *
+   * IT RETURNS `true` IN BOTH ARMS. A write really happened, and a dead
+   * lifetime does not make it a failure. And `true` is NOT "the tab is clean":
+   * in the live arm the tab stays dirty when typing arrived during the write.
+   * The fix round found `promptDirtyClose` in ./store closing a tab on that
+   * `true` with the newer typing still in it, so that caller now asks the tab
+   * again — the same buffer, and clean — before it closes anything.
+   */
+  const completeSave = (
+    id: string,
+    model: WorkingModel,
+    value: string
+  ): true => {
+    const now = getWorkingModel(id);
+    if (now === null || now !== model) return true;
+    deps.patch(id, { savedContents: value, dirty: now.getValue() !== value });
+    return true;
+  };
+
+  /**
    * Save one tab whose file is on another machine (Phase 101).
    *
    * THE ORDER MATTERS AND IT IS THE SAFETY PROPERTY. Saving off is answered
@@ -839,7 +933,12 @@ export function createTabIo(deps: TabIoDeps): TabIo {
         expect
       });
       if (result.outcome === 'wrote') {
-        deps.patch(id, { savedContents: value, dirty: false });
+        // PHASE 277. The same completion rule as the three local doors, and
+        // this arm is why the audit asked for the remote one to be inspected
+        // too: it already held the model instance in `model` above and threw
+        // the answer away. Nothing about the write, the precondition or the
+        // announcement below moves.
+        const done = completeSave(id, model, value);
         // PHASE 230. The one write in this product that re-read nothing
         // afterwards: research 89 section 4.4 measured a file saved by this
         // door absent from Source control for 30 s and from the Explorer when
@@ -850,7 +949,7 @@ export function createTabIo(deps: TabIoDeps): TabIo {
           kind: 'file',
           by: 'editor'
         });
-        return true;
+        return done;
       }
       useApp
         .getState()
@@ -903,13 +1002,17 @@ export function createTabIo(deps: TabIoDeps): TabIo {
   const writePlain = async (
     id: string,
     tab: EditorTab,
+    model: WorkingModel,
     value: string
   ): Promise<boolean> => {
     if (!gmux) return false;
     try {
       await gmux.fs.writeFile(tab.path, value);
-      deps.patch(id, { savedContents: value, dirty: false });
-      return true;
+      // PHASE 277. The same completion rule as the other three doors. This one
+      // is the widest window of the local writes that are not behind a dialog:
+      // `fs:writeFile` has no compare-and-swap, so the await is one IPC round
+      // trip a person can type through.
+      return completeSave(id, model, value);
     } catch (err) {
       useApp
         .getState()
@@ -1030,10 +1133,19 @@ export function createTabIo(deps: TabIoDeps): TabIo {
    * dialog. It is not closed here because closing it means giving the guarded
    * channel a mode for a link and for a file in no project, which is a change
    * to the channel and this phase changes nothing about it.
+   *
+   * PHASE 277. `model` is the instance `value` was read from, carried down to
+   * `writePlain` so the acknowledgement can ask that buffer whether it is still
+   * dirty rather than asserting that it is not. The Overwrite this door offers
+   * re-reads the model at the PRESS instead, because a dialog is the one place
+   * the value and the buffer are taken at different moments — the value is what
+   * the person was shown and it must not move, and the buffer is whatever they
+   * have now.
    */
   const saveOutsideProject = async (
     id: string,
     tab: EditorTab,
+    model: WorkingModel,
     value: string,
     shown: string
   ): Promise<boolean> => {
@@ -1059,10 +1171,20 @@ export function createTabIo(deps: TabIoDeps): TabIo {
         });
       return false;
     }
-    if (disk.kind !== 'changed') return writePlain(id, tab, value);
+    if (disk.kind !== 'changed') return writePlain(id, tab, model, value);
     const again = disk.text;
     offerStaleChoice(tab, value, () => {
-      void saveOutsideProject(id, tab, value, again);
+      // PHASE 277. The press is a fresh save request, so it takes the slot the
+      // same way ⌘S does, and it re-reads the buffer here rather than carrying
+      // the one this call read: a person can look at this dialog for as long as
+      // they like, and `value` is what they were SHOWN. A `null` model is a tab
+      // that was closed under the dialog — the press writes nothing and says
+      // nothing new, because there is no buffer left for the answer to be about.
+      const now = getWorkingModel(id);
+      if (now === null) return;
+      void withSaveSlot(id, 'explicit', () =>
+        saveOutsideProject(id, tab, now, value, again)
+      );
     });
     return false;
   };
@@ -1165,10 +1287,20 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     });
   };
 
-  /** The deliberate second write, guarded against what was just read. */
+  /**
+   * The deliberate second write, guarded against what was just read.
+   *
+   * PHASE 277. It takes `model` like every other door, and `pressOverwrite`
+   * below is the only thing that calls it — that is where the buffer is
+   * re-read, at the press, because this write's `value` is the text the person
+   * was shown on the dialog and the dialog may have been open for a while.
+   * Its own second `stale` goes back through the same press, so a third writer
+   * is still asked about rather than written over.
+   */
   const overwrite = async (
     id: string,
     tab: EditorTab,
+    model: WorkingModel,
     value: string,
     onDisk: string
   ): Promise<boolean> => {
@@ -1179,14 +1311,15 @@ export function createTabIo(deps: TabIoDeps): TabIo {
       contents: value
     });
     if (result.outcome === 'wrote') {
-      deps.patch(id, { savedContents: value, dirty: false });
-      return true;
+      return completeSave(id, model, value);
     }
-    if (result.outcome === 'unguarded') return saveOutsideProject(id, tab, value, tab.savedContents);
+    if (result.outcome === 'unguarded') {
+      return saveOutsideProject(id, tab, model, value, tab.savedContents);
+    }
     if (result.outcome === 'stale') {
       const again = result.sha256;
       offerStaleChoice(tab, value, () => {
-        void overwrite(id, tab, value, again);
+        pressOverwrite(id, tab, value, again);
       });
       return false;
     }
@@ -1196,6 +1329,40 @@ export function createTabIo(deps: TabIoDeps): TabIo {
         sticky: true
       });
     return false;
+  };
+
+  /**
+   * PHASE 277. Somebody pressed Overwrite on the guarded door's stale dialog.
+   *
+   * IT IS A DIALOG PRESS, WHICH IS WHY IT IS HERE AND NOT INLINE. A press is a
+   * fresh save request arriving from a click, so it takes the buffer's save
+   * slot the same way ⌘S does rather than racing whatever is in flight, and it
+   * re-reads the buffer at the moment of the press. `value` deliberately does
+   * NOT move:
+   * it is the text the person was shown when they were asked, and re-reading it
+   * here would write something they were never asked about. The BUFFER is a
+   * different question — it is what the completion rule compares against to
+   * decide whether the tab is still dirty afterwards.
+   *
+   * A `null` model is a tab that was closed while the dialog was open. The
+   * press writes nothing and says nothing new: there is no buffer left for an
+   * answer to be about, and the file is whatever the other writer made it.
+   *
+   * Both stale arms that can reach an Overwrite of a guarded write funnel here
+   * — `saveInProject`'s first refusal and `overwrite`'s own second one — so
+   * there is exactly one spelling of what a press does.
+   */
+  const pressOverwrite = (
+    id: string,
+    tab: EditorTab,
+    value: string,
+    onDisk: string
+  ): void => {
+    const now = getWorkingModel(id);
+    if (now === null) return;
+    void withSaveSlot(id, 'explicit', () =>
+      overwrite(id, tab, now, value, onDisk)
+    );
   };
 
   /**
@@ -1214,10 +1381,22 @@ export function createTabIo(deps: TabIoDeps): TabIo {
    * third copy of a sha256 helper is the growth guardrail's own example. A
    * page with no digest program at all cannot be guarded and takes the old
    * door, exactly as it does today.
+   *
+   * PHASE 277, AND THIS IS THE ARM THE AUDIT NAMED. Its `wrote` arm was the
+   * unconditional clean patch the fixture drives, and the digest above is also
+   * the whole of the window the stated limit is about: `run` in ./auto-save
+   * re-reads the policy in the last synchronous moment it owns, and this single
+   * `await` is what stands between that read and the bridge call. A switch to
+   * Off landing inside it does not interrupt the write, and it stops every
+   * timer that has not reached here. A timer never reaches here LATER than
+   * that: one that finds a save already running is answered false by
+   * `withSaveSlot` and re-armed, rather than waiting a whole write for its turn
+   * with the policy it read before the wait (the fix round's finding).
    */
   const saveInProject = async (
     id: string,
     tab: EditorTab,
+    model: WorkingModel,
     value: string,
     reason: SaveReason
   ): Promise<boolean> => {
@@ -1227,7 +1406,7 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     // falling through. ⌘S is unchanged.
     if (expect === null) {
       if (reason === 'auto') return deps.autoStop(id, { kind: 'link' });
-      return saveOutsideProject(id, tab, value, tab.savedContents);
+      return saveOutsideProject(id, tab, model, value, tab.savedContents);
     }
     const result = await guardedSave({
       root: tab.repoPath,
@@ -1236,8 +1415,10 @@ export function createTabIo(deps: TabIoDeps): TabIo {
       contents: value
     });
     if (result.outcome === 'wrote') {
-      deps.patch(id, { savedContents: value, dirty: false });
-      return true;
+      // PHASE 277, audit F1. THE LINE THE AUDIT NAMED (tab-io.ts:1239 at the
+      // parent), where one `deps.patch` moved the baseline and asserted a clean
+      // tab in the same breath.
+      return completeSave(id, model, value);
     }
     // A symbolic link, which the channel will not turn into a regular file.
     // It takes the plain door, which now reads the file first.
@@ -1252,7 +1433,7 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     // door name.
     if (result.outcome === 'unguarded') {
       if (reason === 'auto') return deps.autoStop(id, { kind: 'link' });
-      return saveOutsideProject(id, tab, value, tab.savedContents);
+      return saveOutsideProject(id, tab, model, value, tab.savedContents);
     }
     if (result.outcome === 'stale') {
       // PHASE 240 FIX ROUND. A `stale` ANSWER IS NOT ALWAYS A CHANGE ON DISK,
@@ -1296,7 +1477,7 @@ export function createTabIo(deps: TabIoDeps): TabIo {
       if (reason === 'auto') return deps.autoStop(id, { kind: 'stale' });
       const again = result.sha256;
       offerStaleChoice(tab, value, () => {
-        void overwrite(id, tab, value, again);
+        pressOverwrite(id, tab, value, again);
       });
       return false;
     }
@@ -1312,15 +1493,29 @@ export function createTabIo(deps: TabIoDeps): TabIo {
   };
 
   /**
-   * Write one tab to disk. Resolves false when nothing was written.
+   * ONE save of one tab, from the top: the ladder of refusals, then one of the
+   * three doors.
    *
-   * PHASE 240: this function no longer names a write at all. It is the ladder
-   * of refusals it has always been, and the write itself is one of the three
-   * doors below — the machine, the guarded channel, or the plain one. That is
-   * what `npm run conformance:save` reads by matching braces: `save`'s own
-   * body must not name `fs:writeFile`.
+   * PHASE 240: this function names no write at all. It is the ladder of
+   * refusals it has always been, and the write itself is one of the three doors
+   * above — the machine, the guarded channel, or the plain one. That is what
+   * `npm run conformance:save` reads by matching braces: this body must not
+   * name `fs:writeFile`.
+   *
+   * PHASE 277 RENAMED IT FROM `save`, and the rename is the point rather than
+   * tidying. `save` is now the serializer below, because the serializer has to
+   * be the function the store calls; this is the ladder, because the ladder has
+   * to be the function the gate reads. `conformance:save` rules 1 and 11 moved
+   * to this name in the same commit, and rule 1 gained a second half asking the
+   * serializer the same question, which is strictly stronger than asking one of
+   * them.
+   *
+   * IT RE-READS EVERYTHING IT NEEDS. The tab, the buffer and the model are
+   * taken here and nowhere earlier, so a follow-up that ran because a first
+   * save was in flight writes what the person holds NOW rather than what they
+   * held when they asked.
    */
-  const save = async (
+  const saveOnce = async (
     id: string,
     reason: SaveReason = 'explicit'
   ): Promise<boolean> => {
@@ -1413,10 +1608,189 @@ export function createTabIo(deps: TabIoDeps): TabIo {
     // build/p268/SPEC.md section 0, and `conformance:save` rule 11.
     if (reason === 'auto' && !guarded) return false;
     return guarded
-      ? saveInProject(id, tab, value, reason)
-      : saveOutsideProject(id, tab, value, tab.savedContents);
+      ? saveInProject(id, tab, model, value, reason)
+      : saveOutsideProject(id, tab, model, value, tab.savedContents);
   };
 
+  /**
+   * PHASE 277, audit F1's third clause. ONE SAVE AT A TIME PER BUFFER, and a
+   * person's second request is REMEMBERED rather than raced or dropped.
+   *
+   * WHAT IT REPLACES, AND BOTH HALVES WERE BROKEN. The scheduler kept an
+   * in-flight set of its own (./auto-save, deleted in this phase), which was a
+   * second truth about one fact kept in the module ⌘S cannot see, so it stopped
+   * a timer racing a timer and nothing else. Measured at b4569686:
+   *
+   *   - ⌘S while a timer's save is in flight submitted TWO guarded writes
+   *     against the same frozen precondition, and the loser was answered
+   *     `stale`. The person read "'notes.md' changed on disk / Something wrote
+   *     to it after Tortie read it" about a writer that does not exist, and in
+   *     the auto direction it also recorded a permanent stop and a sticky
+   *     toast. Spending issue 16's one sentence on Tortie's own timer teaches a
+   *     person to press Overwrite on the dialog that exists to stop them.
+   *   - A second timer expiring during a held write was DROPPED rather than
+   *     deferred — `run` deleted the handle before its in-flight check and
+   *     nothing re-armed. Reading: `writes=1, pending=0`, newer model, older
+   *     saved text, `dirty:false`. That arm reaches the audit's exact end state
+   *     with the clean-edge cancellation never involved at all.
+   *
+   * A TIMER'S REQUEST IS NEVER REMEMBERED HERE, and the fix round is why. As
+   * this phase first built it, a timer that found the slot held was queued, and
+   * the queued request ran a whole write later without asking anything again:
+   * it wrote after the person switched auto save Off, it wrote under "Save
+   * changes to 'notes.md'?", and it wrote into a tab reopened in the meantime.
+   * `run` in ./auto-save had asked the policy, the dialog and the tab before
+   * the request was queued, not before it ran. So an `auto` request that finds
+   * the slot held is answered false at once, and `run` RE-ARMS a tab its save
+   * left dirty, through `arm`, which asks every question again when the timer
+   * next falls due. Deferred rather than dropped, and never unasked.
+   *
+   * A PERSON'S FOLLOW-UP IS AT MOST ONE. Extra ⌘S presses JOIN the one already
+   * queued rather than stacking, and they hand back its promise, so ten presses
+   * during one write are one extra save and ten callers with the same answer.
+   *
+   * THE SLOT BELONGS TO A BUFFER, NOT TO A PATH. A tab id is an absolute path
+   * and a close and reopen hands the same id to a different model, so the slot
+   * records the model instance that took it — the same identity
+   * `completeSave` compares. A slot held by a buffer that is gone blocks
+   * nothing: before the fix round, one write that never answered (the local
+   * channel has no deadline, and a remote put can take 60 s) held the slot for
+   * every later lifetime of that path, and every ⌘S on the reopened file joined
+   * a queue that could not drain and said nothing. And a queued request whose
+   * buffer is gone by the time it would run writes nothing and answers false,
+   * so a ⌘S made in one lifetime can never write the typing of the next.
+   *
+   * IT IS DEADLOCK-FREE BY CALL SITE, NOT BY LUCK. `withSaveSlot` is called
+   * from exactly three places — `save`, `pressOverwrite` and the plain door's
+   * Overwrite — and from nothing that runs INSIDE a slot. The two presses fire
+   * from a click, long after the `save` that raised their dialog resolved
+   * false. A call from inside a body would queue a follow-up that can only run
+   * when that body returns, and the body would be waiting on it.
+   *
+   * THE ONE CORNER, STATED, AND IT IS REACHABLE. A queue entry carries no body,
+   * so a follow-up always runs the ladder fresh as a ⌘S. A person who presses
+   * ⌘S twice and whose first press is answered `stale` gets the dialog, and the
+   * second press starts the moment the first releases the slot — under that
+   * dialog, because it is their own request, made before the question was
+   * asked, and it may raise the same question again. An Overwrite pressed while
+   * that second save is in the air joins it as an ordinary save, so the person
+   * is asked again rather than overwritten. That is the safe direction. Nothing
+   * a TIMER asked for ever runs under a dialog, because a timer never waits
+   * here.
+   */
+  type SaveSlot = {
+    /** The buffer this slot's saves read from: the tab's lifetime. */
+    readonly model: WorkingModel | null;
+    /** At most one person's request, waiting for this slot to be released. */
+    next: { done: Promise<boolean>; settle: (ok: boolean) => void } | null;
+  };
+  const slots = new Map<string, SaveSlot>();
+
+  /** Take the slot for one buffer, run the body, release it in a `finally`, then drain. */
+  const holdSlot = async (
+    id: string,
+    model: WorkingModel | null,
+    body: () => Promise<boolean>
+  ): Promise<boolean> => {
+    const slot: SaveSlot = { model, next: null };
+    slots.set(id, slot);
+    try {
+      return await body();
+    } finally {
+      // THE RELEASE COMES BEFORE THE DRAIN, so the follow-up finds the slot
+      // free and takes it rather than queueing behind itself for ever. And it
+      // releases only ITS OWN slot: a later lifetime of this path may hold the
+      // key by now, and that save is not this one's to end.
+      if (slots.get(id) === slot) slots.delete(id);
+      drainQueue(id, slot);
+    }
+  };
+
+  const drainQueue = (id: string, slot: SaveSlot): void => {
+    const next = slot.next;
+    if (next === null) return;
+    slot.next = null;
+    // THE LIFETIME COMES FIRST, as it does in `completeSave`. Another buffer
+    // holding the key, or a different model under the id, means the tab this
+    // request was made in is gone: nothing is written, and false is the honest
+    // answer, because `promptDirtyClose` closes a tab on true.
+    if (slots.has(id) || getWorkingModel(id) !== slot.model) {
+      next.settle(false);
+      return;
+    }
+    const tab = deps.byId(id);
+    if (tab === undefined) {
+      next.settle(false);
+      return;
+    }
+    // THE ONE PLACE A SAVE IS SKIPPED FOR BEING CLEAN, and it is deliberate
+    // that there is only one. This follow-up exists to catch typing that
+    // happened DURING the write, and with `completeSave`'s rule above a clean
+    // tab is one whose buffer is already on disk. An explicit ⌘S on a clean tab
+    // still writes, exactly as it always has: main has no identical-bytes short
+    // circuit, it stages and renames, so skipping would be a visible change to
+    // a gesture nobody complained about.
+    if (!tab.dirty) {
+      next.settle(true);
+      return;
+    }
+    // `explicit`, and never a stored reason: `withSaveSlot` answers a timer's
+    // request before it can reach the queue, so everything waiting here is a
+    // person's.
+    void holdSlot(id, slot.model, () => saveOnce(id, 'explicit')).then(
+      (ok) => {
+        next.settle(ok);
+      },
+      () => {
+        next.settle(false);
+      }
+    );
+  };
+
+  const withSaveSlot = async (
+    id: string,
+    reason: SaveReason,
+    body: () => Promise<boolean>
+  ): Promise<boolean> => {
+    const model = getWorkingModel(id);
+    const held = slots.get(id);
+    // Free, or held only by a buffer that has since been closed.
+    if (held === undefined || held.model !== model) {
+      return holdSlot(id, model, body);
+    }
+    // A timer never waits. See the doc comment above: ./auto-save re-arms.
+    if (reason === 'auto') return false;
+    if (held.next === null) {
+      let settle!: (ok: boolean) => void;
+      const done = new Promise<boolean>((resolve) => {
+        settle = resolve;
+      });
+      held.next = { done, settle };
+    }
+    return held.next.done;
+  };
+
+  /**
+   * Write one tab to disk. Resolves false when nothing was written.
+   *
+   * PHASE 277. This is the serializer and nothing else, so it still names no
+   * write — the ladder is `saveOnce` above and the doors are above that.
+   *
+   * TRUE MEANS A WRITE LANDED, NOT THAT THE TAB IS CLEAN, and the fix round
+   * corrected this comment, which had promised the second. Typing that arrives
+   * while the write is in the air keeps the tab dirty (`completeSave`), and the
+   * save still answers true, because the bytes it read are on disk. So a caller
+   * that acts on true asks the tab again: `promptDirtyClose` in ./store closes
+   * only a tab that is still the same buffer and is clean, and asks again
+   * otherwise. A timer's request that finds a save of the same buffer running
+   * answers false at once (`withSaveSlot`).
+   */
+  const save = async (
+    id: string,
+    reason: SaveReason = 'explicit'
+  ): Promise<boolean> => {
+    return withSaveSlot(id, reason, () => saveOnce(id, reason));
+  };
 
   const refreshRepo = async (repoPath: string): Promise<void> => {
     if (!gmux) return;
@@ -1461,10 +1835,42 @@ export function createTabIo(deps: TabIoDeps): TabIo {
         }
       }
       // Reload clean buffers so the editor tracks the agent's edits.
-      if (!tab.dirty) {
+      //
+      // PHASE 277 FIX ROUND. THE CLEAN TEST IS ASKED OF THE LIVE TAB, BEFORE
+      // AND AFTER THE READ. It was asked once, of the snapshot `tabs` took
+      // before this loop, and then the directory read above, the file read
+      // below and every earlier tab's reads in this same loop were awaited
+      // before the baseline moved and the buffer was replaced. Typing that
+      // landed in any of those waits was written over by the agent's bytes, and
+      // because `savedContents` moved first, MonacoHost then worked the tab out
+      // as CLEAN — the watcher's own version of the false clean this phase
+      // exists to end, and the one this file's header says the skip prevents.
+      // The attack verifier measured it at the parent and at this phase's first
+      // build alike: the buffer held the agent's bytes and the tab read clean.
+      //
+      // So the buffer must still be untouched when the bytes arrive: the LIVE
+      // tab is still clean, and the id still holds the model this read started
+      // with, because a close and reopen loads its own bytes. MonacoHost marks
+      // a tab dirty inside the model's own change event, synchronously, so the
+      // live flag already carries every keystroke that reached the model.
+      //
+      // The model's TEXT is deliberately not compared with the baseline here.
+      // Monaco normalises a file's line endings when it builds a model, so a
+      // clean tab over a file with mixed endings reads differently from the
+      // bytes it was loaded from, and that compare would stop the watcher
+      // following such a file for good.
+      const before = deps.byId(tab.id);
+      if (before !== undefined && !before.dirty) {
+        const model = getWorkingModel(tab.id);
         try {
           const result = await gmux.fs.readFile(tab.path);
-          if (result.contents !== tab.savedContents) {
+          const live = deps.byId(tab.id);
+          if (
+            live !== undefined &&
+            !live.dirty &&
+            result.contents !== live.savedContents &&
+            getWorkingModel(tab.id) === model
+          ) {
             deps.patch(tab.id, {
               savedContents: result.contents,
               truncated: result.truncated

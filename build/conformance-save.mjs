@@ -30,14 +30,26 @@
  *
  * ## The rules
  *
- *   1. `save`'s OWN BODY names no write. It is the ladder of refusals it has
- *      always been; the write is one of three doors below it. Read through
+ *   1. `save`'s OWN BODY names no write, and neither does `saveOnce`, which is
+ *      the ladder of refusals now; the write is one of three doors below it.
+ *      PHASE 277 moved the ladder. `save` became one line that runs `saveOnce`
+ *      inside `withSaveSlot`, so two saves of one tab can never be in the air
+ *      at once, and rule 1 read `save` alone and found none of the doors — while
+ *      every door was still reached, from the function below it. The rule reads
+ *      the function that CHOOSES the door, not the one that used to. Read through
  *      `namedFunctions` in build/scan-source.mjs, which matches braces, and
  *      which is the reader rather than `functionBodyOf` for one reason: `save`
  *      is `const save = async (id) => {…}` inside `createTabIo`, and
  *      `functionBodyOf` reads a `function` DECLARATION. Both live in the same
  *      module and both match braces the same way. `functionBodyOf` is asked
  *      for the two exported functions in rule 4, where it does apply.
+ *  1c. `save` IS EXACTLY ONE DELEGATION TO `saveOnce` INSIDE `withSaveSlot`,
+ *      compared with the whitespace removed. It began as a substring test and
+ *      the Phase 277 fix round walked three shapes past it. This is the
+ *      half of the Phase 277 move that a retargeted rule 1 would otherwise let
+ *      slip: a later `save` that picked a door directly would skip both the
+ *      slot and every refusal in `saveOnce`, and rules 1 and 11 would still
+ *      pass because they read `saveOnce`. `ablation:p268` arm 6 is the proof.
  *   2. ONE FUNCTION IN THE EDITOR NAMES `writeFile`, and it is
  *      `saveOutsideProject`, which is the old door kept for a file outside
  *      every open project root and for a symbolic link. Everything else that
@@ -72,9 +84,11 @@
  *      loop, so `src/renderer/editor/auto-save.ts` may not name `writeFile`,
  *      `writeGuarded`, `writePlain`, `saveOutsideProject` or `setInterval` at
  *      all.
- *  11. `save` REFUSES THE PLAIN DOOR FOR THE AUTO REASON, and the refusal is
- *      read BEFORE the door name appears in its body. The plain door is
- *      unguarded and a timer does not get an unguarded write.
+ *  11. `saveOnce` REFUSES THE PLAIN DOOR FOR THE AUTO REASON, and the refusal
+ *      is read BEFORE the door name appears in its body. The plain door is
+ *      unguarded and a timer does not get an unguarded write. It read `save`
+ *      until Phase 277 moved the door choice into `saveOnce`; rule 1c is what
+ *      keeps `save` from growing a second route round it.
  *  11b. `saveInProject`'s `unguarded` ARM REFUSES IT TOO. That arm is the
  *      symbolic link, and the shape at this phase's parent — a bare
  *      `return saveOutsideProject(…)` — is the hole a later round reopens,
@@ -682,24 +696,38 @@ const AUTO_SAVE_FORBIDDEN = [
 // ---------------------------------------------------------------------------
 
 {
-  const body = bodyOf(TAB_IO, 'save', '1');
-  if (body !== null) {
-    const named = ['writeFile', 'writeGuarded', 'fs:writeFile', 'fs:writeGuarded'].filter(
-      (n) => body.includes(n)
-    );
-    if (named.length > 0) {
+  const WRITES = ['writeFile', 'writeGuarded', 'fs:writeFile', 'fs:writeGuarded'];
+  const DOORS = ['saveOnMachine', 'saveInProject', 'saveOutsideProject'];
+  const save = bodyOf(TAB_IO, 'save', '1');
+  const once = bodyOf(TAB_IO, 'saveOnce', '1');
+  if (save !== null && once !== null) {
+    const namedInSave = WRITES.filter((n) => save.includes(n));
+    const namedInOnce = WRITES.filter((n) => once.includes(n));
+    if (namedInSave.length > 0 || namedInOnce.length > 0) {
       fail(
-        `1. save in ${TAB_IO} names ${named.join(', ')} in its own body; the write belongs to one of the three doors below it`
+        `1. ${TAB_IO} names ${[...namedInSave, ...namedInOnce].join(', ')} inside save or saveOnce; the write belongs to one of the three doors below them`
       );
     } else {
-      const doors = ['saveOnMachine', 'saveInProject', 'saveOutsideProject'].filter((d) =>
-        body.includes(d)
-      );
+      const doors = DOORS.filter((d) => once.includes(d));
       if (doors.length !== 3) {
-        fail(`1. save reaches ${String(doors.length)} of its 3 doors (${doors.join(', ') || 'none'})`);
+        fail(`1. saveOnce reaches ${String(doors.length)} of its 3 doors (${doors.join(', ') || 'none'})`);
       } else {
-        say('1. save names no write of its own and reaches all three doors, read by matching braces');
+        say('1. neither save nor saveOnce names a write of its own, and saveOnce reaches all three doors, read by matching braces');
       }
+    }
+    // Rule 1c. save's WHOLE body is the one delegation, compared with every
+    // space removed. A substring test was not enough: the Phase 277 fix round
+    // planted three shapes that each passed it — a `'withSaveSlot'` string
+    // literal beside a bare `return saveOnce(id, reason)`, an 'auto' handed to a
+    // helper that names the plain door, and an early `if (reason === 'auto')
+    // return saveOnce(...)` in front of the slot. None of them is the body below.
+    const WANT_SAVE = 'returnwithSaveSlot(id,reason,()=>saveOnce(id,reason));';
+    if (save.replace(/\s+/g, '') !== WANT_SAVE) {
+      fail(
+        '1c. save is not exactly `return withSaveSlot(id, reason, () => saveOnce(id, reason));`, so a save can reach a door outside the slot or around saveOnce'
+      );
+    } else {
+      say('1c. save is exactly one delegation to saveOnce inside withSaveSlot, and nothing else');
     }
   }
 }
@@ -1018,15 +1046,15 @@ const WRITE_CHANNELS = ['fs:writeFile', 'fs:writeGuarded'];
 
 {
   const code = source(TAB_IO);
-  const ordered = bodyOrder(code, 'save', "reason === 'auto'", 'saveOutsideProject');
+  const ordered = bodyOrder(code, 'saveOnce', "reason === 'auto'", 'saveOutsideProject');
   if (ordered === null) {
     fail(
-      "11. save in " + TAB_IO + " does not test `reason === 'auto'` before it names saveOutsideProject, so a timer can reach the unguarded door"
+      "11. saveOnce in " + TAB_IO + " does not test `reason === 'auto'` before it names saveOutsideProject, so a timer can reach the unguarded door"
     );
   } else if (ordered === false) {
-    fail('11. save tests the auto reason AFTER it names the plain door, which is too late');
+    fail('11. saveOnce tests the auto reason AFTER it names the plain door, which is too late');
   } else {
-    say("11. save refuses the plain, unguarded door for reason 'auto' before the door is named");
+    say("11. saveOnce refuses the plain, unguarded door for reason 'auto' before the door is named");
   }
 }
 
@@ -1291,6 +1319,139 @@ const PROJECT_CLOSED_SENTENCE =
         say('17. the refusal log line carries exactly why, reason, root and path, and the handler names neither contents nor expect');
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PHASE 277's rules. Every one of them pins a defect a verifier drove red on
+// the real store, and every one has an arm in build/p268/ablation.mjs that
+// takes it out and must turn exactly that rule red.
+// ---------------------------------------------------------------------------
+
+// Rule 18. A timer is never queued. `withSaveSlot` answers an 'auto' request
+// false BEFORE it creates a follow-up, so nothing waiting in the slot can
+// outlive the policy that armed it (attack T1), write under a confirm (T2, T7)
+// or land in a reopened tab (T3). The deferred timer re-arms in ./auto-save,
+// where the policy, the delay and blocked() are asked again (rule 21).
+{
+  const code = source(TAB_IO);
+  const ordered = bodyOrder(code, 'withSaveSlot', "reason === 'auto'", 'held.next =');
+  if (ordered === null) {
+    fail("18. withSaveSlot does not test `reason === 'auto'` and then create a follow-up, so this rule read nothing");
+  } else if (ordered === false) {
+    fail('18. withSaveSlot creates a follow-up before it refuses a timer, so a timer can wait in the slot and write later');
+  } else {
+    say("18. withSaveSlot refuses a timer's request before it can create a follow-up, so no timer waits in the slot");
+  }
+}
+
+// Rule 19. The drained follow-up checks the LIFETIME before it takes the slot,
+// and runs as a person's save. `getWorkingModel` before `holdSlot`, and the
+// reason passed is the literal 'explicit'.
+{
+  const body = namedFunctions(stripComments(source(TAB_IO))).get('drainQueue');
+  if (body === undefined) {
+    fail('19. drainQueue is not in tab-io.ts, so this rule read nothing');
+  } else {
+    const model = body.indexOf('getWorkingModel(');
+    const hold = body.indexOf('holdSlot(');
+    if (model === -1 || hold === -1 || model > hold) {
+      fail('19. drainQueue does not ask getWorkingModel before holdSlot, so a follow-up from a closed tab can write the reopened one');
+    } else if (!body.includes("saveOnce(id, 'explicit')")) {
+      fail("19. drainQueue does not run saveOnce(id, 'explicit'), so a stored reason can reach a door as a timer");
+    } else {
+      say("19. drainQueue asks the tab's lifetime before it takes the slot, and runs the follow-up as saveOnce(id, 'explicit')");
+    }
+  }
+}
+
+// Rule 20. The close prompt's Save re-reads `dirty` before it closes. True
+// means a write landed, not that the tab is clean.
+{
+  const ordered = bodyOrder(source(EDITOR_STORE), 'promptDirtyClose', 'live.dirty', 'forceCloseTab(');
+  if (ordered === null) {
+    fail('20. promptDirtyClose does not read live.dirty and close the tab, so this rule read nothing');
+  } else if (ordered === false) {
+    fail("20. promptDirtyClose closes the tab before it reads live.dirty, so typing made during the Save is discarded without a question");
+  } else {
+    say('20. the close prompt re-reads dirty after its save answers and asks again rather than closing unsaved typing');
+  }
+}
+
+// Rule 21. A timer deferred by a held slot is re-armed after the save it
+// waited on, never dropped: `run` names `arm(id)` AFTER `await deps.save(`.
+{
+  const body = namedFunctions(stripComments(source(AUTO_SAVE))).get('run');
+  const at = body === undefined ? -1 : body.indexOf('await deps.save(');
+  if (at === -1) {
+    fail('21. run in auto-save.ts does not await deps.save, so this rule read nothing');
+  } else if (body.indexOf('arm(id)', at) === -1) {
+    fail('21. run does not re-arm after deps.save answers, so a timer refused by a held slot is dropped and the newer typing is never written');
+  } else {
+    say('21. run re-arms after deps.save answers, so a timer the slot refused is deferred rather than dropped');
+  }
+}
+
+// Rule 22. refreshRepo reads the LIVE tab after the disk read and before it
+// replaces the buffer. A snapshot taken before the await is attack T6: typing
+// that lands during the read was wiped and the tab left reading clean.
+{
+  const body = namedFunctions(stripComments(source(TAB_IO))).get('refreshRepo');
+  if (body === undefined) {
+    fail('22. refreshRepo is not in tab-io.ts, so this rule read nothing');
+  } else {
+    const read = body.indexOf('fs.readFile(');
+    const reset = body.indexOf('resetWorkingModel(', read);
+    const live = read === -1 ? -1 : body.indexOf('deps.byId(', read);
+    if (read === -1 || reset === -1) {
+      fail('22. refreshRepo does not read a file and reset a buffer, so this rule read nothing');
+    } else if (live === -1 || live > reset) {
+      fail('22. refreshRepo replaces the buffer without reading the live tab after its disk read, so typing made during the read is wiped');
+    } else {
+      say('22. refreshRepo reads the live tab after the disk read and before it replaces the buffer');
+    }
+  }
+}
+
+// Rule 23. No door writes a literal clean state, and every door ends in the
+// one completion. tab-io.ts names no `dirty: false`; `completeSave` is declared
+// once and named by each of the four doors.
+{
+  const code = stripComments(source(TAB_IO));
+  const fns = namedFunctions(code);
+  const doors = ['saveOnMachine', 'writePlain', 'overwrite', 'saveInProject'];
+  const missing = doors.filter((d) => !(fns.get(d) ?? '').includes('completeSave('));
+  const decls = (code.match(/const completeSave\s*=/g) ?? []).length;
+  if (/dirty:\s*false/.test(code)) {
+    fail('23. tab-io.ts writes a literal `dirty: false`, so a door can mark a tab clean without asking what its buffer holds');
+  } else if (decls !== 1) {
+    fail(`23. tab-io.ts declares completeSave ${String(decls)} times rather than once`);
+  } else if (missing.length > 0) {
+    fail(`23. ${missing.join(', ')} ${missing.length === 1 ? 'does' : 'do'} not end in completeSave, so that door decides clean on its own`);
+  } else {
+    say('23. no door writes dirty: false, and all four doors end in the one completeSave');
+  }
+}
+
+// Rule 24. The auditor's fixture ships UNEDITED. It is evidence, and a build
+// that bends it to pass has proved nothing.
+{
+  const shipped = 'src/renderer/editor/__tests__/audit-0914-auto-save.test.ts';
+  const fixture = 'docs/audits/fixtures/2026-09-14/auto-save-interleavings.test.ts.fixture';
+  let a = null;
+  let b = null;
+  try {
+    a = readFileSync(join(repoRoot, shipped), 'utf8');
+    b = readFileSync(join(repoRoot, fixture), 'utf8');
+  } catch {
+    // reported below
+  }
+  if (a === null || b === null) {
+    fail(`24. ${a === null ? shipped : fixture} is missing, so the auditor's closure test cannot be compared`);
+  } else if (a !== b) {
+    fail(`24. ${shipped} differs from the auditor's fixture, so the closure test was edited rather than satisfied`);
+  } else {
+    say("24. the auditor's closure test ships byte for byte as the fixture it was given");
   }
 }
 

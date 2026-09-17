@@ -133,6 +133,25 @@ export function getWorkingModel(
 }
 
 /**
+ * The working model of a tab, as this module hands it out.
+ *
+ * PHASE 277, audit F1. A save carries this INSTANCE from where it read the
+ * buffer to where it acknowledges the write, and compares it back with `===`,
+ * so an acknowledgement can tell "the tab I saved" from "a tab that now holds
+ * the same id". The registry above is what makes reference identity the right
+ * question: `disposeModels` drops the key on close and `workingModel` creates a
+ * fresh instance on the next open, so two lifetimes of one path are two
+ * objects.
+ *
+ * It is DERIVED from `getWorkingModel` rather than spelled as
+ * `monacoNs.editor.ITextModel`, for two reasons. The two can never drift. And
+ * ./tab-io then names no Monaco type of its own, which is rule C4 of
+ * build/p277/SPEC.md — the identity is the instance and nothing else, no
+ * version id, no generation, no new Monaco API in the renderer.
+ */
+export type WorkingModel = NonNullable<ReturnType<typeof getWorkingModel>>;
+
+/**
  * Apply `contents` to a live model as ONE range replacement, keeping the undo
  * stack and the caret (Phase 237, research 97 §5).
  *

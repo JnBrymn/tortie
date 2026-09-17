@@ -150,10 +150,11 @@ import {
   targetOfProject
 } from '@shared/workspace-target';
 import { useApp } from '../state/store';
+import { machineWriteRootFor } from '../state/machines-slice';
 import { onOpenFile } from '../state/open-file';
 import { onRepoChanged } from '../state/repo-changed';
 import type { OpenFileRequest } from '../state/open-file';
-import { disposeModels, dropViewState } from './monaco-loader';
+import { disposeModels, dropViewState, getWorkingModel } from './monaco-loader';
 import { forgetRewindJournal } from './redline-journal';
 import type { EditorMode, EditorTab } from './tab-types';
 import { NO_BASELINE, nextBaseline } from './baseline';
@@ -173,6 +174,7 @@ import { createTabIo } from './tab-io';
 // because this store already owns the patch funnel, the dirty edge and every
 // dispose site — the three things a timer has to agree with.
 import { createAutoSave } from './auto-save';
+import { tabIsReadOnly } from './tab-readonly';
 import type { AutoSaveStopWhy } from './auto-save';
 import { useSettingsStore } from '../settings/settings-store';
 // Direct module import, not the ./markdown barrel: the barrel re-exports the
@@ -467,10 +469,42 @@ export const useEditor = create<EditorState>((set, get) => {
    * the arrow below rather than by a second module: there is exactly one save
    * function in this product and auto save calls it with a reason.
    *
-   * `policy` is read LIVE from the settings store on every arm and every tick,
-   * so a mode or delay changed in the Settings window reaches this window with
-   * no new plumbing — `watchSettings()` is already running here (App.tsx:268)
-   * and a second subscription would be a second truth.
+   * `policy` is read LIVE from the settings store, and this comment says WHEN,
+   * because the sentence it replaces said "on every arm and every tick" and the
+   * tick half was never true: `run` read no policy at all, so a timer armed
+   * under After a delay fired and wrote under Off (audit F2, Phase 277).
+   *
+   * There are two reads and they answer different questions. `arm` reads the
+   * MODE and the DELAY when it creates a timer. `run` reads the MODE again in
+   * the last synchronous moment it owns, immediately before it hands over to
+   * `deps.save`, and asks whether the policy still permits the TRIGGER that
+   * armed this particular timer — so a delay that survived a switch to On focus
+   * change is refused by the clause that authorises delays, rather than by a
+   * general "is auto save on".
+   *
+   * The subscription below is the third piece, and it is not a second truth.
+   * `watchSettings()` (App.tsx:268) is how main's broadcast reaches this
+   * window's settings store; this listens to THAT store, downstream of it, and
+   * does one thing: re-arm every tab that currently HOLDS a timer, through
+   * `arm`, which re-reads both fields. Off and On focus change arm nothing, a
+   * new delay is honoured from now, and a tab that went clean arms nothing.
+   * Tabs with no timer are left alone on purpose — switching auto save ON does
+   * not opt a person's already-dirty files into a timed write. VS Code's
+   * EditorAutoSave saves them all; this deliberately does not.
+   *
+   * THE LIMIT, stated rather than overclaimed. Switching to Off does not
+   * interrupt a write already submitted to main: between `run`'s last read and
+   * the bridge call there is one sha256 digest of `savedContents` (./tab-io),
+   * and that is the whole window. It stops every timer that has not submitted
+   * one. That includes a timer that fell due while a save of the same buffer
+   * was running: ./tab-io answers it false rather than queueing it, and `run`
+   * re-arms it, so it is asked again (the Phase 277 fix round; as first built
+   * such a timer was queued and wrote a whole write later under Off).
+   *
+   * And a change made in the SETTINGS window reaches this window through
+   * main's broadcast, so "immediately before submitting" means immediately
+   * before, as this window knows the policy; the File menu's checkbox runs in
+   * this renderer and has no such gap.
    */
   const autoSave = createAutoSave({
     save: (id) => io.save(id, 'auto'),
@@ -490,6 +524,29 @@ export const useEditor = create<EditorState>((set, get) => {
     setTimer: (fn, ms) => setTimeout(fn, ms),
     clearTimer: (handle) => {
       clearTimeout(handle as ReturnType<typeof setTimeout>);
+    }
+  });
+
+  /**
+   * PHASE 277, audit F2. THE HOOK THAT DID NOT EXIST.
+   *
+   * Nothing cancelled a pending timer when the policy changed, so a timer armed
+   * under After a delay stayed armed under Off for up to a whole delay period.
+   * `run`'s own re-read (./auto-save) is what makes that harmless; this is what
+   * makes it prompt, and the two are deliberately separate — the re-read
+   * survives a round that unwires this line.
+   *
+   * It asks about the two FIELDS and not about the object, for a measured
+   * reason: `SettingsStoreState.update` sets the whole settings object twice
+   * for one gesture, optimistically and then again with main's sanitized
+   * answer, and every other settings row shares the same object. An unrelated
+   * setting moving is not a reason to reschedule somebody's deadline.
+   */
+  useSettingsStore.subscribe((s, prev) => {
+    const now = s.settings.autoSave;
+    const was = prev.settings.autoSave;
+    if (now.mode !== was.mode || now.delayMs !== was.delayMs) {
+      autoSave.notePolicyChanged();
     }
   });
 
@@ -543,10 +600,33 @@ export const useEditor = create<EditorState>((set, get) => {
       body: "Your changes will be lost if you don't save them.",
       confirmLabel: 'Save',
       onConfirm: () => {
+        // PHASE 277 FIX ROUND. The buffer this answer is about, taken at the
+        // press, so the close below can tell it from a reopened tab that holds
+        // the same id by the time the save answers.
+        const buffer = getWorkingModel(tab.id);
         void io.save(tab.id).then((saved) => {
           // A failed write already raised a sticky toast; do not march on
           // through the rest of a Close All and lose the next buffer too.
           if (!saved) return;
+          // PHASE 277 FIX ROUND. TRUE MEANS A WRITE LANDED, NOT THAT THE TAB IS
+          // CLEAN, so the tab is asked again before it is closed. Typing that
+          // arrives while the write is in the air keeps the tab dirty (./tab-io
+          // `completeSave`), and this closed it anyway: the button that exists
+          // to keep a person's work discarded the newest of it, with no second
+          // question. Driven by the attack verifier through the real store:
+          // `{"tabStillOpen":false,"modelGone":true,"promptAgain":false}`.
+          //
+          // A tab that is no longer the buffer the person answered about is not
+          // closed at all, and the run stops there: the tab was closed some
+          // other way, and a reopened tab under the same id is somebody's new
+          // work. A tab still dirty is ASKED AGAIN, with the same question and
+          // the same continuation, so a Close All carries on after it.
+          const live = tabById(tab.id);
+          if (live === undefined || getWorkingModel(tab.id) !== buffer) return;
+          if (live.dirty) {
+            promptDirtyClose(live, next);
+            return;
+          }
           get().forceCloseTab(tab.id);
           next();
         });
@@ -1368,9 +1448,27 @@ export const useEditor = create<EditorState>((set, get) => {
       // Phase 240: a compare tab holds two versions of a file and neither is
       // what the file says now, so a dirty one would prompt on close to save a
       // dead version over a live file.
+      //
+      // PHASE 277 FIX ROUND, AND IT CORRECTS PHASE 101. Phase 101 made a file on
+      // a machine an EDIT SURFACE on a machine with a confirmed folder —
+      // MonacoHost asks `tabIsReadOnly` with that folder and Monaco takes the
+      // keystroke — and this line went on refusing every remote tab. So typing
+      // into one never made it dirty, `closeTab` closed it with no question,
+      // and a queued ⌘S skipped it as clean. Driven through this store by the
+      // attack verifier: `{"dirtyAfterTyping":false,"promptShown":false,
+      // "tabStillOpen":false}`, and identical at the parent. The refusal now
+      // asks MonacoHost's own question with MonacoHost's own folder, so a tab a
+      // person can type into is a tab that can be dirty, and a review tab on a
+      // machine with no folder is still refused exactly as before.
+      const remoteReadOnly =
+        tab.remote !== undefined &&
+        tabIsReadOnly(
+          tab,
+          machineWriteRootFor(useApp.getState().machineStates, tab.remote.machineId)
+        );
       if (
         tab.commit !== null ||
-        tab.remote !== undefined ||
+        remoteReadOnly ||
         tab.archMap !== undefined ||
         tab.diagnostics !== undefined ||
         tab.compare !== undefined

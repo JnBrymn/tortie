@@ -9,6 +9,11 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 ### Fixed
 
 - A shell variable name you added in Settings is no longer pushed off its list by names written into the settings file by hand ahead of it. Those names are still ignored, and closing the Settings window no longer drops yours.
+- Typing into a file while it was being saved no longer marks that file saved. The newer text stays unsaved until it is written, and closing the file still asks about it; before, the save's answer marked it clean, so closing it asked nothing and the newest typing was lost.
+- Turning auto save off, or switching it to save when you click away, now stops a save that was already waiting on its timer. A waiting save also no longer writes while a question like "Save changes to…?" is on screen, or into a file you closed and opened again.
+- Pressing Save in the "Save changes to…?" question no longer closes a file you typed into while it was saving; it asks again.
+- Typing into a file while the project's changes are being refreshed is no longer thrown away.
+- A file open on another machine, in a folder you allowed editing in, now shows as unsaved when you type into it, so closing it asks first.
 
 ## 0.107.0 (2026-09-16)
 

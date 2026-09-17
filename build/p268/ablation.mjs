@@ -20,6 +20,25 @@
  *  5. Arm the timer BEFORE the tab is patched dirty — rule 14. This one is not
  *     hypothetical: it is the shape this phase's first build shipped, and
  *     `npm run probe:p268` caught it by typing ONE character.
+ *  6. PHASE 277. Give `save` a door of its own, outside `saveOnce` and outside
+ *     the one-save-per-tab slot — rule 1c. Rules 1 and 11 read `saveOnce` since
+ *     Phase 277 moved the door choice there, so without 1c this shape passes:
+ *     every refusal lives in a function the new route never calls.
+ *  7-9. PHASE 277 FIX ROUND. The three shapes that walked past rule 1c while
+ *     it was a substring test: a `'withSaveSlot'` string literal beside a bare
+ *     `saveOnce`, an 'auto' handed to a helper that names the plain door, and an
+ *     early auto return in front of the slot — rule 1c.
+ *  10. A timer queued in the slot — rule 18.
+ *  11-12. A follow-up that skips the lifetime check, or runs as the stored
+ *     reason — rule 19.
+ *  13. The close prompt closing on a save's true without re-reading dirty —
+ *     rule 20.
+ *  14. A timer the slot refused, dropped instead of re-armed — rule 21.
+ *  15. refreshRepo replacing a buffer off a snapshot taken before its read —
+ *     rule 22.
+ *  16-17. A literal clean patch in tab-io, and a door that does not end in
+ *     completeSave — rule 23.
+ *  18. The auditor fixture edited to pass — rule 24.
  *
  * Then the files are restored and the gate must exit ZERO again.
  */
@@ -36,6 +55,7 @@ const AUTO_SAVE = join(REPO, 'src/renderer/editor/auto-save.ts');
 const TAB_IO = join(REPO, 'src/renderer/editor/tab-io.ts');
 const EDITOR_STORE = join(REPO, 'src/renderer/editor/store.ts');
 const GATE = join(REPO, 'build/conformance-save.mjs');
+const AUDIT_TEST = join(REPO, 'src/renderer/editor/__tests__/audit-0914-auto-save.test.ts');
 
 /** Run the gate and answer its exit code and the rule numbers it named. */
 function runGate() {
@@ -45,7 +65,7 @@ function runGate() {
   // guessed from the whole output.
   const failed = [
     ...new Set(
-      [...(r.stderr ?? '').matchAll(/^\[conformance:save\] (\d+b?)\./gm)].map((m) => m[1])
+      [...(r.stderr ?? '').matchAll(/^\[conformance:save\] (\d+[a-z]?)\./gm)].map((m) => m[1])
     )
   ];
   return { code: r.status ?? 1, failed, text: `${r.stdout ?? ''}${r.stderr ?? ''}` };
@@ -54,7 +74,8 @@ function runGate() {
 const originals = new Map([
   [AUTO_SAVE, readFileSync(AUTO_SAVE, 'utf8')],
   [TAB_IO, readFileSync(TAB_IO, 'utf8')],
-  [EDITOR_STORE, readFileSync(EDITOR_STORE, 'utf8')]
+  [EDITOR_STORE, readFileSync(EDITOR_STORE, 'utf8')],
+  [AUDIT_TEST, readFileSync(AUDIT_TEST, 'utf8')]
 ]);
 
 function restore() {
@@ -94,8 +115,10 @@ try {
   {
     ablate(
       AUTO_SAVE,
-      "      try {\n        const ok = await deps.save(id);",
-      "      try {\n        await gmuxBridge().fs.writeFile('/tmp/x', 'x');\n        const ok = await deps.save(id);"
+      // PHASE 277 rewrote `run`: the in-flight set is gone and the save is one
+      // un-awaited call, so the anchor is that call rather than the old try.
+      "    void (async () => {\n      if (await deps.save(id)) wrote.add(id);",
+      "    void (async () => {\n      await gmuxBridge().fs.writeFile('/tmp/x', 'x');\n      if (await deps.save(id)) wrote.add(id);"
     );
     const { code, failed } = runGate();
     say(`1 (unguarded write in auto-save.ts): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
@@ -132,7 +155,14 @@ try {
     // byte 0, ablating nothing at all. That is how this ablation first
     // reported a green gate on a hole that was really there.
     const whole = originals.get(TAB_IO);
-    const armStart = whole.indexOf("    if (result.outcome === 'unguarded') {");
+    // PHASE 277 GAVE `overwrite` AN `unguarded` ARM OF ITS OWN, above
+    // `saveInProject`, which is the same trap the paragraph above describes one
+    // arm further up. Searching from byte zero found OVERWRITE's arm, planted
+    // the hole there, and rule 11b — which reads saveInProject — stayed green on
+    // a hole it never looked at. The search starts at saveInProject now.
+    const fnStart = whole.indexOf('  const saveInProject = ');
+    if (fnStart === -1) throw new Error('saveInProject is not where it was');
+    const armStart = whole.indexOf("    if (result.outcome === 'unguarded') {", fnStart);
     if (armStart === -1) throw new Error('the unguarded arm is not where it was');
     const armEnd = whole.indexOf("    if (result.outcome === 'stale') {", armStart);
     if (armEnd === -1) throw new Error('the stale arm is not below the unguarded one');
@@ -140,7 +170,7 @@ try {
     ablate(
       TAB_IO,
       parentArm,
-      "    if (result.outcome === 'unguarded') return saveOutsideProject(id, tab, value, tab.savedContents);\n"
+      "    if (result.outcome === 'unguarded') return saveOutsideProject(id, tab, model, value, tab.savedContents);\n"
     );
     const { code, failed } = runGate();
     say(`3 (the symlink hole): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
@@ -186,6 +216,143 @@ try {
     restore();
   }
 
+  // ------------------------------------------------------------------- 6
+  // PHASE 277. A save that picks the plain door itself, skipping saveOnce's
+  // refusals and the per-tab slot. Rules 1 and 11 read saveOnce and stay green,
+  // which is exactly why rule 1c exists.
+  {
+    ablate(
+      TAB_IO,
+      "    return withSaveSlot(id, reason, () => saveOnce(id, reason));\n",
+      "    const tab = deps.byId(id);\n    if (tab !== undefined && reason === 'auto') return saveOutsideProject(id, tab, null, '', tab.savedContents);\n    return withSaveSlot(id, reason, () => saveOnce(id, reason));\n"
+    );
+    const { code, failed } = runGate();
+    say(`6 (save picks a door itself): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('6. a save with its own door passed the gate');
+    if (!failed.includes('1c')) problems.push('6. rule 1c did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 7
+  {
+    ablate(TAB_IO, "    return withSaveSlot(id, reason, () => saveOnce(id, reason));\n", "    const _slot = 'withSaveSlot';\n    return saveOnce(id, reason);\n");
+    const { code, failed } = runGate();
+    say(`7 (a string literal beside a bare saveOnce): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('7. a string literal beside a bare saveOnce passed the gate');
+    if (!failed.includes('1c')) problems.push('7. rule 1c did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 8
+  {
+    ablate(TAB_IO, "    return withSaveSlot(id, reason, () => saveOnce(id, reason));\n", "    if (reason === 'auto') return viaHelper(id);\n    return withSaveSlot(id, reason, () => saveOnce(id, reason));\n");
+    const { code, failed } = runGate();
+    say(`8 (auto handed to a helper that names the plain door): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('8. auto handed to a helper that names the plain door passed the gate');
+    if (!failed.includes('1c')) problems.push('8. rule 1c did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 9
+  {
+    ablate(TAB_IO, "    return withSaveSlot(id, reason, () => saveOnce(id, reason));\n", "    if (reason === 'auto') return saveOnce(id, reason);\n    return withSaveSlot(id, reason, () => saveOnce(id, reason));\n");
+    const { code, failed } = runGate();
+    say(`9 (an early auto return in front of the slot): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('9. an early auto return in front of the slot passed the gate');
+    if (!failed.includes('1c')) problems.push('9. rule 1c did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 10
+  {
+    ablate(TAB_IO, "    if (reason === 'auto') return false;\n", "");
+    const { code, failed } = runGate();
+    say(`10 (a timer queued in the slot): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('10. a timer queued in the slot passed the gate');
+    if (!failed.includes('18')) problems.push('10. rule 18 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 11
+  {
+    ablate(TAB_IO, "    if (slots.has(id) || getWorkingModel(id) !== slot.model) {\n", "    if (slots.has(id)) {\n");
+    const { code, failed } = runGate();
+    say(`11 (a follow-up that skips the lifetime check): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('11. a follow-up that skips the lifetime check passed the gate');
+    if (!failed.includes('19')) problems.push('11. rule 19 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 12
+  {
+    ablate(TAB_IO, "saveOnce(id, 'explicit')).then(", "saveOnce(id, 'auto')).then(");
+    const { code, failed } = runGate();
+    say(`12 (a follow-up run as a timer): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('12. a follow-up run as a timer passed the gate');
+    if (!failed.includes('19')) problems.push('12. rule 19 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 13
+  {
+    ablate(EDITOR_STORE, "          if (live.dirty) {\n            promptDirtyClose(live, next);\n            return;\n          }\n", "");
+    const { code, failed } = runGate();
+    say(`13 (the close prompt closing on true): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('13. the close prompt closing on true passed the gate');
+    if (!failed.includes('20')) problems.push('13. rule 20 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 14
+  {
+    ablate(AUTO_SAVE, "      if (trigger === 'delay' && epoch === disposals && !timers.has(id)) arm(id);\n", "");
+    const { code, failed } = runGate();
+    say(`14 (a refused timer dropped): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('14. a refused timer dropped passed the gate');
+    if (!failed.includes('21')) problems.push('14. rule 21 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 15
+  {
+    ablate(TAB_IO, "          const live = deps.byId(tab.id);\n", "          const live = before;\n");
+    const { code, failed } = runGate();
+    say(`15 (refreshRepo off a stale snapshot): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('15. refreshRepo off a stale snapshot passed the gate');
+    if (!failed.includes('22')) problems.push('15. rule 22 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 16
+  {
+    ablate(TAB_IO, "return completeSave(id, model, value);", "deps.patch(id, { dirty: false }); return true;");
+    const { code, failed } = runGate();
+    say(`16 (a literal clean patch in a door): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('16. a literal clean patch in a door passed the gate');
+    if (!failed.includes('23')) problems.push('16. rule 23 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 17
+  {
+    ablate(TAB_IO, "return completeSave(id, model, value);", "return true;");
+    const { code, failed } = runGate();
+    say(`17 (a door that does not end in completeSave): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('17. a door that does not end in completeSave passed the gate');
+    if (!failed.includes('23')) problems.push('17. rule 23 did not go red');
+    restore();
+  }
+
+  // ------------------------------------------------------------------ 18
+  {
+    ablate(AUDIT_TEST, "import { beforeEach, expect, it, vi } from 'vitest';", "import { beforeEach, expect, it, vi } from 'vitest';\n// bent to pass");
+    const { code, failed } = runGate();
+    say(`18 (the auditor fixture edited to pass): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('18. the auditor fixture edited to pass passed the gate');
+    if (!failed.includes('24')) problems.push('18. rule 24 did not go red');
+    restore();
+  }
+
   // ---------------------------------------------------------------- restored
   {
     const { code } = runGate();
@@ -201,5 +368,5 @@ if (problems.length > 0) {
   process.stderr.write(`${TAG} FAILED: ${String(problems.length)} finding(s).\n`);
   process.exit(1);
 }
-say('PASS: 5 ablations, each red on the rule that owns it, and the tree restored.');
+say('PASS: 18 ablations, each red on the rule that owns it, and the tree restored.');
 process.exit(0);
