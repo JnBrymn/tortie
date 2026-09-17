@@ -29478,6 +29478,112 @@ from 52 to 53 while it ran. He had started a session of his own.
 - No shipping byte and no release.
 
 
+## Phase 281.1 — the reverify the Claude meter's fix round is owed (operator, 2026-09-17) QUEUED
+
+**Subject.** `test(credentials): the Claude meter's fix round, re-verified` (provisional: if the reverify
+changes no shipping byte, the phase lands as the running-log line and whatever test or document it
+corrected).
+
+**First body line.** `Phase 281.1: the Claude meter's fix round, re-verified`
+
+**Semver.** None unless a defect is found; then whatever the fix earns.
+
+**Tier 3.** It is the credentials domain, the one that reads and writes the person's keychain, and the
+operator asked for it by name.
+
+**Charter.** The operator, 2026-09-17: after CLAUDE.md's operating contract was corrected to carry the
+lane `Verify -> [Fix -> Reverify]` from `docs/method/HOW-WE-VERIFY-THIS.md` §1 (`19c317ef`), he chose
+Phase 281 for a reverify subphase. Phase 281 (`79c6c8fe`, "the Claude meter reads the item Claude Code
+reads") landed with its fix round unreverified, and with two further edits the main session made after
+the fix round that no verifier has read.
+
+### What the fix round changed, so the reverify re-runs exactly those items
+
+The fix round of workflow `wf_c969f45a-9b9` answered two `needs_work` verdicts (the scratch-keychain
+verifier and the vendor re-derive verifier; the attack verifier approved). Its changes:
+
+1. **The fake `security` models now move an updated item behind the others of its name**, as the
+   real program was measured to: `src/main/credentials/__tests__/first-match-security.ts` (the `-i`
+   update splices and pushes) and `build/credentials-conformance-probe.mts` (`items.set`), with a new
+   test in `src/main/credentials/__tests__/p281-stores-address.test.ts` (stray, vendor, `-U` stray:
+   the service-only first match flips each time, the row count stays 2) and a new probe reading
+   `keychain.updateMovesBehind` checked by `build/conformance-credentials.mjs`.
+2. **A locked keychain is a hang, not exit 36, in a GUI session**: the `keychainReader` comment in
+   `src/main/usage/credentials.ts` rewritten, `p281-usage-read.test.ts` part (c) gains a `hang` mode
+   and a test that the shipping 5 s deadline keeps the previous number under `stale`.
+3. Comments only in `src/main/credentials/stores.ts` and `security.ts` (`-U` keeps the item's access
+   list, not its place); `docs/research/126-claude-usage-reliability.md` §8.4 records the measured
+   order; `build/p281/SPEC.md` §8 and a new §8.1.
+
+Two things the main session did AFTER the fix round, which nobody independent has read:
+
+4. **`build/p281/SPEC.md` §8.2**, the vendor re-derive verifier's findings written down by the main
+   session, because the fix round's brief cut that verifier's report off at 30,000 characters and its
+   findings never reached the fixer: `CLAUDE_SECURESTORAGE_CONFIG_DIR` with a chosen login disagreeing
+   with the vendor on 630 of its 1,680 rows (graded major by that verifier, recorded as the stated
+   limit), `CLAUDE_CODE_CUSTOM_OAUTH_URL` changing the vendor's item name, the plaintext file directory
+   under an empty `CLAUDE_CONFIG_DIR`, the vendor's more lenient exit handling, and the `-i` write above
+   4,032 characters. The stale comment at `src/main/credentials/locks.ts:59-64` was rewritten at the same
+   time.
+5. **`build/p281/probe-p281-meter.mjs`**, the app run that reads his real keychain through the shipping
+   meter, declared as `probe:p281`, classified in `build/verification-checks.mjs`, with
+   `HELPER_USER_FLOOR` 139 → 140. Its safety rests on three claims no verifier has checked: that a
+   harness launch with no knob gives the credentials domain `harnessFileKeepDeps`
+   (`src/main/credentials/index.ts`), whose `security` seam refuses every call, so nothing but the meter
+   can reach his keychain; that `HOME` must be his own because the keychain search list resolves through
+   it (measured: a scratch `HOME` exits 44); and that the script prints no token, account attribute or
+   login. One fixture literal of his user name in `build/conformance-logins.mjs` was replaced by
+   `p281-literal`.
+
+### The mechanism
+
+This is a reverify, so it builds nothing first. Two independent verifiers, then one fix if either says
+`needs_work`, then the same verifiers re-run only the failed items, then stop.
+
+- **Method one, re-run the measurement over the real program.** A scratch keychain under `/private/tmp`
+  made with `security create-keychain`, never in the search list (read before and after), every call
+  through a guard wrapper that refuses `-g`, any keychain path argument and any verb but
+  `find-`/`add-`/`delete-generic-password` and `-i`, and appends the scratch file to every call;
+  synthetic accounts `p281-vendor`, `p281-stray`, `p281-other` only; deleted in a `finally`; attributes-only
+  checks before and after that no `p281-*` item exists in his login keychain. Over it: the corrected
+  fakes' claim (item 1) against the real `add -U`; the locked-keychain claim (item 2) measured by locking
+  the SCRATCH keychain and reading once through the shipping `keychainReader` with its `bin` seam
+  pointed at the wrapper; and the vendor rows of item 4 (`CLAUDE_SECURESTORAGE_CONFIG_DIR` set and
+  empty with a chosen login; `CLAUDE_CODE_CUSTOM_OAUTH_URL` set) driven through the shipping
+  `claudeKeychainService` and `readClaudeCredential` to confirm §8.2 describes what the code does.
+- **Method two, re-derive §8.2 independently.** Read the vendor verifier's actual report in the
+  journal of `wf_c969f45a-9b9` and the installed bundle (`~/.local/share/claude/versions/2.1.274`,
+  fixed-string greps only, `dd` windows, never a regex over the binary) and compare every sentence of
+  SPEC §8.2 and the `79c6c8fe` commit body's stated limits against them. A limit stated wrongly, or a
+  finding of that verifier that §8.2 omits, is a finding here.
+- **The probe's safety (item 5), by reading and by one guarded run.** Trace the launch: `GMUX_PROBES=1`
+  with no `GMUX_HARNESS_KEYCHAIN` and no `GMUX_USAGE_FIXTURE` reaches `harnessFileKeepDeps`; the runner
+  handed to the credentials domain answers `{code: 1}` to every call; the login-presence seam; what else
+  in the app can spawn `security` in that launch. Then ONE run of the probe with the CLAUDE SWITCH LEFT
+  OFF (a new `P281_EXPECT=off` arm, or the existing script with the switch call removed in a copy) to
+  prove the launch itself spawns no `security` and writes nothing under his home: count `security`
+  processes and read the app log through the probe's own output. The real-keychain run
+  (`P281_EXPECT=numbers`) is NOT repeated without his approval and a fresh claude turn.
+- **The attack.** Make the corrected fakes disagree with the real program again (an `add -U` on an item
+  that is not first, a delete of the second of two same-named items, a hex-printed payload); make the
+  reader answer `missing` for a locked scratch keychain; reach his login keychain from the probe's
+  launch configuration by any path.
+
+**The proof, run rather than read:** the scratch-keychain run's before/after search list and the
+attributes-only `p281-*` checks, verbatim; the measured `-U` order; the locked read's elapsed time and the
+meter's state; the §8.2 comparison sentence by sentence; the probe's switch-off run with zero `security`
+spawns; and `conformance:credentials` and `conformance:logins` green after any fix.
+
+### What is NOT in this phase
+
+- No change to what Phase 281 addresses or how; a finding against its design is queued, not fixed here.
+- No `-w` or `-g` against any keychain but the scratch one; nothing written to his keychain, logins
+  directory or credential files; no token byte in any output; no network; no claude turn.
+- No repeat of the real-keychain app run without his approval.
+- Not the four historical probes that still name his item by service alone; they stay unrun.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -30223,3 +30329,5 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 285 QUEUED, a probe goes red because he used his own machine (operator), Tier 3.** In Phase 282's battery `probe:p277` passed all four arms and still exited 1 with "the operator's own tmux server changed under this run": his `-L gmux` count went 52 to 53 because he opened a session of his own. About 130 scripts under `build/` fail on that same bare count, the shared helper's census compares NAMES and is off for 94 of the 117 probes that launch through it, and the exact fix was already made once, in `probe-p165-paint.mjs` by Phase 171 after the same thing happened on 2026-08-30, and never spread. **The rule: a probe fails for what it could have done to his server, never for what he did** — a fresh session is a failure when this run's own scratch manifest knows its id, when it started under the run's scratch root, or when it stays unstamped; otherwise it is his and is printed as a note. A session that WENT stays fatal. The other reading in that table, `probe:p268`'s arm G, is already Phase 283.
 
 - 2026-09-17, **PHASE 284 STARTED, the quiet surround, Tier 2 for the surface and Tier 3 for the geometry.** He confirmed it in his own words: "start a phased workflow for the quiet inset work … it can override my previously rule. and drain it" — the rule being the one unbroken band hairline and research 75's kept edges, which this phase rewrites in the same commit. The study is committed first, without the one capture of another company's product. Then spec, builders with disjoint ownership, an integrator, the main session's gates and app runs, an attack and a re-derivation, and a fix round.
+
+- 2026-09-17, **PHASE 281.1 QUEUED, the reverify the Claude meter's fix round is owed, Tier 3.** He chose it after CLAUDE.md was corrected (`19c317ef`) to carry the lane `Verify -> [Fix -> Reverify]` from docs/method: Phase 281 landed with its fix round unreverified, plus two later edits nobody independent read (SPEC §8.2, where the main session wrote down the vendor verifier's findings after the fix round's brief had cut them off, and `probe:p281`, the app run that reads his real keychain). The reverify re-runs exactly those items: the corrected `security` fakes against the real program on a guarded scratch keychain, the locked-keychain claim, the vendor rows §8.2 states as limits, §8.2 itself against the verifier's journal and the installed bundle, and the probe's safety by reading and by one run with the Claude switch off. Then one fix if needed, then the same verifiers on the failed items, then stop. Runs after 284; the real-keychain run is not repeated without his approval.
