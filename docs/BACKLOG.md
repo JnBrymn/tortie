@@ -29119,6 +29119,58 @@ running-log line. The PR is then closed with a note in the operator's voice link
 - No release.
 
 
+## Phase 283 — a file outside every project, written by the timer once (unexplained, 2026-09-17) QUEUED
+
+**Subject.** `fix(editor): the skip list holds under load` (provisional; the cause decides it)
+
+**First body line.** `Phase 283: the write that should not have happened`
+
+**Semver.** Patch, if anything is found to fix.
+
+**Tier 3.** It is the auto-save timer writing a file it must never write, which is the "can it lose or
+corrupt the person's work" question answered yes, and it was seen once rather than reasoned about.
+
+**Charter.** One reading, during Phase 282's battery on 2026-09-17. `probe:p268`'s arm G holds that a
+file opened from OUTSIDE every project, typed into with auto save on, is never written by the timer.
+It failed once, immediately after two other probes with the load average near 20:
+`G: {"opened":true,"mtimeMoved":true,"textMoved":true,"dirty":false,"stopped":null}` — the file was
+written and the tab read clean, where every other run reads `mtimeMoved:false, textMoved:false,
+dirty:true`.
+
+### What is already known, so no round re-derives it
+
+- **It did not reproduce.** Five further runs at Phase 282's head, one at PR 28's head, one on
+  `cc337e67`, and one with Phase 282's build and main running the probe side by side under equal load:
+  all read the arm correctly.
+- **The skip list is untouched** by Phases 277, 281 and 282. `autoSaveSkipReason`'s clause 6
+  (`fileInRepo(tab.repoPath, tab.path)`) and clause 7 (no open root is a prefix of `tab.path`) are as
+  Phase 268 wrote them.
+- **The Phase 282 attack verifier drove the shipping skip list over 20,000 generated tabs**, moving
+  `repoPath`, the open roots, the remote flag and the read-only answer underneath it, and the shipping
+  `createAutoSave` over seven arms that move each of those at the moment the timer fires. It never
+  answered `null` for a tab outside every root, and never called `deps.save`.
+- **`tab-io.ts` carries a second guard** on the same question: `if (reason === 'auto' && !guarded)
+  return false;` with `const guarded = !neverSaved && fileInRepo(tab.repoPath, tab.path);`.
+
+So a repeat needs something neither of those reaches: the ORDER in which the probe's own drive,
+`openOutside`, the project list and the timer arrive, under a machine that is slow enough to separate
+them.
+
+### The mechanism to try
+
+Reproduce before fixing. Run `probe:p268` with the machine deliberately busy — another probe running
+beside it, as the failing run had — and with arm G's own waits lengthened, capturing the tab's
+`repoPath`, the open roots, the skip reason and the timer's decision at each tick rather than only the
+end state. If it reproduces, the reading names the clause; if twenty loaded runs do not reproduce it,
+say so and close the entry with the readings, rather than changing a rule nothing has shown to be
+wrong.
+
+### What is NOT in this phase
+
+- No change to the skip list, the timer or the doors on suspicion alone.
+- No new gate rule until a reading names the clause it would pin.
+- No release.
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29856,3 +29908,5 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 282 QUEUED, the press that moves on (PR 28, JnBrymn), Tier 3.** He asked for the pull request to be built as a queued phase on its own branch, fixed with the standard workflow, committed to the PR as it goes, and closed and integrated once verified. The PR makes ⌥↩ and ⌥⌫ in the Redline view move to the next change and ⌥↓ ⌥↑ loop, and a review over main with it merged found one BLOCKING defect, **typing in the Redline view comes out scrambled**, confirmed in the app (`probe:p237` fails 5 checks with the PR and passes with its one `live-text.ts` line put back), one MAJOR (the move carries an index, so an agent write above the change sends ⌥⌫ back onto a change the person kept) and six MINOR (merged neighbours, a second chord during the write, the keyboard dropped after the last rewind, a watcher read rolling a rewind back, a keystroke in transit, the helper floor at 139 of 140) plus credit written as the operator's. The full battery was green throughout, which is why each finding was reproduced twice by different methods before it was written here.
 
 - 2026-09-17, **PHASE 281 LANDED, the Claude meter reads the item Claude Code reads, `79c6c8fe`, version 0.107.0 unmoved, no tag, pushed.** **Proved in his own app, with his approval, after a turn in a default-login claude session**: one run at the parent and one at HEAD, never at once, two polls a minute apart — the parent drew no numbers and logged `usage.read.failed claude signed-out` twice, HEAD drew both windows and the plan word on both polls and logged nothing. Every read, presence check, attribute read, write, staged write and delete of a Claude Code item now carries `-a` with the vendor's own account rule and asks the ONE name its service rule gives; the plain-name fallback under `CLAUDE_CONFIG_DIR`, which the Phase 280 verifier drove into drawing one account's numbers under another's name, is gone; `security.ts` refuses a vendor name with no account without spawning; and only exit 44 draws the sign-in line, so a keychain that cannot be read keeps the last numbers stale. The write side moved with it: a switch used to commit `add -U -a "unknown"` onto the stray, and now writes where Claude Code reads. **The scratch-keychain verifier measured what no model knew**: `add -U` moves the updated item BEHIND every other item of that name, so each Claude Code refresh puts its own item back behind the stray — which is why the stray kept winning — and both fake `security` models were corrected. **It also repaired conformance:logins**: since Phase 200 its ablated copies had been dying on an import error that the gate counted as red, so none of those 16 ablations had proved anything. The first app run proved nothing and said so: a scratch `HOME` makes `security` answer 44 for every item, because the keychain search list resolves through the home directory, so `probe:p281` uses his own `HOME` with the credentials domain on its file store. Stated limits: a chosen login under `CLAUDE_SECURESTORAGE_CONFIG_DIR`, `CLAUDE_CODE_CUSTOM_OAUTH_URL`, items an earlier build wrote under a copied account, and the `-i` 4,032-character write.
+
+- 2026-09-17, **PHASE 282 LANDED, the press that moves on (PR 28, JnBrymn), `d8debd9d` + `3ea54ad9` + `117e7a85`, version 0.107.0 unmoved, no tag, pushed; PR 28 closed.** His feature landed under his name and the two fix rounds under the operator's: in the Redline view ⌥↩ and ⌥⌫ now move to the change that followed the one pressed, ⌥↓ and ⌥↑ come round at the ends, and a rewind redraws in 25 ms instead of waiting about 1.1 s for the watcher. **A four-lens review over the branch merged onto main found one BLOCKING defect and six more, each reproduced twice by different methods**: typing in the Redline view came out scrambled and a save wrote it to disk (`probe:p237` failed five checks with the branch's `live-text.ts` line in and passes with it out, measured in the app); the move carried an INDEX, so an agent's write above the pressed change sent the next ⌥⌫ onto a change the person had kept; a redraw that merged neighbours did the same with no outside write; a second chord inside the write acted on the change being rewound; rewinding the only change dropped the keyboard so ⌥⇧⌫ did nothing; a keystroke in transit was invisible to the adoption; and a watcher read crossing the rename rolled the tab back in 37 of 500 interleavings. **The verification round then found three more in the fixes themselves**: a hold that one keystroke could freeze for the life of the mount, after which every accept on that tab was refused; a baseline clause that dropped the NEWER of two overlapping reads, so the editor stopped following an agent's edits (refreshRepo is now one walk per project); and a landing fallback reached by an ordinary re-cut that could land on the agent's new change. conformance:save gains rules 25 to 27c, ablation:p268 goes 18 to 27 arms, conformance:redline rule 40 is rewritten with 11 ablations of the shipping source, and probe:redlinemoveon gains five arms. The floor is 141, counting both this round's probe and Phase 281's. One reading is unexplained and queued as Phase 283: `probe:p268` arm G failed once under load and in eight further runs did not.
