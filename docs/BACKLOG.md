@@ -28658,6 +28658,140 @@ Resolution, from the audit:
 - Run the full suite under real concurrent load, which is the condition the audit observed, and report what happened rather than only what passed.
 
 
+## Phase 280 — why Claude usage is flaky and Codex usage is not (operator reported, 2026-09-16) RESEARCH ONLY
+
+**Subject.** `docs(research): the two ways usage arrives, and why one of them is unreliable`
+
+**First body line.** `Phase 280: why Claude usage goes blank`
+
+**Semver.** None. This phase ships `docs/research/126-claude-usage-reliability.md` and touches no shipping
+byte. The repair is a later phase that reads it.
+
+**Tier 3, and the domain earns it rather than the surface.** Every path in it reads the person's
+CREDENTIALS. "Does it spawn a process, hold his credentials, or send his words anywhere?" — it spawns
+`/usr/bin/security`, it holds an OAuth token, and it makes an HTTPS request to a vendor with that token
+attached. A research phase here still touches the one domain where a mistake writes a token somewhere it
+can be read. **No token byte may appear in the document, in a log, in a probe's output or in the commit
+body, and `-g` and `-w` are never passed to `security`.**
+
+**Charter.** The operator, 2026-09-16, with a screenshot of the usage panel: he is signed in as
+`greg@itavero.software`, the Claude row says **"Login: greg@itavero.software"** and directly beneath it
+**"Sign in with Claude Code to see usage."** — the panel knows who he is and claims he is signed out. The
+Codex row beside it reads "Pro plan, 88% wk, Resets in 2d 15h" and is stable. His words: *"if, in tortie,
+I go into a claude code session and type slash usage then it tends to update and reset… I want it to be
+as good and stable as the codex usage monitoring and so I think something about the status line approach
+we use might need to change."*
+
+### What was measured before this entry was written, so no round re-derives it
+
+**THERE ARE TWO PATHS INTO THE CLAUDE NUMBER AND ONLY ONE INTO THE CODEX NUMBER.** That asymmetry is the
+whole shape of the phase.
+
+- **The poll.** `src/main/usage/service.ts:350-374` makes an HTTPS request for BOTH providers —
+  `CLAUDE_USAGE_HOST`/`CLAUDE_USAGE_PATH` with `claudeUsageHeaders(cred.token)`, and the Codex pair
+  beside it. Identical shape. Both need a credential first.
+- **The statusline tap, which is Claude's alone.** `src/main/usage/statusline.ts` documents it: Claude
+  Code hands its status-line command a JSON payload carrying a `rate_limits` block on every turn, and
+  Tortie reads it out of the settings file it already writes per session. **It only produces a number
+  while a session is running and producing turns.** Codex has no equivalent and does not need one.
+
+So the Claude row is fed by a passive tap that goes quiet when nothing is running, PLUS a poll that must
+succeed on its own. **His observation that `/usage` makes it appear is consistent with the tap being the
+thing that works and the poll being the thing that does not** — typing in a session produces turns,
+turns produce a payload, the number appears, and then it goes stale again.
+
+**THE SENTENCE HE SEES IS `signed-out`.** `src/renderer/app/usage-copy.ts:104` maps that exact string to
+the `signed-out` state and to nothing else, so `readClaudeCredential` returned `{ kind: 'missing' }`.
+The panel drew his login name from a different reader, which is why it can name him and claim he is
+signed out in the same breath.
+
+**AND THE CREDENTIAL READER HAS A BRANCH WITH NO FALLBACK.** `src/main/usage/credentials.ts:229-247`:
+
+```
+loginDir set        -> [ claudeScopedService(loginDir) ]                       // ONE service, no fallback
+CLAUDE_CONFIG_DIR   -> [ claudeScopedService(own), CLAUDE_KEYCHAIN_SERVICE ]   // two, with fallback
+neither             -> [ CLAUDE_KEYCHAIN_SERVICE ]
+```
+
+The file's own comment at `:76-79` says why the fallback exists: *"A reader that only tried the scoped
+name would find nothing on this machine and wrongly conclude the person is signed out."* **That is
+exactly the failure he is looking at, and the first branch is the one without the protection the comment
+describes.**
+
+**MEASURED ON HIS MACHINE, attributes only, no `-g`, no `-w`, no value read.** The plain keychain item
+`Claude Code-credentials` EXISTS. He has three Claude login directories, and they are not alike:
+
+| login dir | scoped keychain item | `.credentials.json` | contents |
+| --- | --- | --- | --- |
+| `162d9e5e3eeec40e` | **none** | **none** | **empty directory** |
+| `240800e63706721c` | present | none | has `backups/` |
+| `ec0e1e77dd0c3bc4` | present | none | has `backups/` |
+
+**One login directory holds nothing at all.** If that is the chosen one, the reader tries its scoped
+service, finds nothing, does not fall back to the plain item that DOES exist, and returns `missing` —
+which draws his sentence exactly. That is a hypothesis with a measurement behind it and it is the first
+thing the phase must confirm or refute, **not a conclusion this entry has reached.**
+
+### What the research must answer
+
+1. **WHICH LOGIN IS CHOSEN, and is it the empty one?** Read it from the shipping reader rather than by
+   guessing at files. If it is the empty directory, say how it came to exist and be chosen — a login
+   added and never completed, a swap that half-applied, a directory created before its credential was
+   written.
+2. **IS THE MISSING FALLBACK THE CAUSE, OR ONLY A CAUSE?** Drive the shipping `readClaudeCredential`
+   against each of the three directories and record what each returns. Then answer the design question
+   the comment raises: should a chosen login fall back to the plain item? **Argue both ways.** A
+   fallback means a person who chose login A can be shown login B's usage, which is its own defect and
+   arguably worse than a blank. A fallback that is wrong about WHOSE numbers these are must not ship.
+3. **WHAT DOES THE POLL DO WHEN IT FAILS, AND HOW OFTEN DOES IT TRY?** Find the cadence, the retry and
+   the backoff. Does a failure stick until something forces a re-read? His word is "flaky", which
+   usually means recovers-then-fails-again, so establish the actual cycle rather than the single state.
+4. **HOW DO THE TWO PATHS INTERACT?** When the tap posts a number and the poll then answers
+   `signed-out`, which wins? Does a fresh number get overwritten by a failure? He says it "updates and
+   resets", which is the shape of exactly that. Find the precedence rule and say whether it is
+   deliberate.
+5. **WHY IS CODEX STABLE?** Not rhetorically — measure it. It has one path and it works. Is that
+   because its credential lives somewhere more reliable, because its login model is simpler, or because
+   it never had a tap to be confused by? The answer decides whether the repair is "make Claude's poll as
+   good as Codex's" or "make the tap authoritative".
+6. **THE EXPIRY PATH.** `usage-copy.ts` has a separate `expired` sentence, *"Run Claude Code to refresh
+   the login."* Establish when a token expires, whether an expired token reads as `expired` or as
+   `missing`, and whether he is silently in the first while being shown the second. A person told to
+   sign in when the real answer is "your token aged out" is being sent to the wrong remedy.
+7. **WHAT THE OPERATOR ACTUALLY ASKED.** He believes the statusline approach may need to change. The
+   phase must test that belief rather than adopt it: it may be that the tap is fine and the credential
+   read is the whole fault, in which case changing the tap would be work that fixes nothing. **Say which,
+   with evidence, and say so plainly if he is wrong.**
+
+### Proof, run rather than read
+
+- **Reproduce the blank state on demand.** A scratch profile with a login directory shaped like the
+  empty one, and the panel read through the shipping bridge. If it cannot be reproduced, the hypothesis
+  above is wrong and the phase says so before going further.
+- **Drive the shipping readers over his REAL shape, read-only.** `readClaudeCredential` and
+  `readCodexCredential` against each login directory. Report the RESULT KIND only — `ok`, `missing`,
+  `api-key`, `expired` — and **never a token, never a length, never a prefix.**
+- **Watch the cycle rather than the snapshot.** Run one Electron long enough to see the poll fire more
+  than once, with a session producing turns and then going quiet, and record what the panel says at each
+  point. His complaint is about behaviour over time and a single reading cannot describe it.
+- **Compare against Codex in the same run**, since it is the control that works.
+- **Method 2, re-derive the credential search independently**: enumerate every place a Claude credential
+  can live — the plain keychain item, a scoped item per login, `CLAUDE_CONFIG_DIR`, a
+  `.credentials.json` under any of them — and build the table of which the reader tries in which branch.
+  A location the reader never tries in a branch where it could hold the answer is a finding.
+
+### What is NOT in this phase
+
+**It repairs nothing.** It writes one research document and queues the repair as its own phase with its
+own tier. **No token byte anywhere** — not in the document, a log, a probe's output or the commit body —
+and `security` is never given `-g` or `-w`. **Nothing writes to his keychain, his logins directory, his
+`~/.claude`, or any credential file**; every probe uses a scratch HOME and a scratch profile. No agent is
+launched, no turn is run, no token is spent. It does not change the statusline tap, the settings file the
+activity hooks already write, or the per-session token in it — Phase 182 owns that mechanism and a
+research phase does not edit it. And it does not adopt the operator's own diagnosis: he may be right that
+the tap must change, and the phase's job is to find out rather than to agree.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29375,3 +29509,5 @@ cycle rather than only the evening it was written.
 - 2026-09-16, **v0.107.0 RELEASED from `b770d035`, tortie.sh updated, and issues 25 and 20 and PR 21 all closed.** Durability `35166734953` was DISPATCHED explicitly on the candidate rather than inherited from the nightly, because the last run was on `cd524701` and predated Phases 275 and 276; it passed, gates were green on `f2d173fd` beneath it, and only then was the tag pushed. The signed build notarized first time and the app INSIDE the DMG reads `accepted` / `source=Notarized Developer ID` / `origin=Developer ID Application: Gregory Ceccarelli (4GRQMF5T5U)` at `CFBundleShortVersionString` 0.107.0, with `codesign --verify --deep --strict` exit 0 and `xcrun stapler validate` worked; the stable download answers 200. **The release carries four phases**: 273 a symlinked project saves and a refusal says what it measured, 274 one folder is one project however it is spelled, 275 shell variables set once for every agent, 276 the login shell asked once rather than once per session. tortie.sh is at `37e9e34`: the changelog synced through 0.107.0 and the Settings page REWRITTEN where this release made it wrong — it described shell variables as a per-agent thing because that is what they were, and it now says named once under Every agent with each card showing what it inherits, the list scrolling and taking several at once, and the **Re-read shell** button named for the case the watched files cannot show. **THE TILDE HALF OF PR 21 IS NOT A BUG AND THE MEASUREMENT IS RECORDED HERE SO NO LATER ROUND RE-OPENS IT.** John reported that Tortie's captured PATH preserved literal `~` entries and a phase was nearly queued for it. Measured 2026-09-16: a literal `~` in PATH does not resolve in zsh either — `export PATH="~/bin:$PATH"` then `command -v faketool` finds NOTHING, while `$HOME/bin` finds it instantly — so Tortie copying the PATH faithfully MATCHES the shell exactly, and expanding it would make Tortie find binaries a person's own terminal cannot, which is a worse defect than the one it closes. His observation was real and his diagnosis was wrong; the fix is one character in his own `.zshrc`. The `-il` half WAS addressed, by a different route: an interactive shell for the PROBE rather than for every session, since an interactive shell measured ~1,000 ms against ~10 ms for a login shell, and his version never reached pi because `withLoginShellFlag` is called only on the plain-shell branch. **STILL OPEN AND UNQUEUED, his call**: issue 26 richer status icon colours, issue 23 file state is weird, issue 14 transfer a conversation to a different agent.
 
 - 2026-09-16, **PHASES 277, 278 and 279 QUEUED from the 0.105.0 architecture audit, and the audit and its two fixtures are COMMITTED here rather than left untracked in his checkout.** The audit scored 32/36 at `6eb35f73` with four findings, and **every one was re-measured at `5a604e26` before these entries were written rather than trusted from the document.** The auditor shipped two counterexample fixtures and they are the closure tests; copied into a current tree and run: `auto-save-interleavings` fails 3 of 4 (`a pending delay may not write after switching to off`, `…to onFocusChange`, and `an acknowledgement for older text keeps a newer edit dirty and scheduled`, the steady-buffer control passing), and `env-cap-disclosure` fails 1 of 2 (`untrusted prefix entries cannot silently displace an authenticated name`, the ordinary-name control passing). The two policy cases fail with a guarded write ACTUALLY SUBMITTED after the setting said stop, so this is not a stale document: it reproduces today, after 268, 275 and 276. **F3's FIRST half is CLOSED** by Phase 270 — `remote-sessions.ts` reads the passthrough through `remote-env-carriage.ts` and `remote-env-probe.ts` — so only its cap half is queued. **F4 passes in isolation at 9 of 9 and its file is untouched since the audit commit**, which is exactly the finding: it is not a failure that reproduces on demand, it is a fixture that can fail BEFORE reaching what it tests, reporting a missing readiness file identically to a leaked descendant. **277 is F1 and F2 together because they are one file and one fixture**, and F1 is the one that can lose work: a tab reports itself CLEAN while holding unsaved typing, and `closeTab` prompts only when `dirty` is true, so the question that exists to save a person's work never gets asked. The entry records what the audit records, that the unconditional clean patch PREDATES Phase 268, so no round blames auto save alone. **278 must answer Phase 275's own recorded reason for not fixing it** — "a sanitizer that reorders admits a list nobody wrote" — rather than sorting authorised names to the front and calling it done, and the entry states that the defect FAILS CLOSED, no extra name authorised and no value resolved, so nobody reads it as an escalation. **279 carries the audit's three forbidden closures verbatim**: not by rerunning until green, not by deleting the assertion, not by widening a production timeout. Four points are recoverable, being State ownership, Lifecycle, Failure flow and Test seam, and the restore trust boundary at `restore.ts:962` is explicitly NOT in any of them because the audit calls recipe authentication a separate durability and security design.
+
+- 2026-09-16, **PHASE 280 QUEUED, why Claude usage is flaky and Codex usage is not (operator reported), Tier 3, RESEARCH ONLY.** He sent a screenshot of the usage panel showing the Claude row reading **"Login: greg@itavero.software"** and directly beneath it **"Sign in with Claude Code to see usage."** — the panel names him and claims he is signed out in the same breath — while the Codex row beside it reads "Pro plan, 88% wk, Resets in 2d 15h" and is stable. His words: typing `/usage` inside a Tortie claude session makes it "update and reset", and he thinks "something about the status line approach we use might need to change". **THE SHAPE, measured before the entry was written.** There are TWO paths into the Claude number and only ONE into Codex's: the poll at `service.ts:350-374` is identical for both providers and needs a credential first, while the statusline tap at `statusline.ts` is Claude's alone and reads a `rate_limits` block out of the settings file the activity hooks already write — **so it only produces a number while a session is RUNNING and producing turns.** That is consistent with his observation: the tap works, the poll does not, and `/usage` makes turns which make the tap fire. **THE SENTENCE IS `signed-out`** — `usage-copy.ts:104` maps that exact string to that state and nothing else, so `readClaudeCredential` returned `missing`, while the panel drew his login NAME from a different reader. **AND THE READER HAS A BRANCH WITH NO FALLBACK**: `credentials.ts:229-247` tries `[claudeScopedService(loginDir)]` ALONE when a login is chosen, while the `CLAUDE_CONFIG_DIR` branch tries the scoped name AND the plain one — and that file's own comment at `:76-79` says why the fallback exists, being that "a reader that only tried the scoped name would find nothing on this machine and wrongly conclude the person is signed out", which is exactly what he is looking at. **MEASURED ON HIS MACHINE, attributes only, no `-g`, no `-w`, no value read**: the plain `Claude Code-credentials` keychain item EXISTS, and of his three claude login directories `240800e63706721c` and `ec0e1e77dd0c3bc4` each have a scoped keychain item and a `backups/` directory while **`162d9e5e3eeec40e` is an EMPTY DIRECTORY with no scoped item and no credentials file** — so if that is the chosen one the reader finds nothing, does not fall back to the plain item that exists, and returns missing. **That is a hypothesis with a measurement behind it and the entry is explicit that it is not a conclusion**: the phase confirms or refutes it first. The entry also refuses to adopt his own diagnosis — he may be right that the tap must change, and it may instead be that the tap is fine and the credential read is the whole fault, in which case changing the tap would be work that fixes nothing, so the phase says WHICH with evidence and says so plainly if he is wrong. It must also argue BOTH WAYS on the fallback, because a chosen login falling back to the plain item can show one person's usage under another person's name, which is arguably worse than a blank. **NO TOKEN BYTE anywhere, `-g` and `-w` never passed, nothing written to his keychain, his logins directory or any credential file**, and the repair is a later phase with its own tier.
