@@ -204,12 +204,16 @@ const HELPER = 'electron-run.mjs';
  * scratch `~/.zshrc` eleven ways a real editor writes a file and reads back
  * which GENERATION of an invented sentinel each pane received.
  *
+ * PHASE 281 RAISED IT FROM 139 TO 140, for build/p281/probe-p281-meter.mjs, the
+ * app run that reads the Claude meter's state at the parent and at HEAD over
+ * the person's real keychain, two polls apart.
+ *
  * RAISE IT WHEN YOU ADD ONE, in the same commit, and that is not optional
  * bookkeeping. Adding a probe cannot turn this gate red, so a floor left where
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-const HELPER_USER_FLOOR = 139;
+const HELPER_USER_FLOOR = 140;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

@@ -6,8 +6,8 @@
  *
  * `<root>/kept.json`, mode 0600, beside `logins.json`. One row per slot,
  * carrying the address the vendor's own file named, the DIGEST of the
- * credential in that slot, the keychain account attribute a write back should
- * preserve, and when it was taken. The credential itself is in the store
+ * credential in that slot, the keychain account attribute the item was found
+ * under, and when it was taken. The credential itself is in the store
  * `./vault.ts` owns, which on macOS is the keychain, and it is never in this
  * file, in the logins file, in the manifest or on the wire.
  *
@@ -45,7 +45,13 @@ export interface KeptRecord {
   subject: string | null;
   /** The sha256 of the credential in this slot, in hex. */
   digest: string;
-  /** The keychain item's account attribute, so a write back preserves it. */
+  /**
+   * The keychain account attribute the item was FOUND under, or null when the
+   * store is not a keychain item. A record and nothing more: no write reads it,
+   * because every write to a vendor item takes the vendor's account rule again
+   * (Phase 281), and copying an account off an item is how a write once landed
+   * on a stray under the same name.
+   */
   account: string | null;
   /**
    * The slot this account was PROMOTED OUT OF, when it was promoted.

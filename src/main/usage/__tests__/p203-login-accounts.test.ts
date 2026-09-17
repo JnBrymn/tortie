@@ -14,7 +14,6 @@ import {
   LOGIN_FACTS_TTL_MS,
   claudeAccountFileFor,
   claudeCredentialFileFor,
-  claudeServicesFor,
   codexAuthFileFor,
   emailFromClaudeJson,
   emailFromCodexAuth,
@@ -26,7 +25,7 @@ import {
   sanitizeAccountEmail,
   setLoginAccountDeps
 } from '../login-accounts';
-import { claudeScopedService } from '../credentials';
+import { CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT, claudeScopedService } from '../credentials';
 
 /** A token shaped string whose payload is whatever claims are handed in. */
 function idToken(claims: unknown): string {
@@ -41,18 +40,24 @@ function idToken(claims: unknown): string {
 function deps(over: Partial<LoginAccountDeps> = {}): {
   deps: LoginAccountDeps;
   asked: string[];
+  /** PHASE 281. The account each presence ask carried, in the same order. */
+  accounts: string[];
   opened: string[];
   read: string[];
 } {
   const asked: string[] = [];
+  const accounts: string[] = [];
   const opened: string[] = [];
   const read: string[] = [];
   // THE RECORDING WRAPS THE OVERRIDE rather than being replaced by it, so a
   // test that decides an answer still sees what was asked for.
   const base: LoginAccountDeps = {
-    keychainHas: async (service) => {
+    keychainHas: async (service, account) => {
       asked.push(service);
-      return over.keychainHas === undefined ? false : over.keychainHas(service);
+      accounts.push(account);
+      return over.keychainHas === undefined
+        ? false
+        : over.keychainHas(service, account);
     },
     exists: async (path) => {
       opened.push(path);
@@ -64,9 +69,10 @@ function deps(over: Partial<LoginAccountDeps> = {}): {
     },
     env: over.env ?? {},
     home: over.home ?? '/Users/person',
-    now: over.now ?? ((): number => 1_000)
+    now: over.now ?? ((): number => 1_000),
+    ...(over.osUserName === undefined ? {} : { osUserName: over.osUserName })
   };
-  return { deps: base, asked, opened, read };
+  return { deps: base, asked, accounts, opened, read };
 }
 
 describe('sanitizeAccountEmail', () => {
@@ -212,15 +218,40 @@ describe('where each file is', () => {
     );
   });
 
-  it('gives a login the scoped service and nothing else', () => {
-    const { deps: d } = deps();
-    expect(claudeServicesFor(d, '/data/logins/claude/aa')).toEqual([
-      claudeScopedService('/data/logins/claude/aa')
-    ]);
-    expect(claudeServicesFor(d, null)).toEqual(['Claude Code-credentials']);
-    expect(claudeServicesFor(deps({ env: { CLAUDE_CONFIG_DIR: '/c' } }).deps, null)).toEqual(
-      [claudeScopedService('/c'), 'Claude Code-credentials']
-    );
+  // PHASE 281 REWROTE THIS ROW. It asked `claudeServicesFor`, which is gone,
+  // and pinned `[scoped('/c'), 'Claude Code-credentials']` for a process
+  // `CLAUDE_CONFIG_DIR`: the plain-name fallback research 126 §5 refutes. It
+  // now drives presence itself and pins the ONE name, with the account.
+  it('gives a login the scoped service and nothing else', async () => {
+    const login = deps();
+    await readLoginPresence(login.deps, 'claude', '/data/logins/claude/aa');
+    expect(login.asked).toEqual([claudeScopedService('/data/logins/claude/aa')]);
+    expect(login.accounts).toEqual([CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT]);
+
+    const plain = deps();
+    await readLoginPresence(plain.deps, 'claude', null);
+    expect(plain.asked).toEqual(['Claude Code-credentials']);
+    expect(plain.accounts).toEqual([CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT]);
+
+    const own = deps({ env: { CLAUDE_CONFIG_DIR: '/c', USER: 'p281-vendor' } });
+    await readLoginPresence(own.deps, 'claude', null);
+    expect(own.asked).toEqual([claudeScopedService('/c')]);
+    expect(own.accounts).toEqual(['p281-vendor']);
+  });
+
+  it('asks the user name seam only when USER is unset', async () => {
+    const named = deps({ osUserName: () => 'p281-vendor' });
+    await readLoginPresence(named.deps, 'claude', null);
+    expect(named.accounts).toEqual(['p281-vendor']);
+  });
+
+  it('never says present on the strength of a plain item under a set config dir', async () => {
+    const { deps: d, asked } = deps({
+      env: { CLAUDE_CONFIG_DIR: '/c', USER: 'p281-vendor' },
+      keychainHas: async (service) => service === 'Claude Code-credentials'
+    });
+    expect(await readLoginPresence(d, 'claude', null)).toBe(false);
+    expect(asked).not.toContain('Claude Code-credentials');
   });
 });
 

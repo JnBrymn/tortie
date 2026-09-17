@@ -221,7 +221,7 @@ export async function migrateUnscopedVault(d: MigrateDeps): Promise<MigrateResul
     const staged = unscopedVaultServiceFor(stagedSlotFor(slot));
     if ((await safeRead(d.runner, staged)) !== null) {
       // ONLY A DELETE THAT SUCCEEDED IS COUNTED AS ONE (Phase 219).
-      if (await keychainDelete(d.runner, staged)) out.deleted += 1;
+      if (await keychainDelete(d.runner, staged, null)) out.deleted += 1;
       else out.failed += 1;
     }
     const legacy = unscopedVaultServiceFor(slot);
@@ -257,7 +257,7 @@ export async function migrateUnscopedVault(d: MigrateDeps): Promise<MigrateResul
       out.kept += 1;
       continue;
     }
-    if (await keychainDelete(d.runner, legacy)) out.deleted += 1;
+    if (await keychainDelete(d.runner, legacy, null)) out.deleted += 1;
     else out.failed += 1;
   }
   return out;
@@ -265,7 +265,7 @@ export async function migrateUnscopedVault(d: MigrateDeps): Promise<MigrateResul
 
 async function safeRead(runner: SecurityRunner, service: string): Promise<string | null> {
   try {
-    return await keychainRead(runner, service);
+    return await keychainRead(runner, service, null);
   } catch {
     return null;
   }

@@ -102,7 +102,8 @@ export function installUsageFixture(): void {
   // for the meter or for the list, and the only credentials that exist are the
   // synthetic files the probe wrote into directories the probe made. Every
   // other seam stays the shipped one, so what the list reads is real files
-  // through the real reader.
+  // through the real reader. PHASE 281: presence now asks by service AND
+  // account; this answer ignores both, so it still refuses every item.
   setLoginAccountDeps({ ...defaultLoginAccountDeps(), keychainHas: async () => false });
   // PHASE 204. THE PROBE'S APP OWNS NO KEYCHAIN ENTRY OF HIS EITHER. The store
   // Tortie keeps accounts in becomes a FILE under the probe's own profile, and
@@ -123,6 +124,11 @@ export function installUsageFixture(): void {
     // NO KEYCHAIN, EVER, under this knob. A miss is what the reader is
     // designed for: it falls through to the credentials file, which is the
     // only place a fixture login has anything.
+    //
+    // PHASE 281. Null is the reader's NO SUCH ITEM answer, and it has to stay
+    // null rather than a throw: a throw is the reader's "could not be read",
+    // which draws a fixture login with no file as unavailable instead of the
+    // signed out row the Phase 202 probe drives.
     keychain: async () => null,
     transport: async (req: UsageRequest): Promise<UsageResponse> => {
       let bag: Record<string, { status?: number; body?: unknown }> = {};

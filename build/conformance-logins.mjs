@@ -3,11 +3,17 @@
  * `npm run conformance:logins`, the cheap gate on the logins domain
  * (Phase 202).
  *
- * About a second. It launches no Electron, opens no window, starts no tmux
- * server, spawns no agent, makes no request, and reads nothing under the
- * person's home: the only paths it touches are the repository and a scratch
- * directory it makes and removes. Every runtime number it prints came from the
- * SHIPPING modules, run under node by build/logins-conformance-probe.mts.
+ * About ten seconds since Phase 281, nearly all of it the probe, run once over
+ * the tree, once over an unedited copy and once per ablation. It launches no
+ * Electron, opens no window, starts no tmux server, spawns no agent, makes no
+ * request, opens no keychain, never runs `/usr/bin/security`, and reads
+ * nothing under the person's home: the only paths it touches are the
+ * repository, the dot-named sibling copies it removes in a `finally`, and a
+ * scratch directory it makes and removes. The only processes started below the
+ * probe are the `/bin/sh` stand-ins for `security` it writes for rules 13 and
+ * 16, each started and waited for by the shipping reader, and each exits at
+ * once. Every runtime number it prints came from the SHIPPING modules, run
+ * under node by build/logins-conformance-probe.mts.
  *
  * ## Why a gate rather than unit tests alone
  *
@@ -102,6 +108,53 @@
  *      handler's OWN span by matching braces, because a return in another
  *      handler is not a return in this one, and the rule is about leaving
  *      rather than about the words in the sentence.
+ *
+ * ## Phase 281 added five, and the item they are about is the one Claude Code reads
+ *
+ * Research 126 §2.4 measured the defect: Tortie asked the keychain for Claude
+ * Code's item by SERVICE alone, the operator's keychain held two items under
+ * that name, and `security` handed back a stray under another account while
+ * every claude session read the one under his user name. §5 read the vendor's
+ * own rule out of the bundle, and it asks by service AND account, one name,
+ * with no plain name after a scoped one.
+ *
+ *  13. THE ACCOUNT IS SENT, read from the source and driven. The presence
+ *      check's argv and the meter's reader's argv each carry `-a` with the
+ *      account parameter and `-s` with the service parameter, the presence
+ *      argv still with no `-w`, both default seams hand the vendor rule the
+ *      machine's user name, and both seam calls pass the account. Driven, the
+ *      presence seam and the meter's seam are asked the one vendor name under
+ *      the synthetic vendor account, a stray under the same name reads absent,
+ *      and the SHIPPING `keychainReader` hands a program standing in for
+ *      `security` exactly `-a <account> -s <service> -w` and refuses an empty
+ *      account before anything is started.
+ *  14. NO PLAIN NAME AFTER A SCOPED ONE, read from the source of both domains.
+ *      No array, push sequence or revived `claudeServicesFor` names the plain
+ *      vendor name after a scoped one, and `claudeKeychainService` answers
+ *      exactly five arms, one per branch of the vendor rule, each exactly one
+ *      name, the scoped ones hashing the login directory, then
+ *      `CLAUDE_SECURESTORAGE_CONFIG_DIR`, then `CLAUDE_CONFIG_DIR`.
+ *  15. BRANCH B ANSWERS MISSING, driven through the shipping
+ *      `readClaudeCredential`: `CLAUDE_CONFIG_DIR` set, no scoped item, and a
+ *      usable plain item under the stray account or under the vendor account
+ *      itself, beside a control whose scoped item must still be found.
+ *  16. A MISS IS NOT A FAILURE, driven through the shipping `keychainReader`
+ *      over programs the probe writes and waits for: exit 44 is null, and 36,
+ *      1 and a program that cannot start all throw, so the meter answers
+ *      `missing` for 44 alone and throws for the rest unless the file stands in.
+ *  17. A DECOMPOSED DIRECTORY NAMES THE COMPOSED ITEM, driven: every way a
+ *      directory reaches a service name hashes its NFC form, re-derived here.
+ *
+ * AND IT REPAIRED THE ABLATIONS, which had proved nothing since Phase 200. The
+ * copies went to the system temporary directory, where the usage copy's import
+ * of `../proc/guarded` cannot resolve, so the probe died on import under EVERY
+ * ablation and the verdict read `['error']`, which differs from the live one:
+ * sixteen "red" ablations, all for the wrong reason. The copies are SIBLINGS
+ * of `logins/` and `usage/` under `src/main/` now, named with a leading dot and
+ * removed in a `finally`, the way build/conformance-credentials.mjs already
+ * placed its own. An unedited copy must read exactly what the tree reads before
+ * any ablation counts, a probe that cannot run is a FINDING rather than a red,
+ * and the shipping files' sha256 is compared before and after.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -118,7 +171,14 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { functionBodyOf } from './scan-source.mjs';
+import {
+  blockAt,
+  callArguments,
+  closeOf,
+  functionBodyOf,
+  namedFunctions,
+  stripComments as stripCommentsExact
+} from './scan-source.mjs';
 import { tsxCli } from './ts-runner.mjs';
 
 const TAG = '[logins]';
@@ -127,6 +187,10 @@ const DOMAIN = join(repoRoot, 'src/main/logins');
 /** Phase 203. The account reader, which is in the usage domain on purpose. */
 const USAGE = join(repoRoot, 'src/main/usage');
 const ACCOUNTS_FILE = join(USAGE, 'login-accounts.ts');
+/** Phase 281. The meter's reader and the vendor copies. */
+const CREDENTIALS_FILE = join(USAGE, 'credentials.ts');
+/** Phase 281. The credential domain, which rule 14 reads beside the usage one. */
+const CREDENTIALS_DOMAIN = join(repoRoot, 'src/main/credentials');
 
 const failures = [];
 const notes = [];
@@ -384,7 +448,552 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// The probe, over the tree and over three ablated copies of it.
+// Phase 281. Rules 13 to 17, THE ITEM CLAUDE CODE READS.
+//
+// These read with build/scan-source.mjs's comment stripper rather than this
+// file's own, because the source they read holds a regular expression
+// (`CLAUDE_KEYCHAIN_ACCOUNT_RE`) and template literals that a line-comment
+// regex would cut in half. The older rules keep the stripper they were proved
+// with.
+//
+// Every finding carries the rule it belongs to, so an ablation is asked to
+// turn ITS rule red rather than to change something, anything, somewhere.
+// ---------------------------------------------------------------------------
+
+/** One finding, owned by one rule. */
+function finding(rule, sentence) {
+  return { rule, sentence: `${TAG} rule ${String(rule)} ${sentence}` };
+}
+
+const IDENT = '[A-Za-z_$][\\w$]*';
+
+/** Quotes made uniform and space removed, so `"-a"` and `'-a'` compare. */
+function token(text) {
+  return text.replace(/["`]/g, "'").replace(/\s+/g, '');
+}
+
+/** Every array literal in `code` that opens with `'<verb>'`, as its elements. */
+function argvLiterals(code, verb) {
+  const out = [];
+  const re = new RegExp(`\\[\\s*['"\`]${verb}['"\`]`, 'g');
+  let m;
+  while ((m = re.exec(code)) !== null) {
+    out.push(callArguments(code, m.index).map(token).filter((e) => e !== ''));
+  }
+  return out;
+}
+
+/** Does `elements` hold `flag` immediately followed by `value`? */
+function pairIn(elements, flag, value) {
+  const at = elements.indexOf(`'${flag}'`);
+  return at >= 0 && elements[at + 1] === value;
+}
+
+/**
+ * Rule 13, the meter's reader. The one argv `keychainReader`'s `keychain`
+ * arrow hands `runGuarded` carries `-a` with that arrow's ACCOUNT parameter,
+ * `-s` with its SERVICE parameter, and `-w`, which the reader needs. The
+ * parameters are read from the arrow rather than assumed, so a literal account
+ * such as the one Phase 204's probe once seeded is not the account.
+ */
+function readerArgvFinding(credentialsText) {
+  const code = stripCommentsExact(credentialsText);
+  const decl = /\bfunction\s+keychainReader\s*\(/.exec(code);
+  if (decl === null) return finding(13, 'cannot find keychainReader in src/main/usage/credentials.ts, so the meter read it names is not the one this gate reads');
+  const arrow = new RegExp(`\\bkeychain\\s*:\\s*async\\s*\\(\\s*(${IDENT})\\s*,\\s*(${IDENT})\\s*\\)\\s*=>\\s*\\{`, 'g');
+  arrow.lastIndex = decl.index;
+  const m = arrow.exec(code);
+  if (m === null) {
+    return finding(13, "keychainReader's keychain no longer takes (service, account), so the meter asks the keychain without the account Claude Code's item is filed under");
+  }
+  const body = blockAt(code, m.index + m[0].length - 1) ?? '';
+  const argvs = argvLiterals(body, 'find-generic-password');
+  if (argvs.length !== 1) {
+    return finding(13, `keychainReader holds ${String(argvs.length)} find-generic-password argv literals; it must hold exactly one`);
+  }
+  const [service, account] = [m[1], m[2]];
+  const argv = argvs[0];
+  if (!pairIn(argv, '-a', account) || !pairIn(argv, '-s', service) || !argv.includes("'-w'")) {
+    return finding(
+      13,
+      `THE METER'S KEYCHAIN READ SENDS [${argv.join(', ')}], not -a ${account} -s ${service} -w, so it can land on an item under another account, which is the stray research 126 §2.4 found`
+    );
+  }
+  return null;
+}
+
+/**
+ * Rule 13, the presence check. `defaultLoginAccountDeps`'s `keychainHas` hands
+ * `security` `-a` with its account parameter and `-s` with its service
+ * parameter, and still never `-w` or `-g`, which are the two flags that print
+ * a secret.
+ */
+function presenceArgvFinding(accountsText) {
+  const code = stripCommentsExact(accountsText);
+  const body = functionBodyOf(code, 'defaultLoginAccountDeps');
+  if (body === null) return finding(13, 'cannot find defaultLoginAccountDeps in src/main/usage/login-accounts.ts');
+  const m = new RegExp(`\\bkeychainHas\\s*:\\s*(?:async\\s*)?\\(\\s*(${IDENT})\\s*,\\s*(${IDENT})\\s*\\)\\s*=>`).exec(body);
+  if (m === null) {
+    return finding(13, "the presence check's default keychainHas no longer takes (service, account), so it asks by service alone");
+  }
+  const argvs = argvLiterals(body.slice(m.index), 'find-generic-password');
+  if (argvs.length !== 1) {
+    return finding(13, `the presence check holds ${String(argvs.length)} find-generic-password argv literals; it must hold exactly one`);
+  }
+  const argv = argvs[0];
+  if (argv.includes("'-w'") || argv.includes("'-g'")) {
+    return finding(13, `THE PRESENCE CHECK ASKS FOR A SECRET: [${argv.join(', ')}]`);
+  }
+  if (!pairIn(argv, '-a', m[2]) || !pairIn(argv, '-s', m[1])) {
+    return finding(
+      13,
+      `THE PRESENCE CHECK SENDS [${argv.join(', ')}], not -a ${m[2]} -s ${m[1]}, so a login reads as signed in on the strength of an item no Claude Code session reads`
+    );
+  }
+  return null;
+}
+
+/**
+ * Rule 13, the calls above those argvs. Every `keychainHas(` in
+ * `readLoginPresence` and every `keychain(` in `readClaudeCredential` passes
+ * two arguments, the second being a name that function assigns from
+ * `claudeKeychainAccount(`. And both default seams hand that rule the
+ * machine's user name, because a seam without it gives every person whose
+ * `USER` is unset the vendor's fallback account instead of their own.
+ */
+function seamCallFindings(credentialsText, accountsText) {
+  const out = [];
+  const asks = [
+    { text: accountsText, fn: 'readLoginPresence', call: 'keychainHas', file: 'login-accounts.ts' },
+    { text: credentialsText, fn: 'readClaudeCredential', call: 'keychain', file: 'credentials.ts' }
+  ];
+  for (const a of asks) {
+    const body = functionBodyOf(stripCommentsExact(a.text), a.fn);
+    if (body === null) {
+      out.push(finding(13, `cannot find ${a.fn} in ${a.file}`));
+      continue;
+    }
+    const accountNames = new Set(
+      [...body.matchAll(new RegExp(`\\b(?:const|let)\\s+(${IDENT})\\s*=\\s*claudeKeychainAccount\\s*\\(`, 'g'))].map((x) => x[1])
+    );
+    const calls = [...body.matchAll(new RegExp(`\\.${a.call}\\s*\\(`, 'g'))];
+    if (calls.length === 0) out.push(finding(13, `${a.fn} no longer asks ${a.call} at all`));
+    for (const c of calls) {
+      const args = callArguments(body, c.index + c[0].length - 1).filter((x) => x !== '');
+      const second = args[1] ?? '';
+      if (args.length !== 2 || !(accountNames.has(second) || /^claudeKeychainAccount\s*\(/.test(second))) {
+        out.push(
+          finding(13, `${a.fn} calls ${a.call}(${args.join(', ')}), which is not the one vendor name under the account claudeKeychainAccount gives`)
+        );
+      }
+    }
+  }
+  for (const [text, fn, file] of [
+    [credentialsText, 'defaultCredentialDeps', 'credentials.ts'],
+    [accountsText, 'defaultLoginAccountDeps', 'login-accounts.ts']
+  ]) {
+    const body = functionBodyOf(stripCommentsExact(text), fn) ?? '';
+    if (!/\bosUserName\s*:\s*\(\s*\)\s*=>\s*userInfo\s*\(\s*\)\s*\.\s*username\b/.test(body)) {
+      out.push(finding(13, `${file}'s ${fn} does not pass osUserName: () => userInfo().username, so a person with no USER is asked for under claude-code-user`));
+    }
+  }
+  return out;
+}
+
+/** A scoped service expression: the hash, the one-name rule, or the template. */
+const SCOPED_EXPR = /\bclaudeScopedService\s*\(|\bclaudeKeychainService\s*\(|\$\{\s*CLAUDE_KEYCHAIN_SERVICE\s*\}\s*-/;
+/** The plain vendor name, by constant or by literal, and never the scoped template. */
+const PLAIN_EXPR = /\bCLAUDE_KEYCHAIN_SERVICE\b(?!\s*\}\s*-)|(['"`])Claude Code-credentials\1/;
+
+/** Names a file assigns a scoped expression to. */
+function scopedNamesIn(code) {
+  const names = new Set();
+  const re = new RegExp(
+    `\\b(?:(?:const|let|var)\\s+)?(${IDENT})\\s*(?::[^=;]+)?=\\s*(?:await\\s+)?(?:claudeScopedService|claudeKeychainService)\\s*\\(`,
+    'g'
+  );
+  for (const m of code.matchAll(re)) names.add(m[1]);
+  return names;
+}
+
+/** Where in `text` a scoped expression or a scoped name first ends, or -1. */
+function scopedEnd(text, names) {
+  let start = -1;
+  let end = -1;
+  const direct = SCOPED_EXPR.exec(text);
+  if (direct !== null) {
+    const opens = direct[0].endsWith('(') ? direct.index + direct[0].length - 1 : -1;
+    const closes = opens >= 0 ? closeOf(text, opens) : -1;
+    start = direct.index;
+    end = closes >= 0 ? closes + 1 : direct.index + direct[0].length;
+  }
+  for (const name of names) {
+    const m = new RegExp(`(^|[^\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).exec(text);
+    if (m !== null) {
+      const at = m.index + m[1].length;
+      if (start < 0 || at < start) {
+        start = at;
+        end = m.index + m[0].length;
+      }
+    }
+  }
+  return end;
+}
+
+/** Which offsets of `code` sit inside a string or template literal. */
+function stringMask(code) {
+  const inside = new Uint8Array(code.length);
+  let quote = '';
+  for (let i = 0; i < code.length; i += 1) {
+    const c = code[i];
+    if (quote !== '') {
+      inside[i] = 1;
+      if (c === '\\') {
+        inside[i + 1] = 1;
+        i += 1;
+      } else if (c === quote) quote = '';
+    } else if (c === "'" || c === '"' || c === '`') {
+      quote = c;
+      inside[i] = 1;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Rule 14's list scanner, over one file's text. Returns a sentence per shape.
+ *
+ * THREE SHAPES, being every way the Phase 181 fallback was written or could be
+ * written again: an ARRAY that names the plain name after a scoped one, which
+ * is what `claudeServicesFor` returned and what a loop iterated; a PUSH of the
+ * plain name after a push of a scoped one inside one function; and the Phase
+ * 203 function itself brought back by name.
+ */
+function fallbackListsIn(text) {
+  const code = stripCommentsExact(text);
+  const names = scopedNamesIn(code);
+  const out = [];
+  if (/\bclaudeServicesFor\b/.test(code)) {
+    out.push('names claudeServicesFor, the list of services Phase 281 removed');
+  }
+  const inString = stringMask(code);
+  for (let i = code.indexOf('['); i >= 0; i = code.indexOf('[', i + 1)) {
+    // A bracket inside a string is text, and pairing it would read the rest
+    // of the file as one list.
+    if (inString[i] === 1) continue;
+    const close = closeOf(code, i);
+    if (close < 0) continue;
+    const inner = code.slice(i + 1, close);
+    const end = scopedEnd(inner, names);
+    if (end >= 0 && PLAIN_EXPR.test(inner.slice(end))) {
+      out.push(`holds a list naming the plain vendor name after a scoped one: [${inner.replace(/\s+/g, ' ').trim().slice(0, 120)}]`);
+    }
+  }
+  for (const [fn, body] of namedFunctions(code)) {
+    let scopedSeen = false;
+    for (const m of body.matchAll(/\.(?:push|unshift)\s*\(/g)) {
+      const args = callArguments(body, m.index + m[0].length - 1).join(', ');
+      if (scopedSeen && PLAIN_EXPR.test(args)) {
+        out.push(`${fn} pushes the plain vendor name after a scoped one`);
+        break;
+      }
+      if (scopedEnd(args, names) >= 0) scopedSeen = true;
+    }
+  }
+  return out;
+}
+
+/** The text of the statement starting at `from`, up to its `;` at depth zero. */
+function statementAt(code, from) {
+  let depth = 0;
+  let quote = '';
+  for (let i = from; i < code.length; i += 1) {
+    const c = code[i];
+    if (quote !== '') {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if ('([{'.includes(c)) depth += 1;
+    else if (')]}'.includes(c)) {
+      if (depth === 0) return code.slice(from, i);
+      depth -= 1;
+    } else if (c === ';' && depth === 0) return code.slice(from, i);
+  }
+  return code.slice(from);
+}
+
+/** A ternary split into the expressions it can answer. `??` and `?.` are not ternaries. */
+function ternaryArms(expr) {
+  let text = expr.trim();
+  while (text.startsWith('(') && closeOf(text, 0) === text.length - 1) text = text.slice(1, -1).trim();
+  let depth = 0;
+  let quote = '';
+  let q = -1;
+  let nested = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote !== '') {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if ('([{'.includes(c)) depth += 1;
+    else if (')]}'.includes(c)) depth -= 1;
+    else if (depth === 0 && c === '?') {
+      if (text[i + 1] === '?' || text[i + 1] === '.' || text[i - 1] === '?') continue;
+      if (q < 0) q = i;
+      else nested += 1;
+    } else if (depth === 0 && c === ':' && q >= 0) {
+      if (nested > 0) nested -= 1;
+      else return [...ternaryArms(text.slice(q + 1, i)), ...ternaryArms(text.slice(i + 1))];
+    }
+  }
+  return [text];
+}
+
+/**
+ * Rule 14's second half. `claudeKeychainService` answers FIVE arms, one per
+ * branch of the vendor rule (a login directory; the secure-storage variable
+ * defined and empty; defined and not empty; a non-empty `CLAUDE_CONFIG_DIR`;
+ * neither), and each arm is exactly ONE name: the plain constant, or
+ * `claudeScopedService` of one variable. The scoped arms hash the login
+ * directory, then the secure-storage variable, then `CLAUDE_CONFIG_DIR`, in
+ * that order, and the plain name answers exactly twice. A list, a `??` chain,
+ * a lost branch or a branch hashing the wrong variable each breaks one of
+ * those, and an `if` rewrite of the same rule breaks none.
+ */
+function serviceArmsFinding(credentialsText) {
+  const code = stripCommentsExact(credentialsText);
+  const decl = /\bfunction\s+claudeKeychainService\s*\(/.exec(code);
+  const body = functionBodyOf(code, 'claudeKeychainService');
+  if (decl === null || body === null) return finding(14, 'cannot find claudeKeychainService, the one-name service rule');
+  const params = callArguments(code, decl.index + decl[0].length - 1);
+  const first = (text) => new RegExp(`^\\s*(${IDENT})`).exec(text ?? '')?.[1] ?? null;
+  const envName = first(params[0]);
+  const loginName = first(params[params.length - 1]);
+  const bound = (variable) =>
+    new RegExp(
+      `\\b(?:const|let)\\s+(${IDENT})\\s*=\\s*${envName}\\s*(?:\\[\\s*['"\`]${variable}['"\`]\\s*\\]|\\.${variable}\\b)`
+    ).exec(body)?.[1] ?? null;
+  const secureName = bound('CLAUDE_SECURESTORAGE_CONFIG_DIR');
+  const ownName = bound('CLAUDE_CONFIG_DIR');
+  const arms = [];
+  for (const m of body.matchAll(/\breturn\b/g)) {
+    arms.push(...ternaryArms(statementAt(body, m.index + m[0].length)).map((a) => a.replace(/\s+/g, '')));
+  }
+  const scopedArgs = [];
+  let plain = 0;
+  const shapeless = [];
+  for (const arm of arms) {
+    const scoped = new RegExp(`^claudeScopedService\\((${IDENT})\\)$`).exec(arm);
+    if (arm === 'CLAUDE_KEYCHAIN_SERVICE') plain += 1;
+    else if (scoped !== null) scopedArgs.push(scoped[1]);
+    else shapeless.push(arm);
+  }
+  const want = [loginName, secureName, ownName];
+  if (
+    arms.length !== 5 ||
+    shapeless.length > 0 ||
+    plain !== 2 ||
+    want.includes(null) ||
+    JSON.stringify(scopedArgs) !== JSON.stringify(want)
+  ) {
+    return finding(
+      14,
+      `claudeKeychainService answers [${arms.join(' | ')}], not one name per branch of the vendor rule (five arms, the plain name twice, scoped over ${want.map(String).join(', ')} in that order), so a reader can be handed a list or the wrong item`
+    );
+  }
+  return null;
+}
+
+/** Every non-test TypeScript file under a directory, by path. */
+function sourceFilesUnder(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === '__tests__' || entry.name.startsWith('.')) continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...sourceFilesUnder(path));
+    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * Rules 13 and 14 over one pair of usage files, and rule 14's list scan over
+ * both domains with those two files standing in for the shipping ones.
+ */
+function sourceFindings(usageDir) {
+  const credentialsText = readFileSync(join(usageDir, 'credentials.ts'), 'utf8');
+  const accountsText = readFileSync(join(usageDir, 'login-accounts.ts'), 'utf8');
+  const out = [
+    readerArgvFinding(credentialsText),
+    presenceArgvFinding(accountsText),
+    ...seamCallFindings(credentialsText, accountsText),
+    serviceArmsFinding(credentialsText)
+  ].filter((f) => f !== null);
+  const stand = new Map([
+    [CREDENTIALS_FILE, credentialsText],
+    [ACCOUNTS_FILE, accountsText]
+  ]);
+  for (const path of [...sourceFilesUnder(USAGE), ...sourceFilesUnder(CREDENTIALS_DOMAIN)]) {
+    const text = stand.get(path) ?? readFileSync(path, 'utf8');
+    for (const shape of fallbackListsIn(text)) {
+      out.push(finding(14, `${path.slice(repoRoot.length + 1)} ${shape}, which is the plain-name fallback research 126 §5 refutes`));
+    }
+  }
+  return out;
+}
+
+/** The vendor's scoped name, derived HERE by this file's own hash of the NFC form. */
+function derivedScoped(dir) {
+  return `Claude Code-credentials-${createHash('sha256').update(dir.normalize('NFC')).digest('hex').slice(0, 8)}`;
+}
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Rules 13, 15, 16 and 17, over the probe's section 9. Every expected service
+ * name is derived by this file from the directory the probe used, and every
+ * expected account is the synthetic one the probe declares, which must look
+ * synthetic.
+ */
+function vendorFindings(v) {
+  if (v === undefined || v === null) {
+    return [13, 15, 16, 17].map((rule) => finding(rule, 'the probe printed no Phase 281 reading'));
+  }
+  const out = [];
+  const say = (rule, ok, sentence) => {
+    if (!ok) out.push(finding(rule, sentence));
+  };
+  const vendor = v.accounts?.vendor;
+  const stray = v.accounts?.stray;
+  say(13, /^p281-/.test(vendor ?? '') && /^p281-/.test(stray ?? '') && vendor !== stray, 'the probe keyed its keychain by an account that is not a synthetic p281- one');
+  const plain = 'Claude Code-credentials';
+  const one = (service) => [[service, vendor]];
+
+  // Rule 13, driven.
+  say(13, same(v.presence?.loginAsked, one(derivedScoped(v.presence?.loginDir ?? ''))), `A LOGIN'S PRESENCE ASKED ${JSON.stringify(v.presence?.loginAsked)}, not its one scoped name under the vendor account`);
+  say(13, same(v.presence?.defaultAsked, one(plain)), `THE DEFAULT LOGIN'S PRESENCE ASKED ${JSON.stringify(v.presence?.defaultAsked)}, not the plain name under the vendor account`);
+  say(13, v.presence?.strayOnly === false, 'A STRAY ITEM UNDER ANOTHER ACCOUNT READ AS A SIGNED IN LOGIN, so presence asked without the account');
+  say(13, v.presence?.vendorBehindStray === true, 'the vendor item behind a stray read as absent, so the stray check above proves nothing');
+  const wantArgv = ['find-generic-password', '-a', vendor, '-s', plain, '-w'];
+  say(13, same(v.reader?.argv, [wantArgv]), `THE SHIPPING keychainReader SENT ${JSON.stringify(v.reader?.argv)}, not ${JSON.stringify([wantArgv])}`);
+  say(13, v.reader?.answer === 'vendor', `the shipping keychainReader answered ${String(v.reader?.answer)} over a stray listed first, not the vendor item`);
+  say(13, v.reader?.credential === 'vendor' && same(v.reader?.credentialArgv, [wantArgv]), `the meter read ${String(v.reader?.credential)} through the shipping reader, sending ${JSON.stringify(v.reader?.credentialArgv)}`);
+  say(13, v.reader?.emptyAccount === 'throw' && v.reader?.emptyAccountSpawned === 0, `an empty account answered ${String(v.reader?.emptyAccount)} and started ${String(v.reader?.emptyAccountSpawned)} program(s), so a read with no account is not refused before it becomes the service-only lookup`);
+
+  // Rule 15, branch B.
+  const configScoped = derivedScoped(v.branchB?.configDir ?? '');
+  for (const row of ['stray', 'vendor']) {
+    say(15, v.branchB?.[row]?.answer === 'missing', `BRANCH B WITH A PLAIN ITEM UNDER THE ${row.toUpperCase()} ACCOUNT ANSWERED ${String(v.branchB?.[row]?.answer)}, so the meter draws numbers a Claude Code session under that directory never reads`);
+    say(15, same(v.branchB?.[row]?.asked, one(configScoped)), `branch B (${row}) asked ${JSON.stringify(v.branchB?.[row]?.asked)}, not the one scoped name of CLAUDE_CONFIG_DIR under the vendor account`);
+  }
+  say(15, v.branchB?.control?.answer === 'vendor' && same(v.branchB?.control?.asked, one(configScoped)), `the branch B control answered ${String(v.branchB?.control?.answer)} asking ${JSON.stringify(v.branchB?.control?.asked)}, so the missing answers above prove nothing`);
+
+  // Rule 16, the miss and failure split.
+  const exits = v.exits ?? {};
+  say(16, exits['44'] === 'null', `the shipping keychainReader answered ${String(exits['44'])} for exit 44, which is the one exit that means no such item`);
+  for (const code of ['36', '1', 'spawn']) {
+    say(16, exits[code] === 'throw', `THE SHIPPING keychainReader ANSWERED ${String(exits[code])} FOR ${code === 'spawn' ? 'A PROGRAM THAT CANNOT START' : `EXIT ${code}`}, so a keychain that could not answer reads as a sign out`);
+  }
+  const through = v.credentialExits ?? {};
+  say(16, through['44'] === 'missing', `the meter answered ${String(through['44'])} over exit 44, not missing`);
+  for (const code of ['36', '1']) {
+    say(16, through[code] === 'throw', `THE METER ANSWERED ${String(through[code])} OVER EXIT ${code} with no file, so a locked keychain tells a signed in person to sign in`);
+  }
+  say(16, through.fileStandsIn === 'vendor', `the meter answered ${String(through.fileStandsIn)} over exit 36 with a usable file, so an unreadable keychain hides the file`);
+
+  // Rule 17, NFC.
+  const dir = v.nfc?.dir ?? '';
+  const want = derivedScoped(dir);
+  const raw = `Claude Code-credentials-${createHash('sha256').update(dir).digest('hex').slice(0, 8)}`;
+  say(17, dir !== dir.normalize('NFC') && raw !== want, 'the NFC fixture directory is already composed, so rule 17 stopped testing anything');
+  for (const key of ['scoped', 'composed', 'viaConfig', 'viaSecure', 'viaLogin']) {
+    say(17, v.nfc?.[key] === want, `A DECOMPOSED DIRECTORY NAMED ${String(v.nfc?.[key])} through ${key}, and this file derives ${want} from its NFC form, so Tortie asks an item Claude Code never writes`);
+  }
+  say(17, same(v.nfc?.presenceAsked, one(want)) && same(v.nfc?.credentialAsked, one(want)), `a decomposed directory was asked as ${JSON.stringify([v.nfc?.presenceAsked, v.nfc?.credentialAsked])}, not ${want}`);
+  return out;
+}
+
+// Rules 13 and 14 over the shipping source.
+for (const f of sourceFindings(USAGE)) failures.push(f.sentence);
+
+// The Phase 281 scanners, proved on fixtures. A scanner nobody has seen fail
+// is a scanner nobody has seen work.
+{
+  const READER = (argv, params = 'service, account') =>
+    `export function keychainReader(bin = B): {\n  keychain(service: string, account: string): Promise<string | null>;\n  cancel(): number;\n} {\n  return {\n    keychain: async (${params}) => {\n      const run = await runGuarded(bin, ${argv}, {});\n      return run.stdout;\n    }\n  };\n}\n`;
+  const PRESENCE = (argv) =>
+    `export function defaultLoginAccountDeps(): LoginAccountDeps {\n  return {\n    keychainHas: (service, account) =>\n      new Promise<boolean>((resolve) => {\n        // never '-w'\n        execFile('/usr/bin/security', ${argv}, {}, (err) => resolve(err === null));\n      })\n  };\n}\n`;
+  const SERVICE = (body) =>
+    `export function claudeKeychainService(\n  env: Readonly<Record<string, string | undefined>>,\n  loginDir: string | null\n): string {\n${body}\n}\n`;
+  const SHIPPED_SERVICE = SERVICE(
+    "  if (loginDir !== null && loginDir !== '') return claudeScopedService(loginDir);\n" +
+      "  const secure = env['CLAUDE_SECURESTORAGE_CONFIG_DIR'];\n" +
+      '  if (secure !== undefined) {\n' +
+      "    return secure === '' ? CLAUDE_KEYCHAIN_SERVICE : claudeScopedService(secure);\n" +
+      '  }\n' +
+      "  const own = env['CLAUDE_CONFIG_DIR'];\n" +
+      "  return own !== undefined && own !== ''\n" +
+      '    ? claudeScopedService(own)\n' +
+      '    : CLAUDE_KEYCHAIN_SERVICE;'
+  );
+  const P281_FIXTURES = [
+    { name: 'the reader sending -a account -s service -w', red: readerArgvFinding(READER("['find-generic-password', '-a', account, '-s', service, '-w']")) !== null, want: false },
+    { name: 'the reader with no -a', red: readerArgvFinding(READER("['find-generic-password', '-s', service, '-w']")) !== null, want: true },
+    { name: 'the reader sending a literal account', red: readerArgvFinding(READER("['find-generic-password', '-a', 'p281-literal', '-s', service, '-w']")) !== null, want: true },
+    { name: 'the reader taking the service alone', red: readerArgvFinding(READER("['find-generic-password', '-s', service, '-w']", 'service')) !== null, want: true },
+    { name: 'the reader with -a only in a comment', red: readerArgvFinding(READER("['find-generic-password', /* '-a', account, */ '-s', service, '-w']")) !== null, want: true },
+    { name: 'presence sending -a account -s service', red: presenceArgvFinding(PRESENCE("['find-generic-password', '-a', account, '-s', service]")) !== null, want: false },
+    { name: 'presence with no -a', red: presenceArgvFinding(PRESENCE("['find-generic-password', '-s', service]")) !== null, want: true },
+    { name: 'presence with -a and -w', red: presenceArgvFinding(PRESENCE("['find-generic-password', '-a', account, '-s', service, '-w']")) !== null, want: true },
+    { name: 'presence with the account and service swapped', red: presenceArgvFinding(PRESENCE("['find-generic-password', '-a', service, '-s', account]")) !== null, want: true },
+    { name: 'one scoped name in a list', red: fallbackListsIn('export function f(d: string) { return [claudeScopedService(d)]; }\n').length > 0, want: false },
+    { name: 'the fallback only in a comment', red: fallbackListsIn('// return [claudeScopedService(d), CLAUDE_KEYCHAIN_SERVICE];\nexport const a = 1;\n').length > 0, want: false },
+    { name: 'the scoped template itself', red: fallbackListsIn('export function s(h: string) { return [`${CLAUDE_KEYCHAIN_SERVICE}-${h}`]; }\n').length > 0, want: false },
+    { name: "the Phase 181 fallback's own shape", red: fallbackListsIn("export function servicesFor(own: string) {\n  return own !== ''\n    ? [claudeScopedService(own), CLAUDE_KEYCHAIN_SERVICE]\n    : [CLAUDE_KEYCHAIN_SERVICE];\n}\n").length > 0, want: true },
+    { name: 'a loop over a scoped name held in a variable, then the literal', red: fallbackListsIn("export async function has(d, dir) {\n  const scoped = claudeKeychainService(d.env, dir);\n  for (const service of [scoped, 'Claude Code-credentials']) {\n    if (await d.keychainHas(service)) return true;\n  }\n  return false;\n}\n").length > 0, want: true },
+    { name: 'pushes, scoped then plain', red: fallbackListsIn('function names(env, dir) {\n  const out = [];\n  out.push(claudeKeychainService(env, dir));\n  out.push(CLAUDE_KEYCHAIN_SERVICE);\n  return out;\n}\n').length > 0, want: true },
+    { name: 'a multi-line list of the template then the plain name', red: fallbackListsIn('export function s(h: string) {\n  return [\n    `${CLAUDE_KEYCHAIN_SERVICE}-${h}`,\n    CLAUDE_KEYCHAIN_SERVICE\n  ];\n}\n').length > 0, want: true },
+    { name: 'claudeServicesFor brought back by name', red: fallbackListsIn("import { claudeServicesFor } from './credentials';\nexport const f = (d, dir) => claudeServicesFor(d, dir);\n").length > 0, want: true },
+    { name: 'the service rule as shipped', red: serviceArmsFinding(SHIPPED_SERVICE) !== null, want: false },
+    {
+      name: 'the service rule rewritten as if statements',
+      red:
+        serviceArmsFinding(
+          SERVICE(
+            "  if (loginDir !== null && loginDir !== '') return claudeScopedService(loginDir);\n" +
+              '  const secure = env.CLAUDE_SECURESTORAGE_CONFIG_DIR;\n' +
+              '  if (secure !== undefined) {\n' +
+              "    if (secure === '') return CLAUDE_KEYCHAIN_SERVICE;\n" +
+              '    return claudeScopedService(secure);\n' +
+              '  }\n' +
+              "  const own = env['CLAUDE_CONFIG_DIR'];\n" +
+              "  if (own !== undefined && own !== '') return claudeScopedService(own);\n" +
+              '  return CLAUDE_KEYCHAIN_SERVICE;'
+          )
+        ) !== null,
+      want: false
+    },
+    { name: 'the service rule answering a list', red: serviceArmsFinding(SHIPPED_SERVICE.replace('? claudeScopedService(own)', '? [claudeScopedService(own), CLAUDE_KEYCHAIN_SERVICE]')) !== null, want: true },
+    { name: 'the service rule with a ?? chain', red: serviceArmsFinding(SHIPPED_SERVICE.replace('? claudeScopedService(own)', '? claudeScopedService(own) ?? CLAUDE_KEYCHAIN_SERVICE')) !== null, want: true },
+    { name: 'the secure-storage branch lost', red: serviceArmsFinding(SHIPPED_SERVICE.replace("return secure === '' ? CLAUDE_KEYCHAIN_SERVICE : claudeScopedService(secure);", 'return claudeScopedService(secure);')) !== null, want: true },
+    { name: 'CLAUDE_CONFIG_DIR answering the plain name', red: serviceArmsFinding(SHIPPED_SERVICE.replace('? claudeScopedService(own)', '? CLAUDE_KEYCHAIN_SERVICE')) !== null, want: true },
+    { name: 'the secure-storage branch hashing CLAUDE_CONFIG_DIR', red: serviceArmsFinding(SHIPPED_SERVICE.replace(': claudeScopedService(secure);', ': claudeScopedService(own);')) !== null, want: true }
+  ];
+  let behaved = 0;
+  for (const f of P281_FIXTURES) {
+    if (f.red === f.want) behaved += 1;
+    else failures.push(`${TAG} a Phase 281 scanner misread the fixture "${f.name}": red ${String(f.red)} (want ${String(f.want)})`);
+  }
+  notes.push(`${String(behaved)} of ${String(P281_FIXTURES.length)} Phase 281 scanner fixtures behaved`);
+}
+
+// ---------------------------------------------------------------------------
+// The probe, over the tree and over ablated copies of it.
 // ---------------------------------------------------------------------------
 
 function runProbe(loginsDir, accountsDir = null) {
@@ -413,6 +1022,24 @@ function runProbe(loginsDir, accountsDir = null) {
   }
 }
 
+/** What each element of {@link verdict} is, in order, so a moved one can be named. */
+const VERDICT_PARTS = [
+  'owned',
+  'hostile',
+  'linked',
+  'create',
+  'numeric',
+  'sweepLinked',
+  'refusals',
+  'chosen',
+  'leak',
+  'gone',
+  'file',
+  'presence',
+  'account',
+  'vendor'
+];
+
 /**
  * The whole set of runtime claims, as one comparable value. An ablation must
  * change at least one of them, or the rule it removed was not being checked.
@@ -433,8 +1060,19 @@ function verdict(d) {
     JSON.stringify(d.file),
     // Phase 203. The directory is a fresh temporary path on every run, so it
     // is left out of the verdict and only its DERIVED name is compared.
-    JSON.stringify({ ...d.presence, scoped: '', dir: '', askedForLogin: d.presence?.askedForLogin?.length ?? 0 }),
-    JSON.stringify(d.account)
+    // Phase 281 records the ACCOUNT beside each service asked, and the
+    // accounts are synthetic constants, so they are compared whole.
+    JSON.stringify({
+      ...d.presence,
+      scoped: '',
+      dir: '',
+      askedForLogin: d.presence?.askedForLogin?.length ?? 0,
+      askedForLoginAccounts: (d.presence?.askedForLogin ?? []).map((pair) => pair?.[1] ?? null)
+    }),
+    JSON.stringify(d.account),
+    // Phase 281. Section 9 uses fixed synthetic directories, so every reading
+    // in it is the same on every run.
+    JSON.stringify(d.vendor ?? null)
   ];
 }
 
@@ -623,8 +1261,10 @@ if ('error' in live) {
     live.presence.askedForLogin.length === 1,
     `${TAG} A SECOND LOGIN ASKED FOR ${String(live.presence.askedForLogin.length)} KEYCHAIN ITEMS, so it can read the person's own default credential and call the numbers its own`
   );
+  // Phase 281: each ask is a (service, account) pair now, and the account is
+  // rule 13's business; this check is still about the plain NAME.
   check(
-    live.presence.askedForDefault.includes('Claude Code-credentials'),
+    live.presence.askedForDefault.some((pair) => pair?.[0] === 'Claude Code-credentials'),
     `${TAG} the default login did not ask for the plain keychain item, which is what a default install actually has`
   );
   // RE-DERIVED HERE, by this file's own hash, rather than trusted.
@@ -637,7 +1277,7 @@ if ('error' in live) {
     `${TAG} the scoped service name is ${live.presence.scoped} and this file derives ${wantScoped} from the same directory`
   );
   check(
-    live.presence.askedForLogin[0] === wantScoped,
+    live.presence.askedForLogin[0]?.[0] === wantScoped,
     `${TAG} the item asked for is not the one the directory derives`
   );
   check(
@@ -695,6 +1335,15 @@ if ('error' in live) {
   notes.push(
     `presence keychain ${String(live.presence.keychainOnly)} against file ${String(live.presence.cheapListPresent)}, one item asked per login, both providers name an account`
   );
+
+  // Rules 13, 15, 16 and 17, driven.
+  const driven = vendorFindings(live.vendor);
+  for (const f of driven) failures.push(f.sentence);
+  if (driven.length === 0) {
+    notes.push(
+      `the one vendor name asked under ${String(live.vendor.accounts.vendor)} by presence, the meter and the shipping keychainReader; branch B missing under both accounts; exit 44 null and 36, 1 and a failed start thrown; a decomposed directory named ${live.vendor.nfc.scoped}`
+    );
+  }
 }
 
 // The ablations. Each one must change the verdict.
@@ -737,29 +1386,36 @@ const READER_GUARDS = [
  */
 const ABLATIONS = [
   {
+    // PHASE 281 RE-ANCHORED THIS on the one ask `readLoginPresence` makes now,
+    // since the `claudeServicesFor` loop it used to remove is gone.
     name: 'the keychain half taken out of presence, which is the reported defect',
     dir: 'usage',
     edits: [
       {
         file: 'login-accounts.ts',
-        from:
-          '    for (const service of claudeServicesFor(d, loginDir)) {\n' +
-          '      if (await d.keychainHas(service)) return true;\n' +
-          '    }',
+        from: '    if (await d.keychainHas(service, account)) return true;\n',
         to: ''
       }
     ]
   },
   {
+    // PHASE 281 RE-EXPRESSED THIS. The login branch of `claudeServicesFor` it
+    // anchored on is gone, so the same mistake is written where it would now
+    // be made: a second ask, of the plain name, after the login's own.
     name: 'a second login allowed to fall through to the plain keychain item',
     dir: 'usage',
     edits: [
       {
         file: 'login-accounts.ts',
-        from:
-          "  if (loginDir !== null && loginDir !== '') return [claudeScopedService(loginDir)];",
+        from: "import { claudeKeychainAccount, claudeKeychainService } from './credentials';",
+        to: "import { CLAUDE_KEYCHAIN_SERVICE, claudeKeychainAccount, claudeKeychainService } from './credentials';"
+      },
+      {
+        file: 'login-accounts.ts',
+        from: '    if (await d.keychainHas(service, account)) return true;\n',
         to:
-          "  if (loginDir !== null && loginDir !== '') return [claudeScopedService(loginDir), CLAUDE_KEYCHAIN_SERVICE];"
+          '    if (await d.keychainHas(service, account)) return true;\n' +
+          '    if (await d.keychainHas(CLAUDE_KEYCHAIN_SERVICE, account)) return true;\n'
       }
     ]
   },
@@ -950,28 +1606,213 @@ const ABLATIONS = [
         to: '  if (!isOwnedLoginDir(root, provider, dir)) {'
       }
     ]
+  },
+
+  // -------------------------------------------------------------------------
+  // PHASE 281. Each of these OWNS A RULE, and it counts only if THAT rule goes
+  // red over the ablated copy, read from the source and from the probe alike.
+  // A clause that moved some other reading has not shown its own rule can
+  // fail.
+  // -------------------------------------------------------------------------
+  {
+    name: "the account dropped from the meter's keychainReader argv",
+    rule: 13,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'credentials.ts',
+        from: "          ['find-generic-password', '-a', account, '-s', service, '-w'],",
+        to: "          ['find-generic-password', '-s', service, '-w'],"
+      }
+    ]
+  },
+  {
+    name: "the account dropped from the presence check's argv",
+    rule: 13,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'login-accounts.ts',
+        from: "          ['find-generic-password', '-a', account, '-s', service],",
+        to: "          ['find-generic-password', '-s', service],"
+      }
+    ]
+  },
+  {
+    name: 'the account dropped from the presence seam call',
+    rule: 13,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'login-accounts.ts',
+        from: '    if (await d.keychainHas(service, account)) return true;',
+        to: '    if (await d.keychainHas(service)) return true;'
+      }
+    ]
+  },
+  {
+    name: "the account dropped from the meter's seam call",
+    rule: 13,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'credentials.ts',
+        from: '    payload = await deps.keychain(service, account);',
+        to: '    payload = await deps.keychain(service);'
+      }
+    ]
+  },
+  {
+    name: 'the plain fallback put back after the scoped name in the service function',
+    rule: 14,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'credentials.ts',
+        from:
+          "  return own !== undefined && own !== ''\n" +
+          '    ? claudeScopedService(own)\n' +
+          '    : CLAUDE_KEYCHAIN_SERVICE;',
+        to:
+          "  return own !== undefined && own !== ''\n" +
+          '    ? [claudeScopedService(own), CLAUDE_KEYCHAIN_SERVICE]\n' +
+          '    : CLAUDE_KEYCHAIN_SERVICE;'
+      }
+    ]
+  },
+  {
+    name: 'the meter asking the plain name after the one name, which is branch B read wrong',
+    rule: 15,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'credentials.ts',
+        from: '    payload = await deps.keychain(service, account);',
+        to:
+          '    payload = await deps.keychain(service, account);\n' +
+          '    if (payload === null) payload = await deps.keychain(CLAUDE_KEYCHAIN_SERVICE, account);'
+      }
+    ]
+  },
+  {
+    name: 'exit 36 treated as absent, the way Claude Code itself reads it',
+    rule: 16,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'credentials.ts',
+        from: '        if (answered && run.code === KEYCHAIN_EXIT_NOT_FOUND) return null;',
+        to: '        if (answered && (run.code === KEYCHAIN_EXIT_NOT_FOUND || run.code === 36)) return null;'
+      }
+    ]
+  },
+  {
+    name: 'the NFC normalisation taken out of the scoped hash',
+    rule: 17,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'credentials.ts',
+        from: "    .update(configDir.normalize('NFC'))",
+        to: '    .update(configDir)'
+      }
+    ]
   }
 ];
 
-const ablationRoot = mkdtempSync(join(tmpdir(), 'p202-ablation-'));
+/**
+ * THE ABLATED COPIES LIVE ONE LEVEL UNDER `src/main/`, and the depth is exact
+ * (Phase 281).
+ *
+ * Until Phase 281 they went to the system temporary directory. Since Phase
+ * 200 the usage copy's `credentials.ts` imports `../proc/guarded`, and since
+ * Phase 281 `../credentials/security-print`, and neither resolves from there.
+ * So the probe died on its imports under EVERY ablation, its verdict read
+ * `['error']`, that differed from the live one, and each ablation counted as
+ * red. Measured twice over PRISTINE copies in the temporary directory: at
+ * `cc337e67` the probe exits non-zero with `Cannot find module
+ * '../proc/guarded'`, and with Phase 281's code in place it exits 1 with
+ * `Cannot find module '../credentials/security-print'`. Sixteen red
+ * ablations, none of them for the reason its name gave.
+ *
+ * So each copy is a SIBLING of `logins/` and `usage/`, named with a dot so
+ * neither TypeScript's include globs nor the test runner picks it up, removed
+ * in the `finally` below whatever happened, exactly as
+ * build/conformance-credentials.mjs already places its own. Before any
+ * ablation counts, an UNEDITED copy must read exactly what the tree reads,
+ * and a probe that cannot run over an edited copy is a finding rather than a
+ * red.
+ */
+const ABLATION_PREFIX = `.p202-ablation-${process.pid.toString(36)}-`;
+const mainDir = join(repoRoot, 'src/main');
+const LOGINS_COPIED = ['dirs.ts', 'store.ts', 'paths.ts', 'session.ts', 'index.ts', 'ipc.ts'];
+const USAGE_COPIED = ['login-accounts.ts', 'credentials.ts'];
+
+function sweepAblations() {
+  for (const name of readdirSync(mainDir)) {
+    if (name.startsWith(ABLATION_PREFIX)) {
+      rmSync(join(mainDir, name), { recursive: true, force: true });
+    }
+  }
+}
+
+/** Both domains copied, every time, so an ablation of either runs against the shipping other. */
+function stageCopies(tag) {
+  const loginsDir = join(mainDir, `${ABLATION_PREFIX}${tag}-logins`);
+  const usageDir = join(mainDir, `${ABLATION_PREFIX}${tag}-usage`);
+  mkdirSync(loginsDir, { recursive: true });
+  mkdirSync(usageDir, { recursive: true });
+  for (const f of LOGINS_COPIED) cpSync(join(DOMAIN, f), join(loginsDir, f));
+  for (const f of USAGE_COPIED) cpSync(join(USAGE, f), join(usageDir, f));
+  return { loginsDir, usageDir };
+}
+
+/** The sha256 of every shipping file an ablation copies, so a leak into the tree is caught. */
+function shippingDigest() {
+  const hash = createHash('sha256');
+  for (const f of LOGINS_COPIED) hash.update(readFileSync(join(DOMAIN, f)));
+  for (const f of USAGE_COPIED) hash.update(readFileSync(join(USAGE, f)));
+  return hash.digest('hex');
+}
+
+/** Every Phase 281 finding over one copy of the usage files and the probe run over it. */
+function phase281FindingsOver(usageDir, probe) {
+  return [...sourceFindings(usageDir), ...('error' in probe ? [] : vendorFindings(probe.vendor))];
+}
+
+const digestBefore = shippingDigest();
+const details = [];
 try {
-  const liveVerdict = verdict(live);
+  const liveVerdict = JSON.stringify(verdict(live));
+  // THE CONTROL. An unedited copy must read what the tree reads, or every
+  // ablation below would be red for a reason that is not its clause.
+  const control = stageCopies('control');
+  const pristine = runProbe(control.loginsDir, control.usageDir);
+  let honest = true;
+  if ('error' in pristine) {
+    honest = false;
+    failures.push(
+      `${TAG} THE PROBE CANNOT RUN OVER AN UNEDITED COPY, so every ablation would be red for the wrong reason: ${String(pristine.error).slice(0, 300)}`
+    );
+  } else if (JSON.stringify(verdict(pristine)) !== liveVerdict) {
+    honest = false;
+    failures.push(`${TAG} an unedited copy reads differently from the tree, so no ablation can be judged against it`);
+  } else {
+    // The copy must break exactly the Phase 281 rules the tree breaks, which
+    // is none on a green tree. Asked as the same sentences rather than as
+    // none, so a red tree still has its ablations judged.
+    const overCopy = phase281FindingsOver(control.usageDir, pristine).map((f) => f.sentence);
+    const overTree = phase281FindingsOver(USAGE, live).map((f) => f.sentence);
+    if (JSON.stringify(overCopy) !== JSON.stringify(overTree)) {
+      honest = false;
+      failures.push(
+        `${TAG} an unedited copy reads the Phase 281 rules differently from the tree (${String(overCopy.length)} findings against ${String(overTree.length)}), so no ablation can be judged against it`
+      );
+    }
+  }
   let red = 0;
-  for (const [i, ablation] of ABLATIONS.entries()) {
-    const base = join(ablationRoot, `a${String(i)}`);
-    // BOTH DOMAINS ARE COPIED EVERY TIME, so an ablation of either is run
-    // against the shipping other one and the reading that moves is the one the
-    // clause owns.
-    const loginsDir = join(base, 'logins');
-    const usageDir = join(base, 'usage');
-    mkdirSync(loginsDir, { recursive: true });
-    mkdirSync(usageDir, { recursive: true });
-    for (const f of ['dirs.ts', 'store.ts', 'paths.ts', 'session.ts', 'index.ts', 'ipc.ts']) {
-      cpSync(join(DOMAIN, f), join(loginsDir, f));
-    }
-    for (const f of ['login-accounts.ts', 'credentials.ts']) {
-      cpSync(join(USAGE, f), join(usageDir, f));
-    }
+  for (const [i, ablation] of (honest ? ABLATIONS : []).entries()) {
+    const { loginsDir, usageDir } = stageCopies(`a${String(i)}`);
     let applied = true;
     for (const edit of ablation.edits) {
       const target = join(
@@ -990,18 +1831,54 @@ try {
     }
     if (!applied) continue;
     const ablated = runProbe(loginsDir, usageDir);
-    const changed =
-      JSON.stringify(verdict(ablated)) !== JSON.stringify(liveVerdict);
-    if (changed) red += 1;
-    else {
+    if ('error' in ablated) {
+      // A PROBE THAT CANNOT RUN IS NOT AN ABLATION THAT WENT RED, which is
+      // exactly how this gate proved nothing from Phase 200 to Phase 281.
+      failures.push(
+        `${TAG} the ablation "${ablation.name}" stopped the probe running instead of moving a reading, so it proves nothing: ${String(ablated.error).slice(0, 300)}`
+      );
+      continue;
+    }
+    if (ablation.rule !== undefined) {
+      const found = phase281FindingsOver(usageDir, ablated);
+      const rules = [...new Set(found.map((f) => f.rule))].sort((a, b) => a - b);
+      const own = found.find((f) => f.rule === ablation.rule);
+      if (own !== undefined) {
+        red += 1;
+        details.push(`${ablation.name} -> rules ${rules.join(', ')}: ${own.sentence}`);
+      } else {
+        failures.push(
+          `${TAG} the ablation "${ablation.name}" did not turn rule ${String(ablation.rule)} red (it moved rules ${rules.join(', ') || 'none'}), so that rule cannot fail`
+        );
+      }
+      continue;
+    }
+    const got = verdict(ablated);
+    const was = verdict(live);
+    const moved = VERDICT_PARTS.filter((_, at) => got[at] !== was[at]);
+    if (moved.length > 0) {
+      red += 1;
+      // A CLAUSE OWNS A READING, and naming the one that moved is what lets a
+      // reader see it moved for the reason the ablation's name gives.
+      details.push(`${ablation.name} -> ${moved.join(', ')}`);
+    } else {
       failures.push(
         `${TAG} the ablation "${ablation.name}" changed nothing this gate checks, so that rule cannot fail`
       );
     }
   }
-  notes.push(`${String(red)} of ${String(ABLATIONS.length)} ablations went red`);
+  notes.push(`${String(red)} of ${String(ABLATIONS.length)} ablations went red over sibling copies an unedited copy of which reads what the tree reads`);
 } finally {
-  rmSync(ablationRoot, { recursive: true, force: true });
+  sweepAblations();
+}
+const digestAfter = shippingDigest();
+check(
+  digestAfter === digestBefore,
+  `${TAG} THE SHIPPING SOURCE CHANGED WHILE THE ABLATIONS RAN (sha256 ${digestBefore.slice(0, 12)} before, ${digestAfter.slice(0, 12)} after), so an edit reached the tree rather than a copy`
+);
+notes.push(`shipping sources sha256 ${digestBefore.slice(0, 12)} before and after`);
+if (process.env['P281_ABLATION_DETAIL'] === '1') {
+  for (const line of details) process.stdout.write(`${TAG} ablation ${line}\n`);
 }
 
 // ---------------------------------------------------------------------------

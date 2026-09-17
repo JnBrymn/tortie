@@ -1179,6 +1179,14 @@ export const CHECKS = [
   // control that the same delay unchanged does write. It spawns no agent and
   // spends no token.
   electron('probe:p277'),
+  // PHASE 281's app run, and the ONE probe in this table whose app reads the
+  // person's real login keychain: the Claude meter's shipping reader, at the
+  // parent and at HEAD, never at once, with P281_EXPECT naming the answer. A
+  // harness launch with no knob gives the credentials domain a FILE store whose
+  // security seam refuses every call, HOME is scratch and the Codex switch stays
+  // off, so the meter is the only thing that reads his item. It runs only with
+  // his approval, after a turn in a default-login claude session.
+  electron('probe:p281'),
   // PHASE 276's attack on its own gate. It breaks THIRTY-TWO clauses one at a time —
   // the coverage key weakened to "there is a slot", the projection handing out the
   // slot's own record and iterating the slot's order, a miss that narrows, a cap

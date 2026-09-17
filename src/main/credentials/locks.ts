@@ -57,9 +57,12 @@
  * lag is accepted; the person's own `.claude.json` is never written.
  *
  * The vendor also honours `CLAUDE_SECURESTORAGE_CONFIG_DIR` for the storage
- * lock's directory (`z_` at offset 158839953). Tortie does not read that
- * variable anywhere, so a person who sets it has a storage lock Tortie does
- * not take. That is a stated limit rather than an oversight.
+ * lock's directory (`z_` at offset 158839953). Since Phase 281 Tortie reads
+ * that variable for ONE thing, the default login's keychain service name
+ * (`claudeKeychainService` in ../usage/credentials.ts, a copy of the vendor's
+ * `mI`), and still not for the storage lock or the plaintext credentials file,
+ * so a person who sets it has a storage lock Tortie does not take. That is a
+ * stated limit rather than an oversight.
  *
  * ## CODEX HOLDS NOTHING, AND SAYS SO
  *

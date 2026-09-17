@@ -27,10 +27,19 @@
  *
  * The one thing that does spawn is the CLAUDE PRESENCE half, which asks the
  * keychain, because that is where the credential is. It asks for the item's
- * ATTRIBUTES and never for its payload: `security find-generic-password -s
- * <service>` with no `-w`. So this module can say a credential exists without
- * ever holding a token byte, which is stronger than what the meter needs and
- * is the reason presence can be answered while a meter is switched off.
+ * ATTRIBUTES and never for its payload: `security find-generic-password -a
+ * <account> -s <service>` with no `-w`. So this module can say a credential
+ * exists without ever holding a token byte, which is stronger than what the
+ * meter needs and is the reason presence can be answered while a meter is
+ * switched off.
+ *
+ * PHASE 281 ADDED THE `-a`. The item is the one Claude Code itself reads,
+ * named by the same service AND account ({@link claudeKeychainService} and
+ * {@link claudeKeychainAccount}, copies of the vendor's `mI` and `Cv`). The
+ * service-only form this paragraph used to quote matched a stray item under
+ * another account on the operator's machine (research 126 §2.4), so a
+ * presence check that asks without the account can answer for an item no
+ * Claude Code session will ever read.
  *
  * ## NO TOKEN BYTE OUTLIVES A CALL
  *
@@ -62,10 +71,10 @@
 
 import { execFile } from 'node:child_process';
 import { access, readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { LoginProviderId } from '@shared/logins';
-import { CLAUDE_KEYCHAIN_SERVICE, claudeScopedService } from './credentials';
+import { claudeKeychainAccount, claudeKeychainService } from './credentials';
 
 /**
  * Whose sign in this is.
@@ -92,8 +101,8 @@ export interface LoginFacts {
 
 /** The seams. Tests hand in their own and touch neither keychain nor disk. */
 export interface LoginAccountDeps {
-  /** Does a keychain item with this service name exist? ATTRIBUTES ONLY. */
-  keychainHas(service: string): Promise<boolean>;
+  /** Does the item at (service, account) exist? ATTRIBUTES ONLY, never -w or -g. */
+  keychainHas(service: string, account: string): Promise<boolean>;
   /** Is there a file here? Asked instead of read, so no token is opened. */
   exists(path: string): Promise<boolean>;
   /** The file's text, or null when it does not exist or cannot be read. */
@@ -101,6 +110,12 @@ export interface LoginAccountDeps {
   env: Record<string, string | undefined>;
   home: string;
   now(): number;
+  /**
+   * `userInfo().username`, for {@link claudeKeychainAccount} (Phase 281).
+   * Optional: absent means the user name is not known, which gives the
+   * vendor's own fallback account rather than the machine's user name.
+   */
+  osUserName?(): string;
 }
 
 /** How long the `security` call may take before the answer is "not known". */
@@ -123,25 +138,6 @@ export const LOGIN_FACTS_TIMEOUT_MS = 6_000;
 // ---------------------------------------------------------------------------
 // Where each vendor keeps the two things this module reads
 // ---------------------------------------------------------------------------
-
-/**
- * The keychain service names to try for one login, most specific first.
- *
- * A LOGIN DIRECTORY GETS THE SCOPED NAME AND NOTHING ELSE, which is the same
- * removal `readClaudeCredential` made and for the same reason: falling through
- * to the plain item would answer the PERSON'S OWN default credential for a
- * second login that has never been signed into.
- */
-export function claudeServicesFor(
-  d: Pick<LoginAccountDeps, 'env'>,
-  loginDir: string | null
-): string[] {
-  if (loginDir !== null && loginDir !== '') return [claudeScopedService(loginDir)];
-  const own = d.env['CLAUDE_CONFIG_DIR'];
-  return own !== undefined && own !== ''
-    ? [claudeScopedService(own), CLAUDE_KEYCHAIN_SERVICE]
-    : [CLAUDE_KEYCHAIN_SERVICE];
-}
 
 /** Where claude's credential FILE would be, for a person who turned the keychain off. */
 export function claudeCredentialFileFor(
@@ -381,9 +377,15 @@ export async function readLoginPresence(
   loginDir: string | null
 ): Promise<boolean> {
   if (provider === 'claude') {
-    for (const service of claudeServicesFor(d, loginDir)) {
-      if (await d.keychainHas(service)) return true;
-    }
+    // PHASE 281. ONE item, the one Claude Code reads, and no plain name after
+    // a scoped one: a login directory gets its scoped name and nothing else,
+    // and so does Tortie's own `CLAUDE_CONFIG_DIR`, because a Claude Code
+    // session under that directory never reads the plain item either
+    // (research 126 §5). Falling through to it would say a second login is
+    // signed in on the strength of the PERSON'S OWN default credential.
+    const service = claudeKeychainService(d.env, loginDir);
+    const account = claudeKeychainAccount(d.env, d.osUserName);
+    if (await d.keychainHas(service, account)) return true;
     return d.exists(claudeCredentialFileFor(d, loginDir));
   }
   return d.exists(codexAuthFileFor(d, loginDir));
@@ -412,15 +414,22 @@ export async function readLoginAccount(
 
 export function defaultLoginAccountDeps(): LoginAccountDeps {
   return {
-    keychainHas: (service) =>
+    keychainHas: (service, account) =>
       new Promise<boolean>((resolve) => {
         // NO `-w`. Without it `security` prints the item's ATTRIBUTES and
         // never its payload, so this proves a credential exists without ever
         // holding one. Nothing of the output is inspected beyond the exit
         // code, and nothing of it is logged.
+        //
+        // PHASE 281. `-a` before `-s`, the order Claude Code's own calls use,
+        // so the answer is about the item that vendor reads and never a stray
+        // under the same service name. A failure still reads as not present
+        // here, a limit Phase 281 states rather than fixes: the miss and
+        // failure split is the meter's alone (research 126 §7.2), so a locked
+        // keychain can still draw this list's not signed in row.
         execFile(
           '/usr/bin/security',
-          ['find-generic-password', '-s', service],
+          ['find-generic-password', '-a', account, '-s', service],
           { timeout: KEYCHAIN_TIMEOUT_MS, maxBuffer: 256 * 1024 },
           (err) => resolve(err === null)
         );
@@ -442,7 +451,8 @@ export function defaultLoginAccountDeps(): LoginAccountDeps {
     },
     env: process.env,
     home: homedir(),
-    now: () => Date.now()
+    now: () => Date.now(),
+    osUserName: () => userInfo().username
   };
 }
 

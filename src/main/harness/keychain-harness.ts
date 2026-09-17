@@ -67,7 +67,7 @@ export function installHarnessKeychain(): void {
   setKeepDeps(deps);
   setLoginAccountDeps({
     ...defaultLoginAccountDeps(),
-    keychainHas: (service) => keychainHasItem(runner, service)
+    keychainHas: (service, account) => keychainHasItem(runner, service, account)
   });
   // SAID OUT LOUD, because the probe has to be able to WAIT for it. It names
   // no path and no token.

@@ -225,6 +225,12 @@ export function harnessKeychainKeepDeps(
       vault: keychainVault(runner, root),
       stores: {
         ...defaultStoreDeps(runner, true, home),
+        // THE USER NAME HERE IS ONLY THE VENDOR RULE'S SECOND CHOICE (Phase
+        // 281). The account every vendor item is addressed under is `USER`
+        // when this process has one, as a launch from a login shell does, so
+        // a probe's claude items are written under that name, and `harness`
+        // only when `USER` is unset or empty. Either way they land in the
+        // SCRATCH keychain file this runner names and nowhere else.
         userName: 'harness',
         wait: (ms) => new Promise<void>((r) => setTimeout(r, Math.min(ms, 30)))
       },

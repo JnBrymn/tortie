@@ -240,8 +240,19 @@ describe('a held endpoint request', () => {
 describe('a keychain child that never exits', () => {
   it('is killed before the usage disposal resolves', async () => {
     const reader = keychainReader(NEVER_EXITS);
+    // PHASE 281. A cancelled read THROWS now rather than resolving null,
+    // because a keychain that did not answer is not a sign out. The service
+    // maps the throw to unavailable, so the read below still settles; this
+    // records which answer the reader itself gave.
+    let cancelledReadThrew = false;
     const deps: CredentialDeps = {
-      keychain: reader.keychain,
+      keychain: (service, account) => {
+        const asked = reader.keychain(service, account);
+        asked.catch(() => {
+          cancelledReadThrew = true;
+        });
+        return asked;
+      },
       readText: () => Promise.resolve(null),
       env: {},
       home: '/nonexistent',
@@ -277,6 +288,7 @@ describe('a keychain child that never exits', () => {
     await sleep(200);
     for (const pid of mine) expect(alive(pid)).toBe(false);
     await read;
+    expect(cancelledReadThrew).toBe(true);
   }, 20_000);
 });
 

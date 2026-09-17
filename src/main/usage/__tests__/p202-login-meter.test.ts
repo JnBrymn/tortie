@@ -21,7 +21,11 @@
 
 import { describe, expect, it } from 'vitest';
 import type { UsageSettings } from '@shared/settings';
-import { claudeScopedService, type CredentialDeps } from '../credentials';
+import {
+  CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT,
+  claudeScopedService,
+  type CredentialDeps
+} from '../credentials';
 import { createUsageService } from '../service';
 import type { UsageRequest, UsageResponse } from '../transport';
 
@@ -36,6 +40,8 @@ const ON: UsageSettings = { claude: true, codex: false, bar: 'five-hour' };
 
 interface Seen {
   services: string[];
+  /** PHASE 281. The account each keychain ask carried, in the same order. */
+  accounts: string[];
   files: string[];
   sent: UsageRequest[];
 }
@@ -45,10 +51,11 @@ function build(
   keychainFor: (service: string) => string | null,
   now: () => number = () => NOW
 ): { service: ReturnType<typeof createUsageService>; seen: Seen } {
-  const seen: Seen = { services: [], files: [], sent: [] };
+  const seen: Seen = { services: [], accounts: [], files: [], sent: [] };
   const credentials: CredentialDeps = {
-    keychain: async (service) => {
+    keychain: async (service, account) => {
       seen.services.push(service);
+      seen.accounts.push(account);
       return keychainFor(service);
     },
     readText: async (path) => {
@@ -87,6 +94,9 @@ describe('the read follows the chosen login', () => {
     );
     const snap = await service.read();
     expect(seen.services).toEqual([claudeScopedService(SECOND_DIR)]);
+    // PHASE 281. Under the vendor's account, and with no USER and no user
+    // name seam that is its own fallback, never an ask without one.
+    expect(seen.accounts).toEqual([CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT]);
     // THE PERSON'S OWN ITEM WAS NEVER ASKED FOR.
     expect(seen.services).not.toContain('Claude Code-credentials');
     const row = snap.providers.find((p) => p.provider === 'claude');
@@ -122,6 +132,7 @@ describe('the read follows the chosen login', () => {
     );
     const snap = await service.read();
     expect(seen.services).toEqual(['Claude Code-credentials']);
+    expect(seen.accounts).toEqual([CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT]);
     expect(snap.providers.find((p) => p.provider === 'claude')?.login).toBeNull();
   });
 });

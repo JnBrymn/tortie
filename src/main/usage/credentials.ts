@@ -25,8 +25,12 @@
 import { usagePlanWord } from '@shared/usage';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
+// The decoder's own leaf rather than `../credentials/security`, which imports
+// this file for `isClaudeVendorService`: each importing the other is a runtime
+// cycle (Phase 281).
+import { decodeKeychainPayload } from '../credentials/security-print';
 import { runGuarded } from '../proc/guarded';
 
 /** What a credential read answers. Never a vendor sentence, never a token in a log. */
@@ -46,12 +50,30 @@ export type CredentialResult =
 
 /** The seams. Tests hand in their own and touch neither keychain nor disk. */
 export interface CredentialDeps {
-  /** `security find-generic-password -s <service> -w`, or null when absent. */
-  keychain(service: string): Promise<string | null>;
+  /**
+   * `security find-generic-password -a <account> -s <service> -w`.
+   *
+   * THREE ANSWERS, and Phase 281 is why there are three rather than two.
+   * Resolves the payload decoded through `decodeKeychainPayload` (possibly
+   * ''), resolves null ONLY when the item does not exist (security exit 44),
+   * and THROWS when the item could not be read: any other exit including 36,
+   * a signal, a spawn error, the deadline, a cancel, or a refused argument.
+   * A miss is the one answer that may draw the sign in line, and a keychain
+   * that could not answer is not a miss (research 126 §7.2, item 3 of the
+   * files, "A miss is not a failure").
+   */
+  keychain(service: string, account: string): Promise<string | null>;
   /** The file's text, or null when it does not exist or cannot be read. */
   readText(path: string): Promise<string | null>;
   env: Record<string, string | undefined>;
   home: string;
+  /**
+   * `userInfo().username`, for {@link claudeKeychainAccount} (Phase 281).
+   * Optional: absent means the user name is not known, which gives the
+   * vendor's own fallback account rather than the machine's user name, so a
+   * test seam that leaves it out never depends on who runs it.
+   */
+  osUserName?(): string;
   /**
    * PHASE 200. End everything this reader has in flight, and answer how many
    * were ended. Called by the usage service's own shutdown, so the disposer
@@ -64,22 +86,180 @@ export interface CredentialDeps {
 
 const KEYCHAIN_TIMEOUT_MS = 5_000;
 
+/**
+ * The exit `security` gives when no item matches (errSecItemNotFound), and the
+ * ONLY exit this domain reads as "no credential here" (Phase 281, research 126
+ * §7.2). The vendor's own store reads the same number as absent (`Q=44`,
+ * bundle 2.1.274 offset 170,936,447).
+ */
+const KEYCHAIN_EXIT_NOT_FOUND = 44;
+
+// ---------------------------------------------------------------------------
+// PHASE 281. THE ITEM CLAUDE CODE READS, NAMED THE WAY CLAUDE CODE NAMES IT
+// ---------------------------------------------------------------------------
+//
+// Claude Code addresses its credential item by service AND account. Until this
+// phase Tortie asked by service alone, and on the operator's machine that name
+// matched two items: `security` handed back a stray under another account
+// that gave no usable credential, while every claude session read the item
+// under his user name and posted live numbers. Research 126 §2.4 is the
+// measurement, and the attributes-only `-a` lookup he ran before this phase
+// started confirmed the item exists (exit 0, written that day).
+//
+// The functions below COPY the vendor rather than approximate it, read out of
+// the installed 2.1.274 bundle (the same rule in 2.1.273): `Cv` is the
+// account, `mI` the service name, and the store's read, write, delete and
+// startup read all pass `-a Cv()` against `mI("-credentials")`. The one
+// service-only `find-generic-password -s` string in that bundle is help text
+// for a credential helper. So "Tortie finds nothing" and "Claude Code finds
+// nothing" are the same fact, and the sign in line only ever says what a
+// Claude Code session in the same configuration would itself conclude.
+
 /** The plain service name, which is what a default install actually has. */
 export const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
 
 /**
- * The config-dir-scoped service name.
+ * The account Claude Code gives its item when it cannot use the user name:
+ * `Cv`'s fallback, a fixed string in the bundle.
+ */
+export const CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT = 'claude-code-user';
+
+/** `Cv`'s pattern, byte for byte. A user name outside it is not used. */
+const CLAUDE_KEYCHAIN_ACCOUNT_RE = /^[a-zA-Z0-9._-]+$/;
+
+/**
+ * The account attribute of the item Claude Code reads (Phase 281), a copy of
+ * the vendor's `Cv`:
  *
- * MEASURED CAVEAT: on a default install with `CLAUDE_CONFIG_DIR` unset there
- * is no suffix at all, and the plain name above is the live item. The suffix
- * form is real in orca and UNMEASURED here, so it is tried FIRST only when a
- * config dir is set, and the plain name is always tried as well. A reader that
- * only tried the scoped name would find nothing on this machine and wrongly
- * conclude the person is signed out.
+ * ```
+ * try { n = process.env.USER || userInfo().username }
+ * catch { n = "claude-code-user" }
+ * if (!/^[a-zA-Z0-9._-]+$/.test(n)) return "claude-code-user"
+ * ```
+ *
+ * `USER` wins when it is set and not empty, and the user name is then never
+ * asked, exactly as `||` short circuits in the vendor. `osUserName` is the
+ * `userInfo().username` half, INJECTED so a test never depends on the machine
+ * it runs on. Leaving it out means this process could not learn the user
+ * name, which is the vendor's throw branch and answers the fallback; a
+ * shipping seam always passes it. A name that is not a string is refused the
+ * same way, which only matters for a seam that lies about its type.
+ *
+ * Every `security` call aimed at a vendor service ({@link
+ * isClaudeVendorService}) carries this as `-a`, in both domains, and nothing
+ * falls back to a lookup without it: a lookup by service alone is exactly the
+ * read that landed on the stray item.
+ */
+export function claudeKeychainAccount(
+  env: Readonly<Record<string, string | undefined>>,
+  osUserName?: () => string
+): string {
+  let name: unknown;
+  try {
+    const fromEnv = env['USER'];
+    if (fromEnv !== undefined && fromEnv !== '') {
+      name = fromEnv;
+    } else {
+      if (osUserName === undefined) throw new Error('the user name is not known');
+      name = osUserName();
+    }
+  } catch {
+    name = CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT;
+  }
+  return typeof name === 'string' && CLAUDE_KEYCHAIN_ACCOUNT_RE.test(name)
+    ? name
+    : CLAUDE_KEYCHAIN_FALLBACK_ACCOUNT;
+}
+
+/**
+ * The config-dir-scoped service name: the plain name, a hyphen, and the first
+ * eight hex characters of the sha256 of the directory.
+ *
+ * THE DIRECTORY IS HASHED IN ITS NFC FORM (Phase 281), because the vendor's
+ * `mI` hashes `CLAUDE_CONFIG_DIR.normalize("NFC")` (through `we`) and
+ * `CLAUDE_SECURESTORAGE_CONFIG_DIR.normalize("NFC")`. A directory spelled with
+ * a decomposed accent names the same item as its composed spelling, and a
+ * digest of the raw bytes would name an item no Claude Code ever writes.
+ *
+ * The string is hashed AS GIVEN otherwise: no resolving, no trailing slash
+ * removed, no `~` expanded, because the vendor does none of those. So the
+ * directory handed here must be the exact string a session's
+ * `CLAUDE_CONFIG_DIR` carries.
+ *
+ * The caveat that stood here until Phase 281 called this form unmeasured and
+ * had every reader try the plain name as well whenever a config dir was set.
+ * Research 126 §5 refutes it from the vendor's own code: with a non-empty
+ * `CLAUDE_CONFIG_DIR`, Claude Code asks the scoped name and NOTHING ELSE, and
+ * the plain-name fallback drew one account's numbers under another account's
+ * name when the Phase 280 verifier drove it.
  */
 export function claudeScopedService(configDir: string): string {
-  const digest = createHash('sha256').update(configDir).digest('hex');
+  const digest = createHash('sha256')
+    .update(configDir.normalize('NFC'))
+    .digest('hex');
   return `${CLAUDE_KEYCHAIN_SERVICE}-${digest.slice(0, 8)}`;
+}
+
+/**
+ * The ONE service name the item for this login has (Phase 281). There is no
+ * list and no order, because Claude Code asks exactly one name.
+ *
+ *  - A LOGIN DIRECTORY Tortie made gets the scoped name of that directory,
+ *    which is what the vendor names for a session launched with that
+ *    `CLAUDE_CONFIG_DIR`. Never the plain name: that would read the person's
+ *    own default credential under the second login's name.
+ *  - Otherwise, the default login, a copy of the vendor's `mI`:
+ *    `CLAUDE_SECURESTORAGE_CONFIG_DIR` DEFINED AND EMPTY gives the plain name,
+ *    and defined and not empty gives the scoped name of its NFC form. That
+ *    variable is asked with `!== undefined`, not for being non-empty, because
+ *    the vendor asks `e !== void 0`: an empty value is a deliberate choice of
+ *    the plain name even when `CLAUDE_CONFIG_DIR` is set.
+ *  - Otherwise a non-empty `CLAUDE_CONFIG_DIR` gives the scoped name of its
+ *    NFC form and nothing else, and an empty or unset one gives the plain name.
+ *
+ * THE LIMIT, stated rather than handled: a chosen login under
+ * `CLAUDE_SECURESTORAGE_CONFIG_DIR` gets its directory's scoped name here,
+ * while Claude Code would give every login the one name that variable names.
+ * Research 126 §7.2 leaves that case out of Phase 281.
+ */
+export function claudeKeychainService(
+  env: Readonly<Record<string, string | undefined>>,
+  loginDir: string | null
+): string {
+  if (loginDir !== null && loginDir !== '') return claudeScopedService(loginDir);
+  const secure = env['CLAUDE_SECURESTORAGE_CONFIG_DIR'];
+  if (secure !== undefined) {
+    return secure === '' ? CLAUDE_KEYCHAIN_SERVICE : claudeScopedService(secure);
+  }
+  const own = env['CLAUDE_CONFIG_DIR'];
+  return own !== undefined && own !== ''
+    ? claudeScopedService(own)
+    : CLAUDE_KEYCHAIN_SERVICE;
+}
+
+/**
+ * Is this a keychain service name in Claude Code's namespace (Phase 281)?
+ *
+ * The plain name, any name beginning with the plain name and a hyphen (every
+ * scoped name, and a scoped name's `.tortie-pending` staged place), and any
+ * name beginning with the plain name and a dot (the plain name's own
+ * `Claude Code-credentials.tortie-pending`, which `../credentials/stores.ts`
+ * stages beside the default item). Every `security` call aimed at such a name
+ * carries `-a` with {@link claudeKeychainAccount}, and `../credentials/
+ * security.ts` refuses one that does not before anything is spawned.
+ *
+ * A name that merely STARTS with the same letters, `Claude Code-credentialsX`,
+ * is not the vendor's and answers false. So does `Claude Code` on its own,
+ * the vendor's API key item, which Tortie never names.
+ */
+export function isClaudeVendorService(service: string): boolean {
+  if (typeof service !== 'string') return false;
+  if (service === CLAUDE_KEYCHAIN_SERVICE) return true;
+  const rest = service.slice(CLAUDE_KEYCHAIN_SERVICE.length);
+  return (
+    service.startsWith(CLAUDE_KEYCHAIN_SERVICE) &&
+    (rest.startsWith('-') || rest.startsWith('.'))
+  );
 }
 
 /** The one program this domain runs, and the only one it ever will. */
@@ -96,9 +276,27 @@ export const KEYCHAIN_BIN = '/usr/bin/security';
  * Tortie's is in, always settles inside its deadline, and takes an abort
  * signal so this domain's own shutdown can end it at once.
  *
- * NOTHING ABOUT WHAT IS READ CHANGES. The same argv, the same 5 s deadline, a
- * miss and a failure are still the same answer, and neither the failure nor
- * the output is logged or inspected any further than it was.
+ * PHASE 281 CHANGED WHAT IS ASKED AND WHAT A FAILURE MEANS.
+ *
+ *  - THE ACCOUNT IS PASSED, as `-a`. Claude Code reads its item by service
+ *    AND account (bundle 2.1.274, the async read at offset 170,936,315), and
+ *    a lookup by service alone landed on a stray item under another account
+ *    on the operator's machine (research 126 §2.4). An empty account is
+ *    refused before anything is spawned, because asking without one is that
+ *    same service-only read.
+ *  - THE OUTPUT IS DECODED through `decodeKeychainPayload`, the credentials
+ *    domain's one reading of what `security` prints. A payload holding a
+ *    character `security` will not print raw comes out as HEX, and the raw
+ *    stdout used to reach the JSON parser as that hex and read `missing`
+ *    (research 126 §2.7).
+ *  - A MISS AND A FAILURE ARE NO LONGER THE SAME ANSWER. Exit 44, no such
+ *    item, is null. Everything else throws: another exit, a signal, a spawn
+ *    error, the deadline and a cancel. The usage service already maps a thrown
+ *    read to `unavailable`, which keeps the last numbers under the stale glyph
+ *    instead of clearing them and telling a signed in person to sign in.
+ *
+ * Neither the failure nor the output is logged, and the thrown sentence is
+ * fixed: it names no service, no account and nothing `security` printed.
  *
  * `bin` exists so a test can drive the SHIPPING code over a child of its own
  * that never exits, which is the only way to prove the cancel actually kills
@@ -106,29 +304,52 @@ export const KEYCHAIN_BIN = '/usr/bin/security';
  * nothing a person or an agent can write reaches this argument.
  */
 export function keychainReader(bin: string = KEYCHAIN_BIN): {
-  keychain(service: string): Promise<string | null>;
+  keychain(service: string, account: string): Promise<string | null>;
   cancel(): number;
 } {
   const live = new Set<AbortController>();
   return {
-    keychain: async (service) => {
+    keychain: async (service, account) => {
+      if (typeof account !== 'string' || account === '') {
+        throw new Error('the keychain read was refused: no account');
+      }
       const ending = new AbortController();
       live.add(ending);
       try {
         const run = await runGuarded(
           bin,
-          ['find-generic-password', '-s', service, '-w'],
+          ['find-generic-password', '-a', account, '-s', service, '-w'],
           {
             timeoutMs: KEYCHAIN_TIMEOUT_MS,
             maxOutputBytes: 1024 * 1024,
             cancel: ending.signal
           }
         );
-        // A miss, a failure, a deadline and a cancel are all the same answer
-        // here, and none of them is logged or inspected any further.
-        if (run.spawnError !== null || run.timedOut || run.cancelled) return null;
-        if (run.code !== 0) return null;
-        return run.stdout.trim() === '' ? null : run.stdout;
+        const answered =
+          run.spawnError === null && !run.timedOut && !run.cancelled;
+        if (answered && run.code === 0) return decodeKeychainPayload(run.stdout);
+        // EXIT 36 IS NOT ABSENT HERE, and that is a deliberate difference from
+        // Claude Code. The vendor's own read answers null for 36 as well as 44
+        // (bundle 2.1.274, `o===Q||o===ee` at offset 170,936,447). 36 is the
+        // keychain refusing to interact, which is what a locked keychain
+        // answers WHERE NO UNLOCK PROMPT CAN BE SHOWN (the vendor's own lock
+        // test is `security show-keychain-info` answering 36, offset
+        // 170,936,603), and a locked keychain is
+        // not a sign out: reading it as one would draw "Sign in with Claude
+        // Code" for a person who is signed in and send them to the wrong
+        // remedy (research 126 §7.2 proof step 4).
+        //
+        // IN A GUI SESSION A LOCKED KEYCHAIN DID NOT ANSWER 36. The Phase 281
+        // keychain verifier measured it on a scratch keychain in an Aqua
+        // session: the `-w` read printed nothing and did not exit until it was
+        // killed, most likely held on the unlock prompt. So there the read
+        // throws at the five second deadline above, which keeps the last
+        // numbers under the stale state all the same. THE LIMIT, stated and
+        // not new (the parent sent the same `-w` read): every poll against a
+        // locked login keychain can raise that prompt and hold for five
+        // seconds.
+        if (answered && run.code === KEYCHAIN_EXIT_NOT_FOUND) return null;
+        throw new Error('the keychain item could not be read');
       } finally {
         live.delete(ending);
       }
@@ -155,6 +376,10 @@ export function defaultCredentialDeps(): CredentialDeps {
     },
     env: process.env,
     home: homedir(),
+    // Asked only when `USER` is unset or empty, exactly as the vendor's `Cv`
+    // asks it, and a throw here (no passwd entry) is that function's own
+    // fallback rather than a failed read.
+    osUserName: () => userInfo().username,
     cancel: reader.cancel
   };
 }
@@ -208,9 +433,18 @@ function claudeLoginFrom(
  * the one that matters. `loginDir` names the directory of a login a person
  * added in Tortie, or null for their own default sign in.
  *
- *  - NULL, the default login: the plain service name, which is what a default
- *    install actually has, plus the scoped one when Tortie's OWN process has a
- *    `CLAUDE_CONFIG_DIR` set. This is exactly what Phase 181 did.
+ * PHASE 281 MADE IT ONE ITEM, ADDRESSED THE WAY CLAUDE CODE ADDRESSES IT. The
+ * keychain is asked exactly once, for the one service name
+ * {@link claudeKeychainService} gives under the one account
+ * {@link claudeKeychainAccount} gives:
+ *
+ *  - NULL, the default login: the vendor's own `mI` over Tortie's process
+ *    environment, which is the plain name on a default install and the scoped
+ *    name of `CLAUDE_CONFIG_DIR` when that is set. THERE IS NO PLAIN NAME
+ *    AFTER THE SCOPED ONE. Phase 181 asked both, and research 126 §5 refutes
+ *    that from the vendor's code: a Claude Code session under that directory
+ *    never reads the plain item, and the verifier drove the fallback drawing
+ *    one account's numbers under another account's name.
  *  - A DIRECTORY, a second login: the SCOPED service name for that directory
  *    and NOTHING ELSE, then that directory's own credentials file.
  *
@@ -225,26 +459,39 @@ function claudeLoginFrom(
  * into. On macOS that sign in writes a KEYCHAIN ITEM rather than a file, so
  * "Tortie reads nothing until the file exists" is more exactly "until the
  * scoped item or the file exists", and both are asked here.
+ *
+ * `missing` IS ONLY EVER A CONFIRMED ANSWER (Phase 281). It is returned when
+ * the keychain said there is no such item, or held nothing usable, AND the
+ * file gave nothing either. A keychain that could not be read at all, being
+ * locked, slow, cancelled or refused, with no file to stand in for it, THROWS
+ * instead, and `fetchProvider` maps that to `unavailable`, which keeps the
+ * last numbers under the stale glyph rather than telling a signed in person to
+ * sign in. A payload that parses to no `claudeAiOauth.accessToken` is "held
+ * nothing usable" and not unreadable: the store answered, and its answer is
+ * that no credential Tortie can use is there.
  */
 export async function readClaudeCredential(
   deps: CredentialDeps,
   loginDir: string | null = null
 ): Promise<CredentialResult> {
-  const own = deps.env['CLAUDE_CONFIG_DIR'];
-  const services =
-    loginDir !== null && loginDir !== ''
-      ? [claudeScopedService(loginDir)]
-      : own !== undefined && own !== ''
-        ? [claudeScopedService(own), CLAUDE_KEYCHAIN_SERVICE]
-        : [CLAUDE_KEYCHAIN_SERVICE];
-  for (const service of services) {
-    const payload = await deps.keychain(service);
-    if (payload === null) continue;
+  const service = claudeKeychainService(deps.env, loginDir);
+  const account = claudeKeychainAccount(deps.env, deps.osUserName);
+  let unreadable = false;
+  let payload: string | null = null;
+  try {
+    payload = await deps.keychain(service, account);
+  } catch {
+    // Nothing of the failure is kept or logged. It decides one thing, below:
+    // whether an empty file read may still be called a sign out.
+    unreadable = true;
+  }
+  if (payload !== null) {
     const login = claudeLoginFrom(payload);
     if (login !== null) {
       return { kind: 'ok', token: login.token, accountId: null, plan: login.plan };
     }
   }
+  const own = deps.env['CLAUDE_CONFIG_DIR'];
   const dir =
     loginDir !== null && loginDir !== ''
       ? loginDir
@@ -258,6 +505,7 @@ export async function readClaudeCredential(
       return { kind: 'ok', token: login.token, accountId: null, plan: login.plan };
     }
   }
+  if (unreadable) throw new Error('the Claude keychain item could not be read');
   return { kind: 'missing' };
 }
 

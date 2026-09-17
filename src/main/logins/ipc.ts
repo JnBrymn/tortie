@@ -33,8 +33,10 @@
  * delete.
  *
  * SO `list` NOW SPAWNS ONE THING, AND ONLY ONE. `security
- * find-generic-password -s <service>` per claude login, with NO `-w`, which
- * reads the item's attributes and never its payload. It is asked when a
+ * find-generic-password -a <account> -s <service>` per claude login, with NO
+ * `-w`, which reads the item's attributes and never its payload. The account
+ * is Claude Code's own (Phase 281), because a lookup by service alone answers
+ * whichever item of that name `security` finds first. It is asked when a
  * surface is about to draw and after every change, never on a timer and never
  * on a keystroke, and the answer is held for five seconds so a pointer moving
  * over the meter asks once rather than once a frame. The identity half spawns

@@ -666,7 +666,11 @@ What this document did not establish, and what would establish it.
    Access Control tab in §7.3 would establish it.
 4. **Which of two same-named items `security` returns is undocumented.** Before 2026-09-10 the
    service-only read found a token. It may find something else after any change to the keychain. The fix
-   makes the order irrelevant.
+   makes the order irrelevant. The Phase 281 keychain verifier later measured the order on a scratch
+   keychain (2026-09-17): a service-only lookup answered in creation order, and an
+   `add-generic-password -U` of an existing item kept one item but moved it behind every other item of the
+   same service name. That fits his machine: every Claude Code refresh is an `add -U` of its own item, so
+   each one put it back behind the stray.
 5. **The real cycle was not watched in his app.** It was reproduced with the shipping service and store
    under an injected clock. The Phase 280 entry asked for a long app run. That would be one Electron on
    his real profile for at least 95 minutes, with a session producing turns and then going quiet, reading

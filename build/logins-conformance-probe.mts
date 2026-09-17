@@ -10,15 +10,41 @@
  * `P202_LOGINS_DIR` points the two store modules somewhere else, and
  * `P203_ACCOUNTS_DIR` does the same for the account reader, which is how the
  * gate runs the same probe over an ABLATED copy and watches it go red. A gate
- * whose checks cannot fail proves nothing.
+ * whose checks cannot fail proves nothing. Both copies must be SIBLINGS of
+ * `logins/` and `usage/` under `src/main/`, because the usage copy imports
+ * `../proc/guarded` and `../credentials/security-print`; the gate places them
+ * there (Phase 281, and why is in its own header).
  *
  * PHASE 203 ADDED THE PRESENCE AND ACCOUNT READINGS. Everything below section
  * 8 runs the SHIPPING `src/main/usage/login-accounts.ts` with injected seams,
  * so it opens no keychain, spawns nothing and reads no vendor file: the
- * keychain is a set of names and the file system is a bag of strings.
+ * keychain is a list of (service, account) items and the file system is a bag
+ * of strings.
+ *
+ * PHASE 281 ADDED SECTION 9, and it is the one place this probe starts a
+ * process. `keychainReader` has exactly one seam below its argv, being the
+ * program it runs, so the argv it sends and what it makes of each exit can
+ * only be read by handing it a program. The probe WRITES those programs
+ * itself, as `/bin/sh` scripts in its own scratch root standing in for
+ * `security`: one records its argv and answers from two synthetic items the
+ * way `security` matches (first match, `-a` narrowing it), and three do
+ * nothing but exit 44, 36 and 1. The shipping reader starts each one and
+ * WAITS for it; every one exits at once, holds no loop and no sleeper, so
+ * nothing is left running when the reader returns, and the scripts go with
+ * the scratch root in the `finally`. `/usr/bin/security` is never run, no
+ * keychain is opened, and every account name is a synthetic `p281-` one.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -45,6 +71,16 @@ const credentials = (await import(
 
 /** A value only this probe ever writes. If it appears anywhere, say where. */
 const TOKEN = 'P202-SENTINEL-TOKEN-8f3c1a';
+
+/**
+ * PHASE 281. The two keychain accounts every reading below is keyed by. Both
+ * are synthetic, and `USER` is set to the first in every environment handed to
+ * the shipping code, so the vendor account rule answers it and never the name
+ * of whoever runs the gate. The second stands for the stray item research 126
+ * §2.4 found under the same service name on the operator's machine.
+ */
+const VENDOR_ACCOUNT = 'p281-vendor';
+const STRAY_ACCOUNT = 'p281-stray';
 
 const root = mkdtempSync(join(tmpdir(), 'p202-gate-'));
 const out: Record<string, unknown> = {};
@@ -474,19 +510,30 @@ try {
 
   // -------------------------------------------------------------------------
   // 8. PRESENCE IS THE WHOLE QUESTION (Phase 203), which is the first defect
-  //    the operator reported. Every seam is injected: the keychain is a set of
-  //    service names and the file system is a bag of strings, so nothing here
-  //    opens a keychain, spawns a process or reads a vendor file.
+  //    the operator reported. Every seam is injected: the keychain is a list
+  //    of (service, account) items and the file system is a bag of strings, so
+  //    nothing here opens a keychain, spawns a process or reads a vendor file.
+  //
+  //    PHASE 281 KEYED THE KEYCHAIN BY ACCOUNT TOO, and matches the way
+  //    `security` does: the FIRST item whose service matches and, when an
+  //    account was asked, whose account matches as well. A call that leaves
+  //    the account out is therefore the service-only lookup that landed on the
+  //    stray, and it is visible here as an answer rather than hidden by a
+  //    model that ignored the second argument.
   // -------------------------------------------------------------------------
   const seams = (
-    items: string[],
+    items: ReadonlyArray<readonly [string, string]>,
     files: Record<string, string>,
-    env: Record<string, string | undefined> = {},
-    home = '/nowhere'
+    env: Record<string, string | undefined> = { USER: VENDOR_ACCOUNT },
+    home = '/nowhere',
+    asked: unknown[][] = []
   ): Parameters<typeof accounts.readLoginPresence>[0] => {
-    const set = new Set(items);
     return {
-      keychainHas: async (service: string) => set.has(service),
+      keychainHas: async (service: string, account: string) => {
+        asked.push([service, account ?? null]);
+        const narrowed = typeof account === 'string' && account !== '';
+        return items.some(([s, a]) => s === service && (!narrowed || a === account));
+      },
       exists: async (path: string) => Object.hasOwn(files, path),
       readText: async (path: string) => files[path] ?? null,
       env,
@@ -501,31 +548,26 @@ try {
   if (!listAdd.ok) throw new Error(`add refused: ${listAdd.reason}`);
   const liveDir = listAdd.dir ?? '';
   const scoped = credentials.claudeScopedService(liveDir);
-  const askedForLogin: string[] = [];
-  const scopedProbe = {
-    ...seams([], {}),
-    keychainHas: async (service: string) => {
-      askedForLogin.push(service);
-      return false;
-    }
-  };
-  await accounts.readLoginPresence(scopedProbe, 'claude', liveDir);
-  const askedForDefault: string[] = [];
+  const askedForLogin: unknown[][] = [];
   await accounts.readLoginPresence(
-    {
-      ...seams([], {}),
-      keychainHas: async (service: string) => {
-        askedForDefault.push(service);
-        return false;
-      }
-    },
+    seams([], {}, undefined, undefined, askedForLogin),
+    'claude',
+    liveDir
+  );
+  const askedForDefault: unknown[][] = [];
+  await accounts.readLoginPresence(
+    seams([], {}, undefined, undefined, askedForDefault),
     'claude',
     null
   );
   out['presence'] = {
     // THE DEFECT AND THE FIX SIDE BY SIDE. macOS writes no credentials file
     // for a claude login, so the keychain half is the only half there is.
-    keychainOnly: await accounts.readLoginPresence(seams([scoped], {}), 'claude', liveDir),
+    keychainOnly: await accounts.readLoginPresence(
+      seams([[scoped, VENDOR_ACCOUNT]], {}),
+      'claude',
+      liveDir
+    ),
     fileOnly: await accounts.readLoginPresence(
       seams([], { [`${liveDir}/.credentials.json`]: '{}' }),
       'claude',
@@ -556,7 +598,7 @@ try {
           ? { present: false, email: null }
           : {
               present: await accounts.readLoginPresence(
-                seams([credentials.claudeScopedService(dir)], {}),
+                seams([[credentials.claudeScopedService(dir), VENDOR_ACCOUNT]], {}),
                 provider,
                 dir
               ),
@@ -639,6 +681,326 @@ try {
     decoyAccountFile: accounts.claudeAccountFileFor({ env: {}, home: '/h' }, null),
     decoyCredentialFile: accounts.claudeCredentialFileFor({ env: {}, home: '/h' }, null),
     scopedAccountFile: accounts.claudeAccountFileFor({ env: {}, home: '/h' }, '/d/x')
+  };
+
+  // -------------------------------------------------------------------------
+  // 9. THE ITEM CLAUDE CODE READS (Phase 281). Research 126 §5, §7 and §8.
+  //
+  //    Every directory here is a FIXED synthetic string that is never on disk,
+  //    because nothing below reads a directory: the presence and credential
+  //    seams are injected, and the scoped name is a hash of the string. So
+  //    every reading is the same on every run and the gate compares them
+  //    whole, re-deriving each service name by its own hash.
+  //
+  //    Nothing below prints a payload. A credential answer is reduced to WHOSE
+  //    it is, `vendor` or `stray`, by comparing the token with the two
+  //    synthetic ones this section wrote.
+  // -------------------------------------------------------------------------
+  const PLAIN = credentials.CLAUDE_KEYCHAIN_SERVICE;
+  const LOGIN_DIR = '/p281/logins/claude/0123456789abcdef';
+  const CONFIG_DIR = '/p281/config';
+  // "cafe" and a COMBINING ACUTE ACCENT, which is the decomposed spelling of
+  // the composed "café". Claude Code hashes the NFC form (research 126 §5,
+  // `mI` and `we` in bundle 2.1.274), so both spellings name one item.
+  const NFD_DIR = '/p281/café';
+  const VENDOR_TOKEN = 'P281-VENDOR-SENTINEL-4d1e';
+  const STRAY_TOKEN = 'P281-STRAY-SENTINEL-9b7a';
+  const credentialText = (token: string, plan: string): string =>
+    JSON.stringify({ claudeAiOauth: { accessToken: token, subscriptionType: plan } });
+  const VENDOR_PAYLOAD = credentialText(VENDOR_TOKEN, 'max');
+  const STRAY_PAYLOAD = credentialText(STRAY_TOKEN, 'pro');
+
+  type CredentialDeps = Parameters<typeof credentials.readClaudeCredential>[0];
+  /** Whose credential an answer is, or how it failed. Never the token. */
+  const whose = async (read: () => Promise<unknown>): Promise<string> => {
+    try {
+      const got = await read();
+      if (got === null) return 'null';
+      if (typeof got === 'string') {
+        return got === VENDOR_PAYLOAD ? 'vendor' : got === STRAY_PAYLOAD ? 'stray' : 'other';
+      }
+      const result = got as { kind: string; token?: string };
+      if (result.kind !== 'ok') return result.kind;
+      return result.token === VENDOR_TOKEN
+        ? 'vendor'
+        : result.token === STRAY_TOKEN
+          ? 'stray'
+          : 'other';
+    } catch {
+      return 'throw';
+    }
+  };
+  /**
+   * The credential reader's keychain seam over items kept in order, matched
+   * the way `security` matches: the first item with the service and, when an
+   * account was asked, that account. A call with no account is the
+   * service-only lookup, and it meets whichever item is first.
+   */
+  const credentialSeams = (
+    items: ReadonlyArray<readonly [string, string, string]>,
+    env: Record<string, string | undefined>,
+    asked: unknown[][],
+    files: Record<string, string> = {}
+  ): CredentialDeps => ({
+    keychain: async (service: string, account: string) => {
+      asked.push([service, account ?? null]);
+      const narrowed = typeof account === 'string' && account !== '';
+      const hit = items.find(([s, a]) => s === service && (!narrowed || a === account));
+      return hit === undefined ? null : hit[2];
+    },
+    readText: async (path: string) => files[path] ?? null,
+    env,
+    home: '/p281/home'
+  });
+
+  // 9a. PRESENCE ASKS THE ONE ITEM, WITH THE ACCOUNT.
+  const presenceLoginAsked: unknown[][] = [];
+  await accounts.readLoginPresence(
+    seams([], {}, undefined, undefined, presenceLoginAsked),
+    'claude',
+    LOGIN_DIR
+  );
+  const presenceDefaultAsked: unknown[][] = [];
+  await accounts.readLoginPresence(
+    seams([], {}, undefined, undefined, presenceDefaultAsked),
+    'claude',
+    null
+  );
+  const loginScoped = credentials.claudeScopedService(LOGIN_DIR);
+
+  // 9b. THE PROGRAMS the shipping `keychainReader` runs instead of `security`.
+  //     Each is started and waited for by the reader, exits at once, and is
+  //     removed with `root` in the `finally` below.
+  const binRoot = join(root, 'p281-security');
+  const program = (name: string, body: string[]): { bin: string; argv(): string[][] } => {
+    const dir = join(binRoot, name);
+    mkdirSync(dir, { recursive: true });
+    const bin = join(dir, 'security');
+    writeFileSync(
+      bin,
+      [
+        '#!/bin/sh',
+        'here=$(dirname "$0")',
+        // Every argument, separated by the unit separator so one holding a
+        // space survives, one run per line.
+        `printf '%s\\037' "$@" >> "$here/argv"`,
+        `printf '\\n' >> "$here/argv"`,
+        ...body,
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+    chmodSync(bin, 0o755);
+    return {
+      bin,
+      argv: () => {
+        const file = join(dir, 'argv');
+        if (!existsSync(file)) return [];
+        return readFileSync(file, 'utf8')
+          .split('\n')
+          .filter((line) => line !== '')
+          .map((line) => line.split('').slice(0, -1));
+      }
+    };
+  };
+  /**
+   * Two items under the plain name, the STRAY FIRST, which is the order that
+   * made a service-only lookup wrong on the operator's machine. `-a` picks the
+   * item by account; no `-a` meets the first; `-w` prints the payload and one
+   * newline, as `security` does. Anything else is exit 44.
+   */
+  const firstMatch = (name: string): { bin: string; argv(): string[][] } => {
+    const made = program(name, [
+      "service=''",
+      "account=''",
+      'payload=0',
+      "next=''",
+      'for arg in "$@"; do',
+      '  case "$next" in',
+      '    a) account=$arg ;;',
+      '    s) service=$arg ;;',
+      '  esac',
+      "  next=''",
+      '  case "$arg" in',
+      '    -a) next=a ;;',
+      '    -s) next=s ;;',
+      '    -w) payload=1 ;;',
+      '  esac',
+      'done',
+      '[ "$service" = "$(cat "$here/service")" ] || exit 44',
+      'if [ -z "$account" ]; then held=stray',
+      'elif [ "$account" = "$(cat "$here/vendor-account")" ]; then held=vendor',
+      'elif [ "$account" = "$(cat "$here/stray-account")" ]; then held=stray',
+      'else exit 44',
+      'fi',
+      `if [ "$payload" = 1 ]; then cat "$here/$held"; printf '\\n'; fi`,
+      'exit 0'
+    ]);
+    const dir = join(binRoot, name);
+    writeFileSync(join(dir, 'service'), PLAIN, 'utf8');
+    writeFileSync(join(dir, 'vendor-account'), VENDOR_ACCOUNT, 'utf8');
+    writeFileSync(join(dir, 'stray-account'), STRAY_ACCOUNT, 'utf8');
+    writeFileSync(join(dir, 'vendor'), VENDOR_PAYLOAD, 'utf8');
+    writeFileSync(join(dir, 'stray'), STRAY_PAYLOAD, 'utf8');
+    return made;
+  };
+  const exits = (code: number): { bin: string; argv(): string[][] } =>
+    program(`exit-${String(code)}`, [`exit ${String(code)}`]);
+
+  const direct = firstMatch('direct');
+  const directAnswer = await whose(() =>
+    credentials.keychainReader(direct.bin).keychain(PLAIN, VENDOR_ACCOUNT)
+  );
+  const throughCredential = firstMatch('credential');
+  const throughCredentialAnswer = await whose(() =>
+    credentials.readClaudeCredential(
+      {
+        keychain: credentials.keychainReader(throughCredential.bin).keychain,
+        readText: async () => null,
+        env: { USER: VENDOR_ACCOUNT },
+        home: '/p281/home'
+      },
+      null
+    )
+  );
+  const refused = firstMatch('refused');
+  const refusedAnswer = await whose(() =>
+    credentials.keychainReader(refused.bin).keychain(PLAIN, '')
+  );
+
+  // 9c. A MISS IS NOT A FAILURE: exit 44 alone is absent.
+  const reader = (code: number): Promise<string> =>
+    whose(() => credentials.keychainReader(exits(code).bin).keychain(PLAIN, VENDOR_ACCOUNT));
+  const credentialOver = (bin: string, files: Record<string, string> = {}): Promise<string> =>
+    whose(() =>
+      credentials.readClaudeCredential(
+        {
+          keychain: credentials.keychainReader(bin).keychain,
+          readText: async (path: string) => files[path] ?? null,
+          env: { USER: VENDOR_ACCOUNT },
+          home: '/p281/home'
+        },
+        null
+      )
+    );
+  const exitAnswers = {
+    '44': await reader(44),
+    '36': await reader(36),
+    '1': await reader(1),
+    // A program that is not there: a spawn error, which is not a miss either.
+    spawn: await whose(() =>
+      credentials
+        .keychainReader(join(binRoot, 'not-a-program', 'security'))
+        .keychain(PLAIN, VENDOR_ACCOUNT)
+    )
+  };
+  const credentialExits = {
+    '44': await credentialOver(exits(44).bin),
+    '36': await credentialOver(exits(36).bin),
+    '1': await credentialOver(exits(1).bin),
+    // AND THE FILE STILL STANDS IN when the keychain could not answer, so
+    // the throw above is "nothing could be read", never "the keychain failed".
+    fileStandsIn: await credentialOver(exits(36).bin, {
+      '/p281/home/.claude/.credentials.json': VENDOR_PAYLOAD
+    })
+  };
+
+  // 9d. BRANCH B. `CLAUDE_CONFIG_DIR` is set, there is no scoped item for it,
+  //     and a usable item sits under the PLAIN name. Claude Code under that
+  //     directory asks the scoped name and nothing else (research 126 §5), so
+  //     the honest answer is `missing` whichever account the plain item has.
+  const branchEnv = { CLAUDE_CONFIG_DIR: CONFIG_DIR, USER: VENDOR_ACCOUNT };
+  const branchRow = async (
+    items: ReadonlyArray<readonly [string, string, string]>
+  ): Promise<{ answer: string; asked: unknown[][] }> => {
+    const asked: unknown[][] = [];
+    const answer = await whose(() =>
+      credentials.readClaudeCredential(credentialSeams(items, branchEnv, asked), null)
+    );
+    return { answer, asked };
+  };
+  const configScoped = credentials.claudeScopedService(CONFIG_DIR);
+  const branchB = {
+    // The plain item belongs to another synthetic account.
+    stray: await branchRow([[PLAIN, STRAY_ACCOUNT, STRAY_PAYLOAD]]),
+    // The plain item belongs to the vendor account itself, which is the shape
+    // a plain-name fallback that kept `-a` would still read.
+    vendor: await branchRow([[PLAIN, VENDOR_ACCOUNT, VENDOR_PAYLOAD]]),
+    // THE CONTROL. The scoped item exists under both accounts, the stray
+    // first, so a reader that answers `missing` for everything, or asks
+    // without the account, cannot pass.
+    control: await branchRow([
+      [configScoped, STRAY_ACCOUNT, STRAY_PAYLOAD],
+      [configScoped, VENDOR_ACCOUNT, VENDOR_PAYLOAD]
+    ])
+  };
+
+  // 9e. A DECOMPOSED DIRECTORY NAMES THE SAME ITEM AS ITS COMPOSED SPELLING.
+  const nfdPresenceAsked: unknown[][] = [];
+  await accounts.readLoginPresence(
+    seams([], {}, undefined, undefined, nfdPresenceAsked),
+    'claude',
+    NFD_DIR
+  );
+  const nfdCredentialAsked: unknown[][] = [];
+  await whose(() =>
+    credentials.readClaudeCredential(
+      credentialSeams([], { CLAUDE_CONFIG_DIR: NFD_DIR, USER: VENDOR_ACCOUNT }, nfdCredentialAsked),
+      null
+    )
+  );
+
+  out['vendor'] = {
+    accounts: { vendor: VENDOR_ACCOUNT, stray: STRAY_ACCOUNT },
+    plain: PLAIN,
+    presence: {
+      loginDir: LOGIN_DIR,
+      loginAsked: presenceLoginAsked,
+      defaultAsked: presenceDefaultAsked,
+      // THE STRAY ALONE, under the login's own scoped name: present only to a
+      // check that asked without the account.
+      strayOnly: await accounts.readLoginPresence(
+        seams([[loginScoped, STRAY_ACCOUNT]], {}),
+        'claude',
+        LOGIN_DIR
+      ),
+      // And the vendor item behind it, which must still read present.
+      vendorBehindStray: await accounts.readLoginPresence(
+        seams(
+          [
+            [loginScoped, STRAY_ACCOUNT],
+            [loginScoped, VENDOR_ACCOUNT]
+          ],
+          {}
+        ),
+        'claude',
+        LOGIN_DIR
+      )
+    },
+    reader: {
+      argv: direct.argv(),
+      answer: directAnswer,
+      credential: throughCredentialAnswer,
+      credentialArgv: throughCredential.argv(),
+      emptyAccount: refusedAnswer,
+      emptyAccountSpawned: refused.argv().length
+    },
+    exits: exitAnswers,
+    credentialExits,
+    branchB: { configDir: CONFIG_DIR, ...branchB },
+    nfc: {
+      dir: NFD_DIR,
+      scoped: credentials.claudeScopedService(NFD_DIR),
+      composed: credentials.claudeScopedService(NFD_DIR.normalize('NFC')),
+      viaConfig: credentials.claudeKeychainService({ CLAUDE_CONFIG_DIR: NFD_DIR }, null),
+      viaSecure: credentials.claudeKeychainService(
+        { CLAUDE_SECURESTORAGE_CONFIG_DIR: NFD_DIR },
+        null
+      ),
+      viaLogin: credentials.claudeKeychainService({}, NFD_DIR),
+      presenceAsked: nfdPresenceAsked,
+      credentialAsked: nfdCredentialAsked
+    }
   };
 
   // -------------------------------------------------------------------------

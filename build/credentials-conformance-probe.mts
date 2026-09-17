@@ -32,7 +32,11 @@ import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { addLogin, readLoginsFile } from '../src/main/logins/store';
 import { loginDirIn, loginsFileIn } from '../src/main/logins/dirs';
-import { claudeScopedService } from '../src/main/usage/credentials';
+import {
+  CLAUDE_KEYCHAIN_SERVICE,
+  claudeKeychainAccount,
+  claudeScopedService
+} from '../src/main/usage/credentials';
 import type { LoginProviderId } from '../src/shared/logins';
 
 const MODULES = process.env['P204_MODULES'] ?? 'src/main/credentials';
@@ -96,6 +100,17 @@ const lifecycle = existsSync(resolve(MODULES, 'lifecycle.ts'))
 /** A value only this probe ever writes. If it appears anywhere, say where. */
 const TOKEN = 'P204-SENTINEL-TOKEN-4c19be';
 
+/**
+ * The account Claude Code's own rule gives every arm built on `makeStores`
+ * (Phase 281). That seam's environment names no `USER`, so the vendor's `Cv`
+ * takes the user name, which the seam gives as `gate`. Every item an arm seeds
+ * as the vendor's is seeded under it, because the shipping domain now asks by
+ * service AND account and an item under any other account is not the one
+ * Claude Code reads. The arms seeded the operator's own user name until this
+ * phase, which the fake then ignored.
+ */
+const GATE_ACCOUNT = 'gate';
+
 const out: Record<string, unknown> = {};
 const roots: string[] = [];
 
@@ -158,37 +173,116 @@ interface World {
 }
 
 /**
+ * One keychain item, in the order `security` meets it (Phase 281).
+ *
+ * `security` keeps items by service AND account, so two items may share a
+ * service name, and a lookup answers the FIRST row matching everything it
+ * named. Research 126 §2.4 measured exactly that on the operator's machine: a
+ * stray under another account sat ahead of Claude Code's own item under the
+ * same name, and a lookup by service alone landed on the stray.
+ */
+interface KeychainRow {
+  service: string;
+  account: string;
+  payload: string;
+  modified?: string;
+}
+
+/**
+ * The rows, with the verbs the arms below seed and inspect them by.
+ *
+ * `set` is the `-U` add: it updates the row matching the service AND the
+ * account, or appends one, so an arm that seeds the same name twice under one
+ * account rewrites one item, as it always did. The updated row MOVES TO THE
+ * BACK, because the Phase 281 keychain verifier measured the real program
+ * moving an updated item behind every other item of the same service name. `get`, `has` and `delete` take
+ * the account the way a lookup does, optionally, and answer the first match.
+ * `first` puts a row AHEAD of everything, which is how a stray is planted.
+ */
+interface KeychainItems {
+  rows: KeychainRow[];
+  set(service: string, item: { account: string; payload: string; modified?: string }): void;
+  get(service: string, account?: string): KeychainRow | undefined;
+  has(service: string, account?: string): boolean;
+  delete(service: string, account?: string): boolean;
+  first(row: KeychainRow): void;
+  /** Every row's service in row order, so a name held twice is listed twice. */
+  keys(): string[];
+  entries(): [string, KeychainRow][];
+}
+
+/**
  * A `security` that behaves the way the real one was MEASURED to behave on
  * 2026-09-02, on a scratch keychain that was never in the search list.
  *
  *  - a write arrives through `-i` on STDIN as `add-generic-password -U -a
- *    "<account>" -s "<service>" -X "<hex>"`, and `-U` replaces the item in
- *    place rather than adding a second one;
+ *    "<account>" -s "<service>" -X "<hex>"`, and `-U` replaces the item
+ *    rather than adding a second one, moving it behind the other items of its
+ *    name (measured 2026-09-17 by the Phase 281 keychain verifier);
  *  - `find-generic-password -s <service> -w` prints the payload plus exactly
  *    one newline, and prints it AS HEX when it is not printable;
  *  - the same call without `-w` prints the item's attributes, `acct` included,
  *    and never the payload.
+ *
+ * PHASE 281 MADE IT THE FIRST-MATCH MODEL, the one both domains' Phase 281
+ * unit tests run over (`src/main/credentials/__tests__/first-match-security.ts`)
+ * and the one research 126 §8.10 drove the parent with. Items are ROWS keyed by
+ * service and account, kept in order. `find-generic-password` and
+ * `delete-generic-password` answer the first row whose service matches and,
+ * when `-a` was given, whose account matches too. The `-i` add updates the
+ * row matching service AND account and moves it to the back, or appends one. No match is exit
+ * 44, errSecItemNotFound, and a flag it does not know or a call with no `-s`
+ * is exit 1, so a malformed argv never reads as a miss. Until this phase the
+ * items were keyed by service alone and `-a` was ignored, which is a keychain
+ * where a stray and the vendor's item cannot both exist, so no arm could tell
+ * a lookup that named the account from one that did not.
  *
  * It exists so the keychain half of the shipping code runs for real in this
  * gate, which is what makes the argv assertion below mean anything: a payload
  * that reached a command line would be visible in `w.argvs`.
  */
 function fakeSecurity(w: World): {
-  items: Map<string, { account: string; payload: string; modified?: string }>;
+  items: KeychainItems;
   runner: import('../src/main/credentials/security').SecurityRunner;
 } {
-  const items = new Map<string, { account: string; payload: string; modified?: string }>();
+  const rows: KeychainRow[] = [];
   let writes = 0;
+  const find = (service: string, account: string | undefined): number =>
+    rows.findIndex(
+      (r) => r.service === service && (account === undefined || r.account === account)
+    );
+  const items: KeychainItems = {
+    rows,
+    set: (service, item) => {
+      const at = find(service, item.account);
+      // AN UPDATE MOVES THE ITEM TO THE BACK, as the real program was measured
+      // to (Phase 281, after verification): one item, behind the others of its name.
+      if (at >= 0) rows.splice(at, 1);
+      rows.push({ service, ...item });
+    },
+    get: (service, account) => {
+      const at = find(service, account);
+      return at < 0 ? undefined : rows[at];
+    },
+    has: (service, account) => find(service, account) >= 0,
+    delete: (service, account) => {
+      const at = find(service, account);
+      if (at < 0) return false;
+      rows.splice(at, 1);
+      return true;
+    },
+    first: (row) => {
+      rows.unshift({ ...row });
+    },
+    keys: () => rows.map((r) => r.service),
+    entries: () => rows.map((r): [string, KeychainRow] => [r.service, r])
+  };
   return {
     items,
     runner: {
       run: async (argv, stdin) => {
         w.argvs.push([...argv]);
         if (stdin !== undefined) w.stdins.push(stdin);
-        const at = (flag: string): string => {
-          const i = argv.indexOf(flag);
-          return i < 0 ? '' : (argv[i + 1] ?? '');
-        };
         if (argv[0] === '-i') {
           const found =
             /^add-generic-password -U -a "([^"]*)" -s "([^"]*)" -X "([0-9a-f]*)"$/.exec(
@@ -204,10 +298,22 @@ function fakeSecurity(w: World): {
           });
           return { code: 0, stdout: '' };
         }
+        let service: string | undefined;
+        let account: string | undefined;
+        let wantsPayload = false;
+        for (let i = 1; i < argv.length; i += 1) {
+          const flag = argv[i];
+          if (flag === '-s') service = argv[(i += 1)];
+          else if (flag === '-a') account = argv[(i += 1)];
+          else if (flag === '-w') wantsPayload = true;
+          else return { code: 1, stdout: '' };
+        }
+        if (service === undefined) return { code: 1, stdout: '' };
+        const at = find(service, account);
+        const item = at < 0 ? undefined : rows[at];
         if (argv[0] === 'find-generic-password') {
-          const item = items.get(at('-s'));
-          if (item === undefined) return { code: 1, stdout: '' };
-          if (argv.includes('-w')) {
+          if (item === undefined) return { code: 44, stdout: '' };
+          if (wantsPayload) {
             // eslint-disable-next-line no-control-regex
             const printable = !/[\u0000-\u0008\u000a-\u001f\u007f]/.test(
               item.payload
@@ -219,11 +325,13 @@ function fakeSecurity(w: World): {
           }
           return {
             code: 0,
-            stdout: `keychain: "login"\nattributes:\n    "acct"<blob>="${item.account}"\n    "mdat"<timedate>=0x3230  "${item.modified ?? '20260903000000Z'}"\n    "svce"<blob>="${at('-s')}"\n`
+            stdout: `keychain: "login"\nattributes:\n    "acct"<blob>="${item.account}"\n    "mdat"<timedate>=0x3230  "${item.modified ?? '20260903000000Z'}"\n    "svce"<blob>="${item.service}"\n`
           };
         }
         if (argv[0] === 'delete-generic-password') {
-          items.delete(at('-s'));
+          if (wantsPayload) return { code: 1, stdout: '' };
+          if (item === undefined) return { code: 44, stdout: '' };
+          rows.splice(at, 1);
           return { code: 0, stdout: '' };
         }
         return { code: 1, stdout: '' };
@@ -1066,13 +1174,13 @@ try {
       lockDeps: lockMem.deps
     };
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('alice', '1')
     });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('alice'));
     await keep.observeProvider(d, 'claude');
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('bob', '2')
     });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('bob'));
@@ -1125,13 +1233,13 @@ try {
       lockDeps: { ...lockMem.deps, mtimeMs: () => lockMem.deps.now() }
     };
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('alice', '1')
     });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('alice'));
     await keep.observeProvider(d, 'claude');
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('bob', '2')
     });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('bob'));
@@ -1183,7 +1291,7 @@ try {
       stores: { ...base.stores, runner: security.runner, keychainForClaude: true }
     };
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('alice', '1')
     });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('alice'));
@@ -1193,7 +1301,7 @@ try {
     const work = readLoginsFile(root).file.logins.find((l) => l.name === 'work');
     const workDir = work === undefined ? '' : loginDirIn(root, 'claude', work.id);
     security.items.set(claudeScopedService(workDir), {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('bob', '1')
     });
     w.files.set(join(workDir, '.claude.json'), claudeAccountFile('bob'));
@@ -1259,7 +1367,7 @@ try {
             contested += 1;
             // THE VENDOR, holding its lock, saves alice's refreshed token.
             security.items.set('Claude Code-credentials', {
-              account: 'gdc',
+              account: GATE_ACCOUNT,
               payload: claudeCredential('alice', '2')
             });
             return false;
@@ -1269,7 +1377,7 @@ try {
       }
     };
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('alice', '1')
     });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('alice'));
@@ -1278,7 +1386,7 @@ try {
     const work = readLoginsFile(root).file.logins.find((l) => l.name === 'work');
     const workDir = work === undefined ? '' : loginDirIn(root, 'claude', work.id);
     security.items.set(claudeScopedService(workDir), {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('bob', '1')
     });
     w.files.set(join(workDir, '.claude.json'), claudeAccountFile('bob'));
@@ -1329,7 +1437,7 @@ try {
       stores: { ...base.stores, runner: security.runner, keychainForClaude: true }
     };
     const setDefault = (who: string, n: string): void => {
-      security.items.set('Claude Code-credentials', { account: 'gdc', payload: claudeCredential(who, n) });
+      security.items.set('Claude Code-credentials', { account: GATE_ACCOUNT, payload: claudeCredential(who, n) });
       w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile(who));
     };
     setDefault('alice', '1');
@@ -1339,7 +1447,7 @@ try {
     const workDir = work === undefined ? '' : loginDirIn(root, 'claude', work.id);
     const workService = claudeScopedService(workDir);
     const workSlot = work === undefined ? '' : vault.slotFor('claude', work.id);
-    security.items.set(workService, { account: 'gdc', payload: claudeCredential('bob', '1') });
+    security.items.set(workService, { account: GATE_ACCOUNT, payload: claudeCredential('bob', '1') });
     w.files.set(join(workDir, '.claude.json'), claudeAccountFile('bob'));
     await keep.observeProvider(d, 'claude');
     const bob1 = payload.credentialDigest(claudeCredential('bob', '1'));
@@ -1360,7 +1468,7 @@ try {
     // THE CONTROL. A session under `work` refreshes its OWN store to bob 3,
     // captured later than the default slot's bob 2; choosing alice again must
     // leave that newer copy alone.
-    security.items.set(workService, { account: 'gdc', payload: claudeCredential('bob', '3') });
+    security.items.set(workService, { account: GATE_ACCOUNT, payload: claudeCredential('bob', '3') });
     await keep.observeProvider(d, 'claude');
     const p4 = await keep.activateLogin(d, 'claude', 'alice.example');
     const workSlotAfterControl = digestOf(d.vault.slots.get(workSlot));
@@ -1395,7 +1503,7 @@ try {
         stores: { ...base.stores, runner: security.runner, keychainForClaude: true }
       };
       security.items.set('Claude Code-credentials', {
-        account: 'gdc',
+        account: GATE_ACCOUNT,
         payload: claudeCredential('alice', '1')
       });
       w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('alice'));
@@ -1404,17 +1512,17 @@ try {
       const work = readLoginsFile(root).file.logins.find((l) => l.name === 'work');
       const workDir = work === undefined ? '' : loginDirIn(root, 'claude', work.id);
       security.items.set(claudeScopedService(workDir), {
-        account: 'gdc',
+        account: GATE_ACCOUNT,
         payload: claudeCredential('bob', '1')
       });
       w.files.set(join(workDir, '.claude.json'), claudeAccountFile('bob'));
       await keep.observeProvider(d, 'claude');
       if (shape === 'empty') security.items.delete('Claude Code-credentials');
       else if (shape === 'garbage') {
-        security.items.set('Claude Code-credentials', { account: 'gdc', payload: 'not a credential at all' });
+        security.items.set('Claude Code-credentials', { account: GATE_ACCOUNT, payload: 'not a credential at all' });
       } else {
         security.items.set('Claude Code-credentials', {
-          account: 'gdc',
+          account: GATE_ACCOUNT,
           payload: '{"claudeAiOauth":{"accessToken":"P204-half'
         });
       }
@@ -1579,14 +1687,14 @@ try {
     };
     const argvsBefore = w.argvs.length;
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('alice', '1'),
       modified: '20260903100000Z'
     });
     const first = await watchMod.defaultKeychainFingerprint(d);
     // REWRITTEN UNDER THE SAME ACCOUNT, as a sign in does.
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('bob', '2'),
       modified: '20260903100100Z'
     });
@@ -2150,14 +2258,20 @@ try {
       keychainForClaude: true
     };
     const withKeychain = { ...d, stores: keychainStores };
+    // PHASE 281. A STRAY FIRST, under the plain name and another account, the
+    // shape research 126 §2.4 measured on the operator's machine. It holds a
+    // whole credential, so a read by service alone would come back with a
+    // usable wrong answer rather than an obvious nothing.
+    const strayBytes = claudeCredential('stray', '0');
+    security.items.first({ service: CLAUDE_KEYCHAIN_SERVICE, account: 'p281-stray', payload: strayBytes });
     // The person's own claude item, as a default install has it.
     const own = claudeCredential('alice', '1');
-    security.items.set('Claude Code-credentials', { account: 'gdc', payload: own });
+    security.items.set('Claude Code-credentials', { account: GATE_ACCOUNT, payload: own });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('alice'));
     await keep.observeProvider(withKeychain, 'claude');
     // /login, in his own terminal, in the vendor's own flow.
     security.items.set('Claude Code-credentials', {
-      account: 'gdc',
+      account: GATE_ACCOUNT,
       payload: claudeCredential('bob', '2')
     });
     w.files.set(CLAUDE_DEFAULT_ACCOUNT, claudeAccountFile('bob'));
@@ -2171,21 +2285,62 @@ try {
         : await keep.activateLogin(withKeychain, 'claude', row.name);
     const dir = row === undefined ? '' : loginDirIn(root, 'claude', row.id);
     const wroteService = stores.claudeWriteService(dir);
-    const wrote = security.items.get(wroteService) ?? null;
+    // EVERY ROW under the name the write used, so a write that landed under a
+    // second account beside the vendor's is two rows here rather than one.
+    const wroteRows = security.items.rows.filter((r) => r.service === wroteService);
+    const wrote = wroteRows.length === 1 ? (wroteRows[0] ?? null) : null;
+    // THE MODEL'S ORDER, pinned (Phase 281, after verification). The keychain
+    // verifier measured the real `/usr/bin/security` on a scratch keychain: a
+    // lookup by service alone answers in creation order, and `add -U` of an
+    // existing item moves it behind every other item of its name. A model that
+    // updated in place predicted the wrong first match after any write, so it
+    // is asked here, on a world of its own, before any arm's reading is used.
+    const order = fakeSecurity(makeWorld());
+    const orderLine = (account: string, label: string): string =>
+      `add-generic-password -U -a "${account}" -s "${CLAUDE_KEYCHAIN_SERVICE}" -X "${Buffer.from(claudeCredential(label, '0'), 'utf8').toString('hex')}"\n`;
+    const firstUnderName = async (): Promise<string | undefined> => {
+      const found = await order.runner.run(['find-generic-password', '-s', CLAUDE_KEYCHAIN_SERVICE]);
+      return /"acct"<blob>="([^"]*)"/.exec(found.stdout)?.[1];
+    };
+    await order.runner.run(['-i'], orderLine('p281-stray', 'order-stray'));
+    await order.runner.run(['-i'], orderLine(GATE_ACCOUNT, 'order-vendor'));
+    const firstWhenCreated = await firstUnderName();
+    await order.runner.run(['-i'], orderLine('p281-stray', 'order-stray-again'));
+    const firstAfterUpdate = await firstUnderName();
     out['keychain'] = {
+      // An update keeps one item and moves it BEHIND the other of its name.
+      updateMovesBehind:
+        firstWhenCreated === 'p281-stray' &&
+        firstAfterUpdate === GATE_ACCOUNT &&
+        order.items.rows.length === 2,
       promoted: seen.events.some((e) => e.kind === 'promoted'),
       activated: put.ok,
       // THE VENDOR'S OWN BYTES, PUT BACK EXACTLY, in the item the vendor itself
       // would write for a session launched with that config directory.
       bytesExact: wrote !== null && wrote.payload === own,
-      // THE ACCOUNT ATTRIBUTE FOLLOWS THE PERSON'S OWN ITEM, because the vendor
-      // finds its item by service and account on some of its paths.
-      accountPreserved: wrote?.account === 'gdc',
+      // THE ACCOUNT IS THE VENDOR'S RULE (Phase 281), being Claude Code's `Cv`
+      // over this arm's environment and user name, and never an account copied
+      // off whatever item the name matched. It was "follows the person's own
+      // item" until this phase, which on the operator's machine was the stray.
+      accountIsVendorRule:
+        wrote !== null &&
+        wrote.account === GATE_ACCOUNT &&
+        wrote.account ===
+          claudeKeychainAccount(keychainStores.env, () => keychainStores.userName),
       // THE PERSON'S OWN ITEM WAS NEVER WRITTEN. It still holds what /login put
-      // there, and there is still exactly one of it.
+      // there, and there is still exactly one of it under the vendor account.
       ownItemUntouched:
-        security.items.get('Claude Code-credentials')?.payload ===
-        claudeCredential('bob', '2'),
+        security.items.get('Claude Code-credentials', GATE_ACCOUNT)?.payload ===
+          claudeCredential('bob', '2') &&
+        security.items.rows.filter(
+          (r) => r.service === CLAUDE_KEYCHAIN_SERVICE && r.account === GATE_ACCOUNT
+        ).length === 1,
+      // THE STRAY, still first, still its own bytes, and named by no call.
+      strayUntouched:
+        JSON.stringify(security.items.rows[0]) ===
+          JSON.stringify({ service: CLAUDE_KEYCHAIN_SERVICE, account: 'p281-stray', payload: strayBytes }) &&
+        !w.argvs.some((argv) => argv.includes('p281-stray')) &&
+        !w.stdins.some((line) => line.includes('p281-stray')),
       itemsNamed: [...security.items.keys()].sort(),
       // NO PAYLOAD ON ANY COMMAND LINE, over every call this arm made.
       argvCount: w.argvs.length,
@@ -2201,6 +2356,394 @@ try {
       // NO STAGED ITEM IS LEFT IN THE KEYCHAIN.
       stagedLeft: [...security.items.keys()].some((k) => k.endsWith('tortie-pending'))
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // 12c. THE ITEM CLAUDE CODE READS, AND NO OTHER (Phase 281).
+  //
+  //      THE DEFECT, research 126 §2.4: Claude Code names its keychain item by
+  //      service AND account, and every call here named the service alone. On
+  //      the operator's machine a stray under another account sat first under
+  //      the same name, so the observe, the backstop and both write targets
+  //      read and wrote the stray, and §8.10 drove the parent's `storeTarget`
+  //      and `defaultStoreTarget` committing `add -U -a "unknown"` over this
+  //      model.
+  //
+  //      Every world below plants a STRAY FIRST under every vendor name it
+  //      drives, holding a whole credential of its own, so a call without the
+  //      account comes back with a usable wrong answer. The account rule's
+  //      inputs differ on purpose: `USER` is set and the user name is another
+  //      string, so a domain that took the user name directly, or copied an
+  //      account off an item, writes under a name this arm can tell apart.
+  //      The scoped names are spelled here with `node:crypto` over the NFC
+  //      form, not with the shipping composer.
+  //
+  //      THREE READINGS. `vendorAddress` is rule 20a: every argv and every
+  //      `-i` line readStore, readSettledStore, both targets' five steps,
+  //      forgetStore and the fingerprint send for a vendor name carries `-a`
+  //      with the vendor account, and nothing reads, writes or deletes a stray.
+  //      `vendorRefusal` is rule 20c: a vendor name with no account reaches the
+  //      runner zero times, while Tortie's own names keep the argv they had.
+  //      `vendorCommit` is rule 20d: a directory with no scoped item commits
+  //      under the vendor rule's account, over three shapes of that rule.
+  // -------------------------------------------------------------------------
+  {
+    const security = (await import(
+      pathToFileURL(resolve(MODULES, 'security.ts')).href
+    )) as typeof import('../src/main/credentials/security');
+    const PLAIN = 'Claude Code-credentials';
+    const STAGED = '.tortie-pending';
+    const VENDOR = 'p281-vendor';
+    const OS_USER = 'p281-os';
+    const STRAY = 'p281-stray';
+    const FALLBACK = 'claude-code-user';
+    /** A login directory holding the vendor's scoped item and a stray before it. */
+    const DIR_D = '/p281-logins/dddddddddddddddd';
+    /** A login directory with no scoped item at all, only the plain pair. */
+    const DIR_E = '/p281-logins/eeeeeeeeeeeeeeee';
+    /** The directory a `CLAUDE_CONFIG_DIR` names, with no scoped item. */
+    const DIR_C = '/p281-config/cccccccccccccccc';
+    /** This probe's own spelling of a scoped name, over the NFC form. */
+    const scopedOf = (dir: string): string =>
+      `${PLAIN}-${createHash('sha256').update(dir.normalize('NFC'), 'utf8').digest('hex').slice(0, 8)}`;
+    /** Claude Code's namespace, spelled a second time here. */
+    const isVendorName = (name: string): boolean =>
+      name === PLAIN || name.startsWith(`${PLAIN}-`) || name.startsWith(`${PLAIN}.`);
+
+    const accountLabel = (account: string | null): string =>
+      account === null
+        ? 'none'
+        : account === VENDOR
+          ? 'vendor'
+          : account === STRAY
+            ? 'stray'
+            : account === OS_USER
+              ? 'os-user'
+              : account === FALLBACK
+                ? 'fallback'
+                : 'other';
+    const serviceLabel = (service: string | null): string => {
+      if (service === null) return 'none';
+      const staged = service.endsWith(STAGED);
+      const bare = staged ? service.slice(0, -STAGED.length) : service;
+      const name =
+        bare === PLAIN
+          ? 'plain'
+          : bare === scopedOf(DIR_D)
+            ? 'D'
+            : bare === scopedOf(DIR_E)
+              ? 'E'
+              : bare === scopedOf(DIR_C)
+                ? 'C'
+                : 'other';
+      return staged ? `${name}.staged` : name;
+    };
+
+    interface Sent {
+      verb: string;
+      service: string | null;
+      account: string | null;
+      payload: boolean;
+    }
+    /** Every call a world's runner was handed since a mark, `-i` lines included. */
+    const sentSince = (w: World, mark: { argv: number; stdin: number }): Sent[] => {
+      const out: Sent[] = [];
+      let line = mark.stdin;
+      for (const argv of w.argvs.slice(mark.argv)) {
+        if (argv[0] === '-i') {
+          const text = w.stdins[line] ?? '';
+          line += 1;
+          const add = /^add-generic-password -U -a "([^"]*)" -s "([^"]*)"/.exec(text);
+          out.push({
+            verb: add === null ? 'malformed' : 'add',
+            service: add?.[2] ?? null,
+            account: add?.[1] ?? null,
+            payload: false
+          });
+          continue;
+        }
+        // DEFENSIVE ON PURPOSE, like `textOf`: an ablated domain may hand the
+        // runner something that is not a string, and a probe that threw here
+        // would report "could not run" rather than the reading that moved.
+        const at = (flag: string): string | null => {
+          const i = argv.indexOf(flag);
+          const value: unknown = i < 0 ? null : argv[i + 1];
+          return typeof value === 'string' ? value : null;
+        };
+        out.push({
+          verb: (argv[0] ?? '').replace('-generic-password', ''),
+          service: at('-s'),
+          account: at('-a'),
+          payload: argv.includes('-w') || argv.includes('-g')
+        });
+      }
+      return out;
+    };
+    const markOf = (w: World) => ({ argv: w.argvs.length, stdin: w.stdins.length });
+    const shown = (calls: Sent[]): string[] =>
+      calls.map(
+        (c) =>
+          `${c.verb} -a ${accountLabel(c.account)} -s ${serviceLabel(c.service)}${c.payload ? ' -w' : ''}`
+      );
+    const storesOver = (
+      w: World,
+      runner: import('../src/main/credentials/security').SecurityRunner,
+      env: Record<string, string | undefined>
+    ): import('../src/main/credentials/stores').StoreDeps => ({
+      ...makeStores(w),
+      runner,
+      env,
+      keychainForClaude: true,
+      userName: OS_USER
+    });
+    const strayOf = (service: string): KeychainRow => ({
+      service,
+      account: STRAY,
+      payload: claudeCredential('stray', service.slice(-8)),
+      modified: '20260910024431Z'
+    });
+
+    // ---- 20a. THE ADDRESS, over every function that names a vendor item ----
+    {
+      const w = makeWorld();
+      const sec = fakeSecurity(w);
+      const d = storesOver(w, sec.runner, { USER: VENDOR });
+      // THE STRAYS FIRST, one under every name this world drives.
+      for (const name of [
+        PLAIN,
+        `${PLAIN}${STAGED}`,
+        scopedOf(DIR_D),
+        `${scopedOf(DIR_D)}${STAGED}`
+      ]) {
+        sec.items.first(strayOf(name));
+      }
+      const plainBytes = claudeCredential('vendor', 'plain');
+      const loginBytes = claudeCredential('vendor', 'login');
+      sec.items.set(PLAIN, { account: VENDOR, payload: plainBytes });
+      sec.items.set(scopedOf(DIR_D), { account: VENDOR, payload: loginBytes });
+      const strays = JSON.stringify(sec.items.rows.filter((r) => r.account === STRAY));
+      const strayBytes = new Set(
+        sec.items.rows.filter((r) => r.account === STRAY).map((r) => r.payload)
+      );
+
+      let mark = markOf(w);
+      const read = await stores.readStore(d, 'claude', null);
+      const readCalls = shown(sentSince(w, mark));
+      mark = markOf(w);
+      const settled = await stores.readSettledStore(d, 'claude', null);
+      const settledCalls = shown(sentSince(w, mark));
+      mark = markOf(w);
+      const readLogin = await stores.readStore(d, 'claude', DIR_D);
+      const readLoginCalls = shown(sentSince(w, mark));
+
+      const nextLogin = claudeCredential('vendor', 'login-next');
+      mark = markOf(w);
+      const target = await stores.storeTarget(d, 'claude', DIR_D);
+      const targetPut = target === null ? null : await swap.safeSwap(target, nextLogin);
+      const targetCalls = shown(sentSince(w, mark));
+
+      const nextPlain = claudeCredential('vendor', 'plain-next');
+      mark = markOf(w);
+      const lift = await stores.defaultStoreTarget(d, 'claude');
+      const liftPut = lift === null ? null : await swap.safeSwap(lift, nextPlain);
+      const liftCalls = shown(sentSince(w, mark));
+
+      const loginAfterWrite = sec.items.get(scopedOf(DIR_D), VENDOR)?.payload ?? null;
+      const plainAfterWrite = sec.items.get(PLAIN, VENDOR)?.payload ?? null;
+
+      mark = markOf(w);
+      await stores.forgetStore(d, 'claude', DIR_D);
+      const forgetCalls = shown(sentSince(w, mark));
+      const loginGone = !sec.items.has(scopedOf(DIR_D), VENDOR);
+
+      mark = markOf(w);
+      const print = await watchMod.defaultKeychainFingerprint({
+        stores: d
+      } as unknown as import('../src/main/credentials/keep').KeepDeps);
+      const printCalls = shown(sentSince(w, mark));
+
+      const every = sentSince(w, { argv: 0, stdin: 0 });
+      out['vendorAddress'] = {
+        read: {
+          calls: readCalls,
+          where: read.where,
+          account: accountLabel(read.account),
+          vendorBytes: read.payload === plainBytes
+        },
+        settled: { calls: settledCalls, vendorBytes: settled?.payload === plainBytes },
+        readLogin: {
+          calls: readLoginCalls,
+          account: accountLabel(readLogin.account),
+          vendorBytes: readLogin.payload === loginBytes
+        },
+        target: {
+          calls: targetCalls,
+          ok: targetPut?.ok === true,
+          vendorItemHoldsIt: loginAfterWrite === nextLogin
+        },
+        lift: {
+          calls: liftCalls,
+          ok: liftPut?.ok === true,
+          vendorItemHoldsIt: plainAfterWrite === nextPlain
+        },
+        forget: { calls: forgetCalls, vendorItemGone: loginGone },
+        fingerprint: {
+          calls: printCalls,
+          namesVendor: typeof print === 'string' && print.includes(`=${VENDOR}`),
+          namesStray: typeof print === 'string' && print.includes(STRAY)
+        },
+        // THE WHOLE WORLD, every call above: a vendor name without the vendor
+        // account, a call naming the stray, a stray row changed, and a stray's
+        // bytes in anything a function answered.
+        unaddressed: every.filter(
+          (c) => c.service !== null && isVendorName(c.service) && c.account !== VENDOR
+        ).length,
+        vendorCalls: every.filter((c) => c.service !== null && isVendorName(c.service)).length,
+        strayNamed: every.some((c) => c.account === STRAY),
+        straysUntouched:
+          JSON.stringify(sec.items.rows.filter((r) => r.account === STRAY)) === strays,
+        strayBytesAnswered: [read.payload, settled?.payload, readLogin.payload].some(
+          (bytes) => typeof bytes === 'string' && strayBytes.has(bytes)
+        )
+      };
+
+      // D3, THE ONE NAME. `CLAUDE_CONFIG_DIR` set, no scoped item for it, and a
+      // whole vendor credential under the plain name: a Claude Code session
+      // under that directory finds nothing, and so must every reader here.
+      const wc = makeWorld();
+      const secC = fakeSecurity(wc);
+      const dc = storesOver(wc, secC.runner, { USER: VENDOR, CLAUDE_CONFIG_DIR: DIR_C });
+      secC.items.first(strayOf(PLAIN));
+      secC.items.set(PLAIN, { account: VENDOR, payload: plainBytes });
+      const cMark = markOf(wc);
+      const cRead = await stores.readStore(dc, 'claude', null);
+      await watchMod.defaultKeychainFingerprint({
+        stores: dc
+      } as unknown as import('../src/main/credentials/keep').KeepDeps);
+      (out['vendorAddress'] as Record<string, unknown>)['configDir'] = {
+        calls: shown(sentSince(wc, cMark)),
+        readNothing: cRead.payload === null
+      };
+    }
+
+    // ---- 20c. NO ACCOUNT, NO CALL ----
+    {
+      const w = makeWorld();
+      const sec = fakeSecurity(w);
+      const vendorNames = [
+        PLAIN,
+        `${PLAIN}${STAGED}`,
+        scopedOf(DIR_D),
+        `${scopedOf(DIR_D)}${STAGED}`
+      ];
+      for (const name of vendorNames) {
+        sec.items.first(strayOf(name));
+        sec.items.set(name, { account: VENDOR, payload: claudeCredential('vendor', name.slice(-8)) });
+      }
+      const rowsBefore = JSON.stringify(sec.items.rows);
+      // `undefined` because an untyped caller can still leave the argument
+      // off, and the quote because it is an account the domain will not name.
+      const missing: unknown[] = [null, undefined, '', 'p281"stray'];
+      const answers: unknown[] = [];
+      for (const name of vendorNames) {
+        for (const account of missing) {
+          const a = account as string | null;
+          answers.push(await security.keychainRead(sec.runner, name, a));
+          answers.push(await security.keychainAccount(sec.runner, name, a));
+          answers.push(await security.keychainModified(sec.runner, name, a));
+          answers.push(await security.keychainHasItem(sec.runner, name, a));
+          answers.push(await security.keychainDelete(sec.runner, name, a));
+        }
+      }
+      const refusedReached = w.argvs.length;
+      const rowsKept = JSON.stringify(sec.items.rows) === rowsBefore;
+
+      // THE CONTROLS. The same five functions with the vendor account reach
+      // the runner once each, aimed at the vendor row. A name outside the
+      // namespace with no account sends the service-only argv it always sent,
+      // which is what Tortie's own vault names still send.
+      const mark = markOf(w);
+      const name = PLAIN;
+      await security.keychainRead(sec.runner, name, VENDOR);
+      await security.keychainAccount(sec.runner, name, VENDOR);
+      await security.keychainModified(sec.runner, name, VENDOR);
+      await security.keychainHasItem(sec.runner, name, VENDOR);
+      const addressed = w.argvs.slice(mark.argv).map((argv) => argv.join(' '));
+      const outside = [
+        'Tortie-credentials-claude.default-0123abcd',
+        `${PLAIN}X`,
+        'Claude Code'
+      ];
+      const outsideMark = markOf(w);
+      for (const other of outside) {
+        await security.keychainRead(sec.runner, other, null);
+        await security.keychainHasItem(sec.runner, other, null);
+      }
+      const outsideArgv = w.argvs.slice(outsideMark.argv);
+      out['vendorRefusal'] = {
+        asked: missing.length * vendorNames.length * 5,
+        refusedReached,
+        refusedAnswers: answers.every((a) => a === null || a === false),
+        rowsKept,
+        addressed,
+        outsideExact:
+          JSON.stringify(outsideArgv) ===
+          JSON.stringify(
+            outside.flatMap((other) => [
+              ['find-generic-password', '-s', other, '-w'],
+              ['find-generic-password', '-s', other]
+            ])
+          )
+      };
+    }
+
+    // ---- 20d. A DIRECTORY WITH NO SCOPED ITEM COMMITS UNDER THE VENDOR ACCOUNT ----
+    {
+      const shapes: [string, Record<string, string | undefined>, string][] = [
+        ['USER', { USER: VENDOR }, 'vendor'],
+        ['user name', {}, 'os-user'],
+        ['fallback', { USER: 'p281 not a name' }, 'fallback']
+      ];
+      const commits: Record<string, unknown> = {};
+      for (const [why, env, expected] of shapes) {
+        const w = makeWorld();
+        const sec = fakeSecurity(w);
+        const d = storesOver(w, sec.runner, env);
+        const ruleAccount = claudeKeychainAccount(env, () => OS_USER);
+        sec.items.first(strayOf(PLAIN));
+        sec.items.set(PLAIN, { account: ruleAccount, payload: claudeCredential('vendor', why) });
+        const strays = JSON.stringify(sec.items.rows.filter((r) => r.account === STRAY));
+        const bytes = claudeCredential('chosen', why);
+        let mark = markOf(w);
+        const target = await stores.storeTarget(d, 'claude', DIR_E);
+        const put = target === null ? null : await swap.safeSwap(target, bytes);
+        const targetAdds = shown(sentSince(w, mark).filter((c) => c.verb === 'add'));
+        const eRows = sec.items.rows
+          .filter((r) => r.service === scopedOf(DIR_E))
+          .map((r) => `${accountLabel(r.account)}:${r.payload === bytes ? 'chosen' : 'other'}`);
+        const liftBytes = claudeCredential('lifted', why);
+        mark = markOf(w);
+        const lift = await stores.defaultStoreTarget(d, 'claude');
+        const lifted = lift === null ? null : await swap.safeSwap(lift, liftBytes);
+        const liftAdds = shown(sentSince(w, mark).filter((c) => c.verb === 'add'));
+        const plainRows = sec.items.rows
+          .filter((r) => r.service === PLAIN)
+          .map((r) => `${accountLabel(r.account)}:${r.payload === liftBytes ? 'lifted' : 'other'}`);
+        commits[why] = {
+          expected,
+          ruleAgrees: accountLabel(ruleAccount) === expected,
+          targetOk: put?.ok === true,
+          targetAdds,
+          eRows,
+          liftOk: lifted?.ok === true,
+          liftAdds,
+          plainRows,
+          straysUntouched:
+            JSON.stringify(sec.items.rows.filter((r) => r.account === STRAY)) === strays
+        };
+      }
+      out['vendorCommit'] = commits;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -2229,15 +2772,15 @@ try {
       }
     };
     // The person's own item, which nothing in this arm may ever touch.
-    const OWN = claudeCredential('gdc', 'own');
-    security.items.set('Claude Code-credentials', { account: 'gdc', payload: OWN });
+    const OWN = claudeCredential('person', 'own');
+    security.items.set('Claude Code-credentials', { account: GATE_ACCOUNT, payload: OWN });
 
     /** Give one login everything a signed in login has. */
     const furnish = (id: string, who: string): string => {
       const dir = loginDirIn(root, 'claude', id);
       const service = stores.claudeWriteService(dir);
       security.items.set(service, {
-        account: 'gdc',
+        account: GATE_ACCOUNT,
         payload: claudeCredential(who, '1')
       });
       d.vault.slots.set(vault.slotFor('claude', id), claudeCredential(who, '1'));
@@ -2248,7 +2791,7 @@ try {
             email: `${who}@example.com`,
             subject: null,
             digest: payload.credentialDigest(claudeCredential(who, '1')),
-            account: 'gdc',
+            account: GATE_ACCOUNT,
             from: null,
             at: 1
           }
@@ -2453,7 +2996,7 @@ try {
 
     // The migration, both ways, over the measured security.
     const arm = async (
-      plant: (items: Map<string, { account: string; payload: string }>, root: string) => void,
+      plant: (items: KeychainItems, root: string) => void,
       ownProfile: boolean,
       record: string | null = null,
       vanishAfterConfirm = false

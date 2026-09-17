@@ -14,8 +14,10 @@
  *  - `-X <hex>` round trips a payload holding double quotes, backslashes and
  *    newlines exactly, and `-w "<escaped>"` does not: the `-i` tokenizer ends
  *    the command at the first newline and answers `unknown command`.
- *  - `-U` updates the item IN PLACE. One item before, one item after, and the
- *    access control list is the one the item already had.
+ *  - `-U` updates the item rather than adding a second one. One item before,
+ *    one item after, and the access control list is the one the item already
+ *    had. Its PLACE is not kept: Phase 281's keychain verifier measured the
+ *    updated item moving behind every other item of the same service name.
  *  - a payload that is not printable comes BACK as hex from `find-generic-
  *    password -w`, which is why {@link decodeKeychainPayload} exists.
  *
@@ -30,6 +32,27 @@
  * program on the machine and would be a downgrade of the person's own
  * credential.
  *
+ * ## HOW THE VENDOR ADDRESSES ITS ITEM, AND WHY EVERY CALL HERE DOES THE SAME
+ *
+ * The same program is only half of it. Claude Code names its item by SERVICE
+ * AND ACCOUNT: its read, its write over `-i`, its delete and its startup read
+ * all pass `-a` with its account function `Cv` (bundle offset 170,928,749 in
+ * 2.1.274) against the service `mI("-credentials")` gives, and none of them
+ * asks by service alone (research 126 §2.4 and §5, and the Phase 281 spec §1).
+ * Until Phase 281 every reader here asked by service alone, and on the
+ * operator's machine that name matched TWO items: `security` handed back a
+ * stray under another account, which gave no usable credential, while every
+ * claude session read the item under his user name.
+ *
+ * So every function below that names a service takes the account as an
+ * explicit argument, and a name in the vendor's namespace
+ * (`../usage/credentials.ts`'s `isClaudeVendorService`) with no account, or
+ * with an account this file will not name, is REFUSED before anything is
+ * spawned. There is no lookup without `-a` to fall back to, because that
+ * lookup is exactly the read that landed on the stray. Tortie's own vault
+ * names are not the vendor's and pass no account, so their command lines are
+ * the ones they always were.
+ *
  * ## WHAT IS NEVER LOGGED
  *
  * Nothing in this file writes a log line, and no error it raises carries the
@@ -39,7 +62,9 @@
  */
 
 import { runGuarded } from '../proc/guarded';
+import { isClaudeVendorService } from '../usage/credentials';
 import { credentialsAreOpen, ownCredentialChild } from './lifecycle';
+import { decodeKeychainPayload } from './security-print';
 
 /** How long any one `security` call may take. */
 export const SECURITY_TIMEOUT_MS = 10_000;
@@ -185,49 +210,56 @@ export function isPlainSecurityName(name: string): boolean {
 }
 
 /**
- * What `find-generic-password -w` printed, as the bytes the item holds.
- *
- * MEASURED: `security` prints the payload verbatim when it is printable and
- * prints it as HEX when it is not, and in both cases it adds exactly one
- * trailing newline. A trim would corrupt a payload with trailing spaces, so
- * exactly one newline is removed and nothing else.
- *
- * THE DISAMBIGUATION, and it follows from the same measurement. `security`
- * prints hex ONLY when the payload is not printable. So a run of hex digits
- * whose decoding is itself printable cannot be a hex PRINTING, because the
- * payload it would have come from would have been printed raw: the text is the
- * payload. The decoding is taken only when it holds a character `security`
- * would have refused to print, which is what forced the hex form.
- *
- * A residual ambiguity is left on purpose and it is harmless: a payload whose
- * own text is the hex of a control character is read as that control
- * character. Every write in this domain is verified by reading it back and
- * comparing bytes, so a payload that cannot survive this round trip refuses
- * the write rather than corrupting a store. Neither vendor writes one: both
- * write JSON, which is never a run of hex digits.
+ * What `find-generic-password -w` printed, as the bytes the item holds. It
+ * lives in `./security-print.ts` since Phase 281, which imports nothing, so
+ * the usage reader can decode without importing this file: this file asks
+ * `../usage/credentials.ts` which names are the vendor's, and each importing
+ * the other would be a runtime cycle. Re-exported here, beside the runner whose
+ * output it reads.
  */
-export function decodeKeychainPayload(raw: string): string {
-  const text = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
-  if (text.length === 0) return text;
-  if (text.length % 2 !== 0 || !/^[0-9a-f]+$/.test(text)) return text;
-  const bytes = Buffer.from(text, 'hex');
-  const decoded = bytes.toString('utf8');
-  // Not valid UTF-8, so it was never a payload this product wrote.
-  if (!Buffer.from(decoded, 'utf8').equals(bytes)) return text;
-  // eslint-disable-next-line no-control-regex
-  return /[\u0000-\u0008\u000a-\u001f\u007f]/.test(decoded) ? decoded : text;
+export { decodeKeychainPayload } from './security-print';
+
+/**
+ * The `-a` and `-s` half of a command line for one item, or null for an item
+ * this file refuses to name (Phase 281).
+ *
+ * A VENDOR NAME WITHOUT AN ACCOUNT IS REFUSED, FAIL CLOSED. `null`, `''`, an
+ * account {@link isPlainSecurityName} refuses, and `undefined` all refuse it,
+ * the last because an untyped build probe can still call with two arguments
+ * and must reach no lookup by service alone that way either. A name that is
+ * not the vendor's with no account keeps the `-s` form it always had, which is
+ * what Tortie's own vault names send. An account, when there is one, goes
+ * BEFORE `-s`, in the order Claude Code's own argv uses and the one
+ * {@link keychainWrite}'s `-i` line already had.
+ */
+function itemAddress(
+  service: string,
+  account: string | null | undefined
+): readonly string[] | null {
+  if (!isPlainSecurityName(service)) return null;
+  if (account === null || account === undefined) {
+    return isClaudeVendorService(service) ? null : ['-s', service];
+  }
+  if (!isPlainSecurityName(account)) return null;
+  return ['-a', account, '-s', service];
 }
 
-/** The item's payload, or null when there is no such item. */
+/**
+ * The item's payload, or null when there is no such item.
+ *
+ * `account` is REQUIRED and admits null so every call site states it: the
+ * vendor's account for a vendor name, and null for Tortie's own names.
+ */
 export async function keychainRead(
   runner: SecurityRunner,
-  service: string
+  service: string,
+  account: string | null
 ): Promise<string | null> {
-  if (!isPlainSecurityName(service)) return null;
+  const address = itemAddress(service, account);
+  if (address === null) return null;
   const { code, stdout } = await runner.run([
     'find-generic-password',
-    '-s',
-    service,
+    ...address,
     '-w'
   ]);
   if (code !== 0) return null;
@@ -235,17 +267,22 @@ export async function keychainRead(
   return payload === '' ? null : payload;
 }
 
-/** The item's `acct` attribute, or null. Asks for ATTRIBUTES and never `-w`. */
+/**
+ * The item's `acct` attribute, or null. Asks for ATTRIBUTES and never `-w`.
+ *
+ * Asked with `-a` for a vendor name, so what it answers is that account read
+ * back from the item it names, or null when no item under that account exists.
+ * It no longer tells Tortie which account to write under: that is the vendor's
+ * rule, never whatever item a name happened to match (Phase 281).
+ */
 export async function keychainAccount(
   runner: SecurityRunner,
-  service: string
+  service: string,
+  account: string | null
 ): Promise<string | null> {
-  if (!isPlainSecurityName(service)) return null;
-  const { code, stdout } = await runner.run([
-    'find-generic-password',
-    '-s',
-    service
-  ]);
+  const address = itemAddress(service, account);
+  if (address === null) return null;
+  const { code, stdout } = await runner.run(['find-generic-password', ...address]);
   if (code !== 0) return null;
   const found = /"acct"<blob>="([^"\n]*)"/.exec(stdout);
   return found === null || found[1] === undefined || found[1] === ''
@@ -258,22 +295,21 @@ export async function keychainAccount(
  * Asks for ATTRIBUTES and never `-w` (Phase 211 fix round).
  *
  * IT EXISTS FOR THE KEYCHAIN BACKSTOP. The first build fingerprinted the
- * `acct` attribute, which the vendor sets to `process.env.USER` (`Hv` at
- * bundle offset 158840579) and never changes on a sign in, so a credential
- * rewritten with no file moving never moved the fingerprint and the backstop
- * could not see the one thing it exists for. The modification date moves on
- * every write and is an attribute like any other.
+ * `acct` attribute, which the vendor sets to `USER`, else the user name, else
+ * `claude-code-user` (`Cv` at bundle offset 170,928,749 in 2.1.274), and
+ * never changes on a sign in, so a credential rewritten with no file moving
+ * never moved the fingerprint and the backstop could not see the one thing it
+ * exists for. The modification date moves on every write and is an attribute
+ * like any other.
  */
 export async function keychainModified(
   runner: SecurityRunner,
-  service: string
+  service: string,
+  account: string | null
 ): Promise<string | null> {
-  if (!isPlainSecurityName(service)) return null;
-  const { code, stdout } = await runner.run([
-    'find-generic-password',
-    '-s',
-    service
-  ]);
+  const address = itemAddress(service, account);
+  if (address === null) return null;
+  const { code, stdout } = await runner.run(['find-generic-password', ...address]);
   if (code !== 0) return null;
   const found = /"mdat"<timedate>=0x[0-9A-Fa-f]+\s+"([^"\n]*)"/.exec(stdout);
   return found === null || found[1] === undefined || found[1] === ''
@@ -281,13 +317,18 @@ export async function keychainModified(
     : found[1];
 }
 
-/** Does an item with this service name exist? Attributes only, no payload. */
+/**
+ * Does the item at this service, and this account when one is given, exist?
+ * Attributes only, no payload.
+ */
 export async function keychainHasItem(
   runner: SecurityRunner,
-  service: string
+  service: string,
+  account: string | null
 ): Promise<boolean> {
-  if (!isPlainSecurityName(service)) return false;
-  const { code } = await runner.run(['find-generic-password', '-s', service]);
+  const address = itemAddress(service, account);
+  if (address === null) return false;
+  const { code } = await runner.run(['find-generic-password', ...address]);
   return code === 0;
 }
 
@@ -324,12 +365,19 @@ export async function keychainWrite(
  * there a moment ago and cannot now be found is an anomaly worth counting
  * rather than a tidy no-op. A name this module refuses is never asked at all,
  * which is a refusal and so also false.
+ *
+ * A vendor name is deleted under the vendor's account and no other (Phase
+ * 281): `delete-generic-password -s` alone removes the FIRST item the name
+ * matches, and on the operator's machine that is a stray under another
+ * account, which nothing in Tortie may remove.
  */
 export async function keychainDelete(
   runner: SecurityRunner,
-  service: string
+  service: string,
+  account: string | null
 ): Promise<boolean> {
-  if (!isPlainSecurityName(service)) return false;
-  const { code } = await runner.run(['delete-generic-password', '-s', service]);
+  const address = itemAddress(service, account);
+  if (address === null) return false;
+  const { code } = await runner.run(['delete-generic-password', ...address]);
   return code === 0;
 }

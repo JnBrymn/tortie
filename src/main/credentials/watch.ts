@@ -49,12 +49,9 @@
 import { watch } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { LOGIN_PROVIDERS, type LoginProviderId } from '@shared/logins';
-import {
-  claudeAccountFileFor,
-  claudeServicesFor,
-  codexAuthFileFor
-} from '../usage/login-accounts';
+import { claudeAccountFileFor, codexAuthFileFor } from '../usage/login-accounts';
 import { keychainAccount, keychainModified } from './security';
+import { claudeStoreAddress } from './stores';
 import { loginDirIn, loginDirOnDisk } from '../logins/dirs';
 import { readLoginsFile } from '../logins/store';
 import { observeProvider, type KeepDeps } from './keep';
@@ -344,18 +341,23 @@ function defaultWatchDir(
  * that moves when the item is rewritten. The first build read the account
  * attribute alone, which the vendor sets to the user name and never changes on
  * a sign in, so the backstop could not see the one thing it exists for, being
- * a credential rewritten with no file moving. The account is kept in the
- * fingerprint as well, so an item replaced under another account still moves
- * it.
+ * a credential rewritten with no file moving. The account read back is kept in
+ * the fingerprint as well, so an item that goes away moves it.
+ *
+ * ONE ITEM, ADDRESSED THE WAY CLAUDE CODE ADDRESSES IT (Phase 281). The service
+ * `mI` gives this process's environment and nothing after it, under the
+ * vendor's account. The first build looped over a service list and asked each
+ * name by service alone, so with two items under one name it fingerprinted
+ * whichever `security` found first, which on the operator's machine was a stray
+ * that no session writes: the item Claude Code rewrites could move every hour
+ * and this backstop would never see it, while a change to the stray would run
+ * an observe for nothing.
  */
 export async function defaultKeychainFingerprint(keep: KeepDeps): Promise<string | null> {
   const stores = keep.stores;
   if (!stores.keychainForClaude) return null;
-  const parts: string[] = [];
-  for (const service of claudeServicesFor(stores, null)) {
-    const account = await keychainAccount(stores.runner, service);
-    const modified = await keychainModified(stores.runner, service);
-    parts.push(`${service}=${account ?? ''}@${modified ?? ''}`);
-  }
-  return parts.join(' ');
+  const { service, account } = claudeStoreAddress(stores, null);
+  const found = await keychainAccount(stores.runner, service, account);
+  const modified = await keychainModified(stores.runner, service, account);
+  return `${service}=${found ?? ''}@${modified ?? ''}`;
 }

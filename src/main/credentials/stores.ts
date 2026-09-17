@@ -38,17 +38,19 @@ import type { LoginProviderId } from '@shared/logins';
 import {
   claudeAccountFileFor,
   claudeCredentialFileFor,
-  claudeServicesFor,
   codexAuthFileFor,
   emailFromClaudeJson,
   emailFromCodexAuth,
   subjectFromClaudeJson,
   subjectFromCodexAuth
 } from '../usage/login-accounts';
-import { claudeScopedService } from '../usage/credentials';
+import {
+  claudeKeychainAccount,
+  claudeKeychainService,
+  claudeScopedService
+} from '../usage/credentials';
 import { isCredentialPayload } from './payload';
 import {
-  keychainAccount,
   keychainDelete,
   keychainRead,
   keychainWrite,
@@ -74,7 +76,11 @@ export interface StoreDeps {
    * code path writes it.
    */
   keychainForClaude: boolean;
-  /** The account attribute a NEW keychain item gets when none is there to copy. */
+  /**
+   * The OS user name the vendor's account rule uses when `USER` is unset
+   * (Phase 281). It is `userInfo().username` in the shipping seam, and it is
+   * only ever read through {@link claudeStoreAddress}.
+   */
   userName: string;
   wait(ms: number): Promise<void>;
 }
@@ -98,7 +104,12 @@ export interface StoreReading {
    */
   subject: string | null;
   where: StoreWhere;
-  /** The keychain item's account attribute, so a write back can preserve it. */
+  /**
+   * The account the keychain item was FOUND under, being the vendor rule's
+   * account, and null when the credential did not come out of the keychain.
+   * It is recorded, and nothing writes by it: every write takes the vendor
+   * rule again (Phase 281).
+   */
   account: string | null;
 }
 
@@ -123,6 +134,40 @@ export function claudeWriteService(dir: string): string {
 }
 
 /**
+ * The service AND account of the item Claude Code itself reads and writes for
+ * this login (Phase 281). `dir` is null for the default login.
+ *
+ * ## WHY THE VENDOR'S RULE, AND NEVER AN ACCOUNT COPIED OFF AN ITEM
+ *
+ * Until Phase 281 this domain asked `security` for an item by service alone and
+ * wrote back under whatever account that item carried, falling back to the
+ * person's own item's account and then the user name. Claude Code addresses its
+ * item by service and account (research 126 §2.4), so a lookup by service
+ * alone answers the FIRST item of that name, and on the operator's machine that
+ * was a stray under another account. Copying its account made every write land
+ * on the stray: research 126 §8.10 drove the shipping `storeTarget` and
+ * `defaultStoreTarget` over that model and both committed an `add -U` under the
+ * stray's account, which updates an item no Claude Code session reads.
+ *
+ * So the account is the vendor's own rule, `../usage/credentials.ts`'s
+ * {@link claudeKeychainAccount} (a copy of `Cv`), over this seam's environment
+ * with {@link StoreDeps.userName} as the user name, and the service is
+ * {@link claudeKeychainService} (a copy of `mI`), ONE name with no plain-name
+ * fallback when a config dir is set. Every read, write, stage, discard and
+ * delete below is aimed at exactly this pair, so an item under the same name and
+ * another account is never read, rewritten or deleted by anything here.
+ */
+export function claudeStoreAddress(
+  d: Pick<StoreDeps, 'env' | 'userName'>,
+  dir: string | null
+): { service: string; account: string } {
+  return {
+    service: claudeKeychainService(d.env, dir),
+    account: claudeKeychainAccount(d.env, () => d.userName)
+  };
+}
+
+/**
  * A read that answers null rather than throwing.
  *
  * THE ATTACK THIS ANSWERS, and the phase names it: a store that becomes
@@ -141,10 +186,11 @@ async function safeText(d: StoreDeps, path: string): Promise<string | null> {
 
 async function safeKeychain(
   d: StoreDeps,
-  service: string
+  service: string,
+  account: string
 ): Promise<string | null> {
   try {
-    return await keychainRead(d.runner, service);
+    return await keychainRead(d.runner, service, account);
   } catch {
     return null;
   }
@@ -172,17 +218,13 @@ export async function readStore(
   const email = accountText === null ? null : emailFromClaudeJson(accountText);
   const subject = accountText === null ? null : subjectFromClaudeJson(accountText);
   if (d.keychainForClaude) {
-    for (const service of claudeServicesFor(d, dir)) {
-      const found = await safeKeychain(d, service);
-      if (found === null) continue;
-      if (!isCredentialPayload('claude', found)) continue;
-      return {
-        payload: found,
-        email,
-        subject,
-        where: 'keychain',
-        account: await keychainAccount(d.runner, service)
-      };
+    // ONE ITEM, the one Claude Code reads for this login, and no second name
+    // after it (Phase 281): a plain-name read under a config dir answered one
+    // account's credential under another account's directory.
+    const { service, account } = claudeStoreAddress(d, dir);
+    const found = await safeKeychain(d, service, account);
+    if (found !== null && isCredentialPayload('claude', found)) {
+      return { payload: found, email, subject, where: 'keychain', account };
     }
   }
   const text = await safeText(d, claudeCredentialFileFor(d, dir));
@@ -232,7 +274,13 @@ function fileTarget(d: StoreDeps, path: string): SwapTarget {
   };
 }
 
-/** One keychain item, as the one write in this domain sees it. */
+/**
+ * One keychain item, as the one write in this domain sees it.
+ *
+ * EVERY STEP CARRIES THE ONE ACCOUNT, the staged place included (Phase 281).
+ * A read, a staged read or a discard by service alone would reach the first
+ * item of that name, whoever's it is.
+ */
 function keychainTarget(
   d: StoreDeps,
   service: string,
@@ -244,14 +292,17 @@ function keychainTarget(
     if (!ok) throw new Error('the keychain refused an item');
   };
   return {
-    read: () => keychainRead(d.runner, service),
+    read: () => keychainRead(d.runner, service, account),
     stage: (payload) => put(staged, payload),
-    readStaged: () => keychainRead(d.runner, staged),
-    // `add-generic-password -U` UPDATES IN PLACE, measured: one item before,
-    // one item after, and the access control list is the one the item had.
+    readStaged: () => keychainRead(d.runner, staged, account),
+    // `add-generic-password -U` UPDATES the one item, measured: one item
+    // before, one item after, and the access control list is the one the item
+    // had. It does not keep the item's PLACE: the Phase 281 keychain verifier
+    // measured the updated item moving behind every other item of the same
+    // service name, which is why nothing here may rely on a lookup's order.
     commit: (payload) => put(service, payload),
     discard: async () => {
-      await keychainDelete(d.runner, staged);
+      await keychainDelete(d.runner, staged, account);
     }
   };
 }
@@ -276,15 +327,14 @@ export async function storeTarget(
   if (!d.keychainForClaude) {
     return fileTarget(d, claudeCredentialFileFor(d, dir));
   }
-  const service = claudeWriteService(dir);
-  // THE ACCOUNT ATTRIBUTE IS PRESERVED when the item is already there, because
-  // the vendor finds its item by service AND account on some of its paths, and
-  // an item whose account moved is an item the vendor cannot find. A store with
-  // no item yet gets the same account the person's own store uses, and the
-  // user name is the last resort.
-  const existing = await keychainAccount(d.runner, service);
-  const own = existing ?? (await ownAccountName(d));
-  return keychainTarget(d, service, own);
+  // THE ACCOUNT IS THE VENDOR'S RULE, NEVER COPIED (Phase 281). Claude Code
+  // finds its item by service AND account on every path, so the item a session
+  // under this directory reads is the one under `claudeStoreAddress`'s account,
+  // whatever else carries the name. Copying the account of the first item the
+  // name matched, or of the person's own item, is how a write landed on a stray
+  // under another account (research 126 §8.10).
+  const { account } = claudeStoreAddress(d, dir);
+  return keychainTarget(d, claudeWriteService(dir), account);
 }
 
 /**
@@ -314,24 +364,15 @@ export async function defaultStoreTarget(
 ): Promise<SwapTarget | null> {
   if (provider === 'codex') return fileTarget(d, codexAuthFileFor(d, null));
   if (!d.keychainForClaude) return fileTarget(d, claudeCredentialFileFor(d, null));
-  // THE ITEM THE VENDOR READS FOR THE DEFAULT LOGIN, most specific first, which
-  // is the scoped name when a `CLAUDE_CONFIG_DIR` is set and the plain
-  // `Claude Code-credentials` otherwise. Writing any other name would leave a
-  // running session reading a credential Tortie did not update.
-  const service = claudeServicesFor(d, null)[0];
-  if (service === undefined) return null;
-  const existing = await keychainAccount(d.runner, service);
-  const own = existing ?? (await ownAccountName(d));
-  return keychainTarget(d, service, own);
-}
-
-/** The account attribute the person's own claude item carries, or the user name. */
-async function ownAccountName(d: StoreDeps): Promise<string> {
-  for (const service of claudeServicesFor(d, null)) {
-    const found = await keychainAccount(d.runner, service);
-    if (found !== null) return found;
-  }
-  return d.userName;
+  // THE ITEM THE VENDOR READS FOR THE DEFAULT LOGIN, and only that one (Phase
+  // 281): the ONE service name `mI` gives this process's environment, being
+  // the scoped name when a `CLAUDE_CONFIG_DIR` is set and the plain
+  // `Claude Code-credentials` otherwise, under the vendor's account. Writing
+  // any other name or any other account would leave a running session reading
+  // a credential Tortie did not update, and the stray under the same name is
+  // left exactly as it is.
+  const { service, account } = claudeStoreAddress(d, null);
+  return keychainTarget(d, service, account);
 }
 
 /**
@@ -354,6 +395,11 @@ async function ownAccountName(d: StoreDeps): Promise<string> {
  * branch here that takes the default store, for the same reason
  * {@link storeTarget} has none.
  *
+ * NOR AN ITEM UNDER ANOTHER ACCOUNT (Phase 281). Both deletes carry the vendor
+ * rule's account, because a delete by service alone removes the first item the
+ * name matches, and an item under the same name and another account is not one
+ * this login's sessions ever wrote.
+ *
  * IT DELETES NO FILE AT ALL. A stray whose entry is a symbolic link would
  * otherwise send a file delete through the link and into somebody else's
  * store, and the caller unlinks the entry itself.
@@ -366,7 +412,8 @@ export async function forgetStore(
   if (provider !== 'claude' || !d.keychainForClaude) return;
   if (dir === '') return;
   const service = claudeWriteService(dir);
-  await keychainDelete(d.runner, service);
+  const { account } = claudeStoreAddress(d, dir);
+  await keychainDelete(d.runner, service, account);
   // The staged place a crash between a stage and its discard would leave.
-  await keychainDelete(d.runner, `${service}.tortie-pending`);
+  await keychainDelete(d.runner, `${service}.tortie-pending`, account);
 }

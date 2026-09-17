@@ -53,10 +53,12 @@
  *   9. NO TOKEN BYTE. Not in an event, a fact, an answer, a refusal, the record
  *      file, the logins file or ANY command line, over an arm that really runs
  *      the keychain path so the command lines exist to be checked.
- *  10. THE KEYCHAIN PATH END TO END, over a `security` that behaves the way the
- *      real one was measured to on 2026-09-02: the bytes are exact, the account
- *      attribute is preserved, the person's own item is untouched, the payload
- *      went over STDIN, `-A` was never passed, and no staged item is left.
+ *  10. THE KEYCHAIN PATH END TO END, over a `security` that behaves the way
+ *      the real one was measured to on 2026-09-02: the bytes are exact, the write
+ *      lands under the vendor rule's account rather than one copied off an item
+ *      (Phase 281), the person's own item is untouched, a stray placed first
+ *      under its name is untouched, the payload went over STDIN, `-A` was never
+ *      passed, and no staged item is left.
  *  11. The gate is named in package.json, in build/verification-checks.mjs and
  *      in CLAUDE.md, because a gate nothing names is how a gate decays.
  *  12. TWO OVERLAPPING OBSERVES leave one login, one surviving record row, the
@@ -142,6 +144,32 @@
  *      awaits the join; the second is scanned because `capabilities.ts` is not
  *      in the domain the ablated copies carry, and it is proved on six fixtures
  *      of which five must make it fail.
+ *  20. EVERY CALL AIMED AT CLAUDE CODE'S ITEM NAMES ITS ACCOUNT, AND NOTHING
+ *      TOUCHES A STRAY (Phase 281). Claude Code names its keychain item by
+ *      service AND account, and research 126 §2.4 found every call in this
+ *      domain naming the service alone, so on the operator's machine a stray
+ *      under another account, first under the same name, was what the observe
+ *      and the backstop read and what both write targets wrote (§8.10 drove
+ *      the parent committing `add -U -a "unknown"`). The probe's `security`
+ *      is the first-match model now, keeping items as (service, account) rows
+ *      in order, and every Phase 281 world plants a stray FIRST under every
+ *      vendor name it drives. (a) Driven: every argv and every `-i` line
+ *      readStore, readSettledStore, storeTarget and defaultStoreTarget through
+ *      all five swap steps, forgetStore and the fingerprint send carries `-a`
+ *      with the vendor account, exactly the calls pinned, the one name
+ *      `CLAUDE_CONFIG_DIR` gives with no plain name after it, and no stray is
+ *      named, read, rewritten or deleted. (b) Source: the vendor keychain call
+ *      sites in the domain are counted against a pinned number, and each one's
+ *      account is followed back to a name destructured from
+ *      `claudeStoreAddress`, never a literal, a `null`, a reading's field or
+ *      an account read back off an item; the ablated copies are scanned as well
+ *      as probed. (c) Driven: a vendor name with a null, undefined, empty or
+ *      refused account reaches the runner zero times, while the same calls with
+ *      the account reach it and a name outside the namespace keeps the argv
+ *      Tortie's vault always sent. (d) Driven: storeTarget for a directory with
+ *      no scoped item, and defaultStoreTarget, commit under the vendor rule's
+ *      account over its three shapes, being `USER`, the user name and the
+ *      fallback, with the stray beside them byte identical.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -156,7 +184,12 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { functionBodyOf } from './scan-source.mjs';
+import {
+  callArguments,
+  closeOf,
+  functionBodyOf,
+  stripComments as blankComments
+} from './scan-source.mjs';
 import { tsxCli } from './ts-runner.mjs';
 
 const TAG = '[credentials]';
@@ -624,6 +657,325 @@ notes.push(
 );
 
 // ---------------------------------------------------------------------------
+// Rule 20b (Phase 281). EVERY VENDOR KEYCHAIN CALL SITE, AND WHERE ITS ACCOUNT
+// CAME FROM.
+//
+// Claude Code names its keychain item by service AND account, and research
+// 126 §2.4 found every call in this domain naming the service alone, so on the
+// operator's machine the observe, the backstop and both write targets reached
+// a stray under another account first. The driven half of rule 20 is the
+// probe's `vendorAddress`, `vendorRefusal` and `vendorCommit` readings. This is
+// the half a probe cannot give: a NEW call site the probe never drives, and an
+// account that happens to equal the vendor's in every world the probe builds
+// while coming from somewhere else, being a literal, the account read back off
+// an item, or a reading's `account` field.
+//
+// So every call of the six `security.ts` functions in the domain is found, the
+// number of them aimed at a vendor name is pinned, and each one's account
+// argument is followed back to its binding: it must be a name destructured
+// from `claudeStoreAddress(...)` in the same function and never assigned
+// again, or a parameter every caller in the same file fills that way. And
+// `claudeStoreAddress` itself must take the account from `claudeKeychainAccount`
+// over the seam's environment. Tortie's own vault names live in `vault.ts` and
+// `migrate.ts` and pass `null`, or `VAULT_ACCOUNT` to the write, and are counted
+// apart. A file other than `security.ts` naming a `security` verb as a string
+// is running the program itself around the refusal, and is a finding too.
+//
+// IT IS TEXT AND NOT A TYPE CHECKER. It reads top level function declarations
+// whose closing brace sits at the start of a line, which is every function the
+// domain declares under the repository's formatter, and it follows a parameter
+// one caller deep. A binding it cannot follow is a finding rather than a pass,
+// so a later shape it does not understand fails closed and says which site.
+// ---------------------------------------------------------------------------
+
+/** The domain's own names, which are not the vendor's and pass no account. */
+const OWN_NAME_FILES = new Set(['vault.ts', 'migrate.ts']);
+
+/**
+ * THE PINNED COUNT. `stores.ts` holds seven, being `safeKeychain`'s read,
+ * `keychainTarget`'s write, read, staged read and discard, and `forgetStore`'s
+ * two deletes, and `watch.ts` holds the fingerprint's two attribute reads. A
+ * commit that adds or removes one moves this number in the same commit and
+ * says why in its body.
+ */
+const VENDOR_KEYCHAIN_SITES = 9;
+
+/**
+ * The names in one parameter list, split at the commas that sit at depth zero.
+ * Angle brackets count as depth here and nowhere else, because a parameter typed
+ * `Pick<StoreDeps, 'env' | 'userName'>` holds a comma that is not a split.
+ */
+function parameterNames(code, open) {
+  const close = closeOf(code, open);
+  const text = close < 0 ? '' : code.slice(open + 1, close);
+  const names = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '=' && text[i + 1] === '>') {
+      current += '=>';
+      i += 1;
+      continue;
+    }
+    if ('([{<'.includes(c)) depth += 1;
+    else if (')]}>'.includes(c)) depth -= 1;
+    if (c === ',' && depth === 0) {
+      names.push(current);
+      current = '';
+      continue;
+    }
+    current += c;
+  }
+  if (current.trim() !== '') names.push(current);
+  return names.map((n) => n.trim().replace(/^\.\.\./, '').split(/[?:=]/)[0].trim());
+}
+
+/** Every top level function declaration, with its parameter names and span. */
+function topLevelFunctions(code) {
+  const out = [];
+  const declared = /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm;
+  let m;
+  while ((m = declared.exec(code)) !== null) {
+    const open = m.index + m[0].length - 1;
+    const params = parameterNames(code, open);
+    const end = code.indexOf('\n}', open);
+    out.push({ name: m[1], params, start: m.index, end: end < 0 ? code.length : end });
+  }
+  return out;
+}
+
+/**
+ * Where the account at one call came from: `null` when it is the vendor rule's,
+ * or a sentence naming what it is instead.
+ */
+function accountProvenance(code, fns, at, arg, depth) {
+  if (!/^[A-Za-z_$][\w$]*$/.test(arg)) {
+    return `the account is \`${arg}\` rather than a name bound from claudeStoreAddress`;
+  }
+  const fn = fns.find((f) => f.start <= at && at < f.end);
+  if (fn === undefined) return `the account \`${arg}\` is not inside a function this rule can read`;
+  const body = code.slice(fn.start, fn.end);
+  // AN ASSIGNMENT, and a declaration is not one: `const own = existing ?? x`
+  // is a name bound from something else, which the question below answers.
+  const signature = body.match(/^[^(]*\([^)]*\)/)?.[0].length ?? 0;
+  const assigned = new RegExp(`\\b${arg}\\s*(?:=(?![=>])|\\?\\?=|\\|\\|=)`, 'g');
+  let a;
+  while ((a = assigned.exec(body)) !== null) {
+    if (a.index < signature) continue;
+    const before = body.slice(0, a.index);
+    if (/\.\s*$/.test(before) || /\b(?:const|let|var)\s+$/.test(before)) continue;
+    return `the account \`${arg}\` in ${fn.name} is assigned again after it is bound`;
+  }
+  const destructured = new RegExp(
+    `\\b(?:const|let)\\s*\\{[^}]*\\b${arg}\\b[^}]*\\}\\s*=\\s*claudeStoreAddress\\s*\\(`
+  );
+  if (destructured.test(body)) return null;
+  const position = fn.params.indexOf(arg);
+  if (position < 0) {
+    return `the account \`${arg}\` in ${fn.name} is not destructured from claudeStoreAddress`;
+  }
+  if (depth >= 2) return `the account \`${arg}\` in ${fn.name} is passed down further than this rule follows`;
+  const callers = [];
+  const call = new RegExp(`\\b${fn.name}\\s*\\(`, 'g');
+  let m;
+  while ((m = call.exec(code)) !== null) {
+    if (/function\s+$/.test(code.slice(Math.max(0, m.index - 24), m.index))) continue;
+    callers.push(m.index);
+  }
+  if (callers.length === 0) return `${fn.name} takes the account \`${arg}\` and nothing in the file calls it`;
+  for (const callAt of callers) {
+    const given = callArguments(code, code.indexOf('(', callAt))[position] ?? '';
+    const why = accountProvenance(code, fns, callAt, given, depth + 1);
+    if (why !== null) return `${fn.name}'s caller: ${why}`;
+  }
+  return null;
+}
+
+/** Rule 20b over one file's text. */
+function vendorKeychainSitesIn(name, text) {
+  const code = blankComments(text);
+  const fns = topLevelFunctions(code);
+  const sites = [];
+  const bad = [];
+  const own = [];
+  const bypass = [];
+  if (name !== 'security.ts') {
+    for (const verb of ['find-generic-password', 'delete-generic-password', 'add-generic-password']) {
+      if (new RegExp(`['"\`]${verb}\\b`).test(code)) bypass.push(`${name} runs ${verb} itself`);
+    }
+  }
+  const called = /\bkeychain(?:Read|Account|Modified|HasItem|Delete|Write)\s*\(/g;
+  let m;
+  while ((m = called.exec(code)) !== null) {
+    if (/function\s+$/.test(code.slice(Math.max(0, m.index - 24), m.index))) continue;
+    const verb = m[0].replace(/\s*\($/, '');
+    const args = callArguments(code, m.index + m[0].length - 1);
+    const account = args[2] ?? '';
+    const fn = fns.find((f) => f.start <= m.index && m.index < f.end);
+    const where = `${name}:${fn?.name ?? '(top level)'}:${verb}`;
+    if (OWN_NAME_FILES.has(name)) {
+      own.push(where);
+      const expected = verb === 'keychainWrite' ? 'VAULT_ACCOUNT' : 'null';
+      if (account !== expected) bad.push(`${where} passes \`${account}\` where Tortie's own names pass ${expected}`);
+      continue;
+    }
+    sites.push(where);
+    const why = accountProvenance(code, fns, m.index, account, 0);
+    if (why !== null) bad.push(`${where}: ${why}`);
+  }
+  let addressRule = null;
+  const address = fns.find((f) => f.name === 'claudeStoreAddress');
+  if (address !== undefined) {
+    const body = code.slice(address.start, address.end);
+    addressRule =
+      /\baccount:\s*claudeKeychainAccount\s*\(\s*d\.env\s*,/.test(body) &&
+      /\bservice:\s*claudeKeychainService\s*\(\s*d\.env\s*,/.test(body);
+  }
+  return { sites, bad, own, bypass, addressRule };
+}
+
+/** Rule 20b over a whole domain directory, as one comparable reading. */
+function vendorKeychainSites(dir) {
+  const sites = [];
+  const bad = [];
+  const bypass = [];
+  let own = 0;
+  let addressRule = false;
+  let addressDefined = 0;
+  for (const name of readdirSync(dir).filter((n) => n.endsWith('.ts')).sort()) {
+    const got = vendorKeychainSitesIn(name, readFileSync(join(dir, name), 'utf8'));
+    sites.push(...got.sites);
+    bad.push(...got.bad);
+    bypass.push(...got.bypass);
+    own += got.own.length;
+    if (got.addressRule !== null) {
+      addressDefined += 1;
+      addressRule = got.addressRule;
+    }
+  }
+  return {
+    sites: sites.sort(),
+    bad: bad.sort(),
+    bypass: bypass.sort(),
+    own,
+    addressRule: addressDefined === 1 && addressRule
+  };
+}
+
+// The scanner, proved on fixtures before it is believed. The first is the
+// shipping shape and must pass; every other one is a way the account stops
+// being the vendor rule's, and each must be caught.
+const SITE_FIXTURES = [
+  {
+    name: 'the shipping shape, a parameter one caller deep',
+    file: 'stores.ts',
+    text:
+      'async function safeKeychain(d, service, account) {\n  return await keychainRead(d.runner, service, account);\n}\n' +
+      'export async function readStore(d, provider, dir) {\n  const { service, account } = claudeStoreAddress(d, dir);\n  const found = await safeKeychain(d, service, account);\n}\n',
+    sites: 1,
+    bad: 0,
+    bypass: 0
+  },
+  {
+    name: 'a literal account',
+    file: 'stores.ts',
+    text: "export async function forgetStore(d, provider, dir) {\n  await keychainDelete(d.runner, claudeWriteService(dir), 'p281-stray');\n}\n",
+    sites: 1,
+    bad: 1,
+    bypass: 0
+  },
+  {
+    name: 'no account at all',
+    file: 'watch.ts',
+    text: 'export async function defaultKeychainFingerprint(keep) {\n  const { service } = claudeStoreAddress(keep.stores, null);\n  return keychainModified(keep.stores.runner, service, null);\n}\n',
+    sites: 1,
+    bad: 1,
+    bypass: 0
+  },
+  {
+    name: 'the account copied off the item the name matched',
+    file: 'stores.ts',
+    text:
+      'function keychainTarget(d, service, account) {\n  return { read: () => keychainRead(d.runner, service, account) };\n}\n' +
+      'export async function storeTarget(d, provider, dir) {\n  const service = claudeWriteService(dir);\n  const existing = await keychainAccount(d.runner, service, null);\n  return keychainTarget(d, service, existing ?? d.userName);\n}\n',
+    sites: 2,
+    bad: 2,
+    bypass: 0
+  },
+  {
+    name: "a reading's account field",
+    file: 'stores.ts',
+    text: 'export async function forgetStore(d, provider, dir) {\n  const reading = await readStore(d, provider, dir);\n  await keychainDelete(d.runner, claudeWriteService(dir), reading.account);\n}\n',
+    sites: 1,
+    bad: 1,
+    bypass: 0
+  },
+  {
+    name: 'the vendor account bound and then assigned over',
+    file: 'stores.ts',
+    text: 'export async function forgetStore(d, provider, dir) {\n  let { account } = claudeStoreAddress(d, dir);\n  account = d.userName;\n  await keychainDelete(d.runner, claudeWriteService(dir), account);\n}\n',
+    sites: 1,
+    bad: 1,
+    bypass: 0
+  },
+  {
+    name: 'security run by hand around the refusal',
+    file: 'watch.ts',
+    text: "export async function defaultKeychainFingerprint(keep) {\n  return (await keep.stores.runner.run(['find-generic-password', '-s', 'x'])).stdout;\n}\n",
+    sites: 0,
+    bad: 0,
+    bypass: 1
+  },
+  {
+    name: "Tortie's own vault name, which passes null",
+    file: 'vault.ts',
+    text: 'export function keychainVault(runner, scope) {\n  return { get: (slot) => keychainRead(runner, serviceFor(slot), null) };\n}\n',
+    sites: 0,
+    bad: 0,
+    bypass: 0
+  },
+  {
+    name: 'a comment naming a service-only call',
+    file: 'stores.ts',
+    text: '// keychainRead(d.runner, service, null) was the parent.\nexport const X = 1;\n',
+    sites: 0,
+    bad: 0,
+    bypass: 0
+  }
+];
+let siteFixturesBehaved = 0;
+for (const f of SITE_FIXTURES) {
+  const got = vendorKeychainSitesIn(f.file, f.text);
+  if (got.sites.length === f.sites && got.bad.length === f.bad && got.bypass.length === f.bypass) {
+    siteFixturesBehaved += 1;
+  } else {
+    failures.push(
+      `${TAG} the vendor call site scanner misread the fixture "${f.name}": ${JSON.stringify({ sites: got.sites.length, bad: got.bad, bypass: got.bypass })}`
+    );
+  }
+}
+
+const liveSites = vendorKeychainSites(DOMAIN);
+check(
+  liveSites.sites.length === VENDOR_KEYCHAIN_SITES,
+  `${TAG} THE CREDENTIALS DOMAIN HAS ${String(liveSites.sites.length)} VENDOR KEYCHAIN CALL SITES rather than the ${String(VENDOR_KEYCHAIN_SITES)} this gate pins, so a call was added or removed without anyone deciding its account: ${liveSites.sites.join(', ')}`
+);
+for (const why of liveSites.bad) {
+  failures.push(`${TAG} A VENDOR KEYCHAIN CALL DOES NOT PASS THE VENDOR ACCOUNT: ${why}`);
+}
+for (const why of liveSites.bypass) {
+  failures.push(`${TAG} THE REFUSAL IS WALKED AROUND: ${why}, so a lookup by service alone reaches the first item of that name`);
+}
+check(
+  liveSites.addressRule,
+  `${TAG} claudeStoreAddress does not take its account from claudeKeychainAccount and its service from claudeKeychainService over the seam's environment, or it is defined other than once`
+);
+notes.push(
+  `${String(liveSites.sites.length)} vendor keychain call sites each passing the vendor rule's account, ${String(liveSites.own)} of Tortie's own, ${String(siteFixturesBehaved)} of ${String(SITE_FIXTURES.length)} call site fixtures behaved`
+);
+
+// ---------------------------------------------------------------------------
 // The probe, over the tree and over the ablated copies of it.
 // ---------------------------------------------------------------------------
 
@@ -692,7 +1044,10 @@ const VERDICT_PARTS = [
   'keychain',
   'scope',
   'shapes',
-  'lifecycle'
+  'lifecycle',
+  'vendorAddress',
+  'vendorRefusal',
+  'vendorCommit'
 ];
 
 function verdict(d) {
@@ -733,7 +1088,10 @@ function verdict(d) {
     JSON.stringify(keychain),
     JSON.stringify(d.scope),
     JSON.stringify(d.shapes),
-    JSON.stringify(d.lifecycle)
+    JSON.stringify(d.lifecycle),
+    JSON.stringify(d.vendorAddress),
+    JSON.stringify(d.vendorRefusal),
+    JSON.stringify(d.vendorCommit)
   ];
 }
 
@@ -1231,17 +1589,34 @@ if ('error' in live) {
   check(live.leak.recordHasDigest, `${TAG} the record file holds no digest, so the leak scan is over an empty file`);
   check(live.keychain.promoted && live.keychain.activated, `${TAG} the keychain arm did not run to the end`);
   check(live.keychain.bytesExact, `${TAG} THE KEYCHAIN ROUND TRIP IS NOT BYTE EXACT`);
-  check(live.keychain.accountPreserved, `${TAG} a write back did not preserve the item's account attribute`);
+  // PHASE 281. This was "the account attribute is preserved", which copied the
+  // account off whatever item the name matched. The write's account is now the
+  // vendor rule's over the arm's environment and user name, and nothing else.
+  check(
+    live.keychain.accountIsVendorRule,
+    `${TAG} A WRITE BACK DID NOT LAND UNDER THE VENDOR RULE'S ACCOUNT, being claudeKeychainAccount of the arm's environment and user name, or it landed as a second item beside one`
+  );
   check(live.keychain.ownItemUntouched, `${TAG} THE PERSON'S OWN KEYCHAIN ITEM WAS WRITTEN`);
   check(
-    live.keychain.itemsNamed.length === 2,
-    `${TAG} the keychain holds ${String(live.keychain.itemsNamed.length)} items rather than the person's own and the one login's`
+    live.keychain.strayUntouched,
+    `${TAG} THE STRAY UNDER THE PERSON'S OWN ITEM'S NAME WAS READ, REWRITTEN, MOVED OR NAMED by the keychain arm`
+  );
+  check(
+    live.keychain.itemsNamed.length === 3,
+    `${TAG} the keychain holds ${String(live.keychain.itemsNamed.length)} items rather than the stray, the person's own and the one login's`
   );
   check(live.keychain.argvCount > 0, `${TAG} the keychain arm made no calls, so the argv check proves nothing`);
   check(!live.keychain.tokenInArgv, `${TAG} A CREDENTIAL REACHED A COMMAND LINE`);
   check(live.keychain.payloadInStdin, `${TAG} no write went over stdin, so the argv check proves nothing`);
   check(!live.keychain.everPassedA, `${TAG} -A WAS PASSED, which trusts every program on the machine`);
   check(!live.keychain.stagedLeft, `${TAG} a staged keychain item was left behind`);
+  // PHASE 281, after verification. The probe's `security` must keep the order
+  // the real program was measured to keep, or every order-sensitive reading
+  // above is a reading of a keychain that does not exist.
+  check(
+    live.keychain.updateMovesBehind,
+    `${TAG} the probe's security updates an item in place, and the real one moves an updated item behind every other item of its service name`
+  );
 
   // Rule 17. THE VAULT IS SCOPED TO ITS PROFILE (Phase 208).
   //
@@ -1313,6 +1688,116 @@ if ('error' in live) {
     live.scope.migration.succeededDelete,
     `${TAG} a delete that SUCCEEDED was not counted as one, so the count above proves nothing`
   );
+  }
+
+  // Rule 20 (Phase 281). THE ITEM CLAUDE CODE READS, AND NO OTHER.
+  const va = live.vendorAddress;
+  const vr = live.vendorRefusal;
+  const vc = live.vendorCommit;
+  check(
+    va !== undefined && vr !== undefined && vc !== undefined,
+    `${TAG} RULE 20 CANNOT RUN: the probe gave no Phase 281 readings`
+  );
+  if (va !== undefined && vr !== undefined && vc !== undefined) {
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const swapCalls = (name) => [
+      `add -a vendor -s ${name}.staged`,
+      `find -a vendor -s ${name}.staged -w`,
+      `add -a vendor -s ${name}`,
+      `find -a vendor -s ${name} -w`,
+      `delete -a vendor -s ${name}.staged`
+    ];
+    // 20a. Every function that names a vendor item, over strays placed first.
+    check(
+      same(va.read.calls, ['find -a vendor -s plain -w']) &&
+        va.read.where === 'keychain' &&
+        va.read.account === 'vendor' &&
+        va.read.vendorBytes,
+      `${TAG} READSTORE DID NOT READ THE ITEM CLAUDE CODE READS: with a stray first under the same name it sent ${JSON.stringify(va.read.calls)} and answered ${String(va.read.where)} under ${String(va.read.account)}`
+    );
+    check(
+      same(va.settled.calls, ['find -a vendor -s plain -w', 'find -a vendor -s plain -w']) &&
+        va.settled.vendorBytes,
+      `${TAG} readSettledStore did not settle on the vendor item: it sent ${JSON.stringify(va.settled.calls)}`
+    );
+    check(
+      same(va.readLogin.calls, ['find -a vendor -s D -w']) &&
+        va.readLogin.account === 'vendor' &&
+        va.readLogin.vendorBytes,
+      `${TAG} A LOGIN'S STORE WAS NOT READ UNDER THE VENDOR ACCOUNT: it sent ${JSON.stringify(va.readLogin.calls)}`
+    );
+    check(
+      same(va.target.calls, swapCalls('D')) && va.target.ok && va.target.vendorItemHoldsIt,
+      `${TAG} STORETARGET'S STAGE, STAGED READ, COMMIT, CONFIRM AND DISCARD DO NOT ALL CARRY THE VENDOR ACCOUNT: they sent ${JSON.stringify(va.target.calls)}`
+    );
+    check(
+      same(va.lift.calls, swapCalls('plain')) && va.lift.ok && va.lift.vendorItemHoldsIt,
+      `${TAG} DEFAULTSTORETARGET'S STAGE, STAGED READ, COMMIT, CONFIRM AND DISCARD DO NOT ALL CARRY THE VENDOR ACCOUNT: they sent ${JSON.stringify(va.lift.calls)}`
+    );
+    check(
+      same(va.forget.calls, ['delete -a vendor -s D', 'delete -a vendor -s D.staged']) &&
+        va.forget.vendorItemGone,
+      `${TAG} FORGETSTORE DID NOT DELETE UNDER THE VENDOR ACCOUNT, so a remove reaches the first item of the name or leaves the login's own: it sent ${JSON.stringify(va.forget.calls)}`
+    );
+    check(
+      same(va.fingerprint.calls, ['find -a vendor -s plain', 'find -a vendor -s plain']) &&
+        va.fingerprint.namesVendor &&
+        !va.fingerprint.namesStray,
+      `${TAG} THE KEYCHAIN BACKSTOP DOES NOT FINGERPRINT THE VENDOR ITEM: it sent ${JSON.stringify(va.fingerprint.calls)}${va.fingerprint.namesStray ? ' and read the stray' : ''}`
+    );
+    check(
+      same(va.configDir.calls, ['find -a vendor -s C -w', 'find -a vendor -s C', 'find -a vendor -s C']) &&
+        va.configDir.readNothing,
+      `${TAG} WITH CLAUDE_CONFIG_DIR SET AND NO SCOPED ITEM, A READER ASKED ANOTHER NAME or answered a credential, which no Claude Code session under that directory would find: it sent ${JSON.stringify(va.configDir.calls)}`
+    );
+    check(
+      va.vendorCalls > 0 && va.unaddressed === 0,
+      `${TAG} ${String(va.unaddressed)} OF ${String(va.vendorCalls)} CALLS AIMED AT A VENDOR NAME DID NOT CARRY -a WITH THE VENDOR ACCOUNT`
+    );
+    check(
+      !va.strayNamed && va.straysUntouched && !va.strayBytesAnswered,
+      `${TAG} A STRAY UNDER A VENDOR NAME WAS NAMED, READ, REWRITTEN OR DELETED, which is research 126's stray on the operator's machine: ${JSON.stringify({ named: va.strayNamed, untouched: va.straysUntouched, answered: va.strayBytesAnswered })}`
+    );
+    // 20c. No account, no call.
+    check(
+      vr.asked > 0 && vr.refusedReached === 0 && vr.refusedAnswers && vr.rowsKept,
+      `${TAG} A VENDOR NAME WITH NO ACCOUNT REACHED SECURITY ${String(vr.refusedReached)} TIMES out of ${String(vr.asked)} asks, so a lookup by service alone is still possible`
+    );
+    check(
+      same(vr.addressed, [
+        'find-generic-password -a p281-vendor -s Claude Code-credentials -w',
+        'find-generic-password -a p281-vendor -s Claude Code-credentials',
+        'find-generic-password -a p281-vendor -s Claude Code-credentials',
+        'find-generic-password -a p281-vendor -s Claude Code-credentials'
+      ]),
+      `${TAG} the refusal refused more than it should: the same calls WITH the vendor account sent ${JSON.stringify(vr.addressed)}`
+    );
+    check(
+      vr.outsideExact,
+      `${TAG} A NAME OUTSIDE CLAUDE CODE'S NAMESPACE no longer sends the service-only command line Tortie's own vault names always sent`
+    );
+    // 20d. A directory with no scoped item commits under the vendor account.
+    for (const [why, arm] of Object.entries(vc)) {
+      const e = arm.expected;
+      check(
+        arm.ruleAgrees && arm.targetOk && arm.liftOk,
+        `${TAG} the ${why} commit arm did not run to the end, so what it proves next is nothing`
+      );
+      check(
+        same(arm.targetAdds, [`add -a ${e} -s E.staged`, `add -a ${e} -s E`]) &&
+          same(arm.eRows, [`${e}:chosen`]),
+        `${TAG} STORETARGET FOR A DIRECTORY WITH NO SCOPED ITEM DID NOT COMMIT UNDER THE VENDOR RULE'S ACCOUNT (${why}), the regression research 126 §8.10 measured as add -U -a "unknown": it sent ${JSON.stringify(arm.targetAdds)} and left ${JSON.stringify(arm.eRows)}`
+      );
+      check(
+        same(arm.liftAdds, [`add -a ${e} -s plain.staged`, `add -a ${e} -s plain`]) &&
+          same(arm.plainRows, ['stray:other', `${e}:lifted`]),
+        `${TAG} DEFAULTSTORETARGET DID NOT COMMIT UNDER THE VENDOR RULE'S ACCOUNT (${why}), so the default lift updates an item no Claude Code session reads: it sent ${JSON.stringify(arm.liftAdds)} and left ${JSON.stringify(arm.plainRows)}`
+      );
+      check(arm.straysUntouched, `${TAG} the ${why} commit arm changed the stray`);
+    }
+    notes.push(
+      `${String(va.vendorCalls)} vendor keychain calls over strays placed first, every one under the vendor account, ${String(vr.asked)} asks with no account and ${String(vr.refusedReached)} reaching security, ${String(Object.keys(vc).length)} account rule shapes committing where Claude Code reads`
+    );
   }
 
   // Rule 11's runtime half: the shapes.
@@ -1921,13 +2406,14 @@ const ABLATIONS = [
   },
   {
     // PHASE 211 FIX ROUND. The fingerprint reading the account alone, which
-    // the vendor never changes on a sign in.
+    // the vendor never changes on a sign in. Re-anchored in Phase 281, when the
+    // loop over a service list became one return over the one name.
     name: 'the keychain fingerprint reading the account attribute alone',
     edits: [
       {
         file: 'watch.ts',
-        from: "    parts.push(`${service}=${account ?? ''}@${modified ?? ''}`);",
-        to: "    parts.push(`${service}=${account ?? ''}`);"
+        from: "  return `${service}=${found ?? ''}@${modified ?? ''}`;",
+        to: "  return `${service}=${found ?? ''}`;"
       }
     ]
   },
@@ -2067,12 +2553,36 @@ const ABLATIONS = [
     ]
   },
   {
-    name: 'the item account attribute no longer preserved on a write back',
+    // PHASE 281. This was "the item account attribute no longer preserved on a
+    // write back", and Phase 281 made preserving it the defect: the parent's
+    // storeTarget copied the account of the first item the name matched, then
+    // of the person's own item, then took the user name, and research 126 §8.10
+    // drove it committing `add -U -a "unknown"` onto the stray's account. The
+    // mistake a later round would make is that code put back, so that is the
+    // ablation. With security.ts's refusal in place the two lookups by service
+    // alone are refused and the copy falls through to the user name, which is
+    // not the vendor rule's account when `USER` is set; the ablation after
+    // the next one removes the refusal too and lands on the stray itself.
+    name: 'the account copied again from the existing item in storeTarget',
     edits: [
       {
         file: 'stores.ts',
-        from: '  const existing = await keychainAccount(d.runner, service);\n  const own = existing ?? (await ownAccountName(d));',
-        to: '  const own = d.userName;'
+        from: 'import {\n  keychainDelete,\n  keychainRead,',
+        to: 'import {\n  keychainAccount,\n  keychainDelete,\n  keychainRead,'
+      },
+      {
+        file: 'stores.ts',
+        from:
+          '  const { account } = claudeStoreAddress(d, dir);\n' +
+          '  return keychainTarget(d, claudeWriteService(dir), account);',
+        to:
+          '  const service = claudeWriteService(dir);\n' +
+          '  const existing = await keychainAccount(d.runner, service, null);\n' +
+          '  const own =\n' +
+          '    existing ??\n' +
+          '    (await keychainAccount(d.runner, claudeKeychainService(d.env, null), null)) ??\n' +
+          '    d.userName;\n' +
+          '  return keychainTarget(d, service, own);'
       }
     ]
   },
@@ -2145,8 +2655,8 @@ const ABLATIONS = [
     edits: [
       {
         file: 'security.ts',
-        from: "  const { code } = await runner.run(['delete-generic-password', '-s', service]);\n  return code === 0;",
-        to: "  await runner.run(['delete-generic-password', '-s', service]);\n  return true;"
+        from: "  const { code } = await runner.run(['delete-generic-password', ...address]);\n  return code === 0;",
+        to: "  await runner.run(['delete-generic-password', ...address]);\n  return true;"
       }
     ]
   },
@@ -2266,6 +2776,114 @@ const ABLATIONS = [
     ]
   },
   {
+    // PHASE 281, rule 20a. readStore's read made without the account, which is
+    // the parent's lookup by service alone. security.ts refuses it, so the
+    // vendor item is never read at all.
+    name: "the account dropped at readStore's read",
+    edits: [
+      {
+        file: 'stores.ts',
+        from: '    const found = await safeKeychain(d, service, account);',
+        to: '    const found = await safeKeychain(d, service, null);'
+      }
+    ]
+  },
+  {
+    // PHASE 281, rule 20a. forgetStore's delete of the login's own item made
+    // without the account, which by service alone removes the first item of
+    // the name, whoever's it is.
+    name: "the account dropped at forgetStore's delete",
+    edits: [
+      {
+        file: 'stores.ts',
+        from: '  await keychainDelete(d.runner, service, account);\n  // The staged place',
+        to: '  await keychainDelete(d.runner, service, null);\n  // The staged place'
+      }
+    ]
+  },
+  {
+    // PHASE 281, rule 20c. The refusal taken out of security.ts's one address
+    // helper, so a vendor name with no account sends `-s` alone again.
+    name: "security.ts's refusal of a vendor name with no account removed",
+    edits: [
+      {
+        file: 'security.ts',
+        from: "    return isClaudeVendorService(service) ? null : ['-s', service];",
+        to: "    return ['-s', service];"
+      }
+    ]
+  },
+  {
+    // PHASE 281, rule 20d with the refusal gone as well: the parent's copying
+    // storeTarget over a security.ts that no longer refuses, which is exactly
+    // the shape research 126 §8.10 drove. The service-only lookup of the plain
+    // name lands on the stray placed first and the commit goes under its
+    // account.
+    name: "the refusal removed and the account copied again, research 126 §8.10's shape",
+    edits: [
+      {
+        file: 'security.ts',
+        from: "    return isClaudeVendorService(service) ? null : ['-s', service];",
+        to: "    return ['-s', service];"
+      },
+      {
+        file: 'stores.ts',
+        from: 'import {\n  keychainDelete,\n  keychainRead,',
+        to: 'import {\n  keychainAccount,\n  keychainDelete,\n  keychainRead,'
+      },
+      {
+        file: 'stores.ts',
+        from:
+          '  const { account } = claudeStoreAddress(d, dir);\n' +
+          '  return keychainTarget(d, claudeWriteService(dir), account);',
+        to:
+          '  const service = claudeWriteService(dir);\n' +
+          '  const existing = await keychainAccount(d.runner, service, null);\n' +
+          '  const own =\n' +
+          '    existing ??\n' +
+          '    (await keychainAccount(d.runner, claudeKeychainService(d.env, null), null)) ??\n' +
+          '    d.userName;\n' +
+          '  return keychainTarget(d, service, own);'
+      }
+    ]
+  },
+  {
+    // PHASE 281, rule 20a. The backstop made one attribute read by service
+    // alone, straight through the runner, which is the parent's fingerprint in
+    // one call: it reads whichever item `security` meets first.
+    name: 'the keychain fingerprint made a service-only attribute read',
+    edits: [
+      {
+        file: 'watch.ts',
+        from:
+          '  const found = await keychainAccount(stores.runner, service, account);\n' +
+          '  const modified = await keychainModified(stores.runner, service, account);',
+        to:
+          "  const listed = (await stores.runner.run(['find-generic-password', '-s', service])).stdout;\n" +
+          '  const found = /"acct"<blob>="([^"\\n]*)"/.exec(listed)?.[1] ?? null;\n' +
+          '  const modified = /"mdat"<timedate>=0x[0-9A-Fa-f]+\\s+"([^"\\n]*)"/.exec(listed)?.[1] ?? null;'
+      }
+    ]
+  },
+  {
+    // PHASE 281, rule 20b. A NEW vendor keychain call that no arm drives, and
+    // with no account. Every probe reading stays where it was, because nothing
+    // calls it, and security.ts would refuse it at run time anyway. It is the
+    // source rule's own ablation: the half of rule 20 a probe cannot give.
+    name: 'a new vendor keychain read with no account, which no arm drives',
+    edits: [
+      {
+        file: 'stores.ts',
+        from: '/** Read a store once. */\nexport async function readStore(',
+        to:
+          'export async function peekStore(d: StoreDeps, dir: string): Promise<string | null> {\n' +
+          '  return keychainRead(d.runner, claudeWriteService(dir), null);\n' +
+          '}\n\n' +
+          '/** Read a store once. */\nexport async function readStore('
+      }
+    ]
+  },
+  {
     name: 'a store that cannot be read throws instead of answering nothing',
     edits: [
       {
@@ -2309,6 +2927,7 @@ function sweepAblations() {
 
 try {
   const liveVerdict = JSON.stringify(verdict(live));
+  const liveSitesReading = JSON.stringify(liveSites);
   let red = 0;
   for (const [i, ablation] of ABLATIONS.entries()) {
     const dir = join(mainDir, `${ABLATION_PREFIX}${String(i)}`);
@@ -2363,6 +2982,12 @@ try {
       continue;
     }
     const moved = VERDICT_PARTS.filter((_, at) => got[at] !== was[at]);
+    // RULE 20b IS READ FROM SOURCE (Phase 281), so the ablated copy is scanned
+    // as well as probed. A call site whose account stopped being the vendor
+    // rule's moves this reading even where no world the probe builds can tell.
+    if (JSON.stringify(vendorKeychainSites(dir)) !== liveSitesReading) {
+      moved.push('vendorSites');
+    }
     if (moved.length > 0) {
       red += 1;
       // A CLAUSE OWNS A READING. Saying which one is what stops an ablation
