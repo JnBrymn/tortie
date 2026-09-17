@@ -201,6 +201,12 @@ const api: InstalledGmuxApi = {
   // Phase 275: what the last settings read dropped from those lists, so the
   // window can say it. Read only; it starts nothing and carries no value.
   envRejections: () => invoke('settings:envRejections'),
+  // Phase 276: ask the login shell again, now. No argument, and the answer is
+  // nothing at all — not a name, not a count, and certainly not a value. It
+  // exists for the class the shell-config watch provably cannot see, being a
+  // key a rc file SOURCES, one a vault hands over at shell start, or one a
+  // plugin loads from a .env.
+  envRefresh: () => invoke('settings:envRefresh'),
   onSettingsChanged: (cb) => on(EVT_SETTINGS_CHANGED, cb),
   // Phase 19 item 11 optional extra: the machine woke up. The terminal clears
   // its WebGL glyph atlas on this, because a texture atlas does not survive

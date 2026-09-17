@@ -35,6 +35,10 @@ import { disposeOverviewIpc, registerOverviewIpc } from './overview/ipc';
 // snapshot they answer from, dropped in the ordered disposer below.
 import { disposeUsageService, registerUsageIpc } from './usage/ipc';
 import { registerLoginsIpc, stopLoginsWatch } from './logins/ipc';
+// Phase 276: the shell-config watch that keeps the login-shell env answer
+// fresh. It holds fs.watch handles and a timer, so it stops beside the
+// credential watcher below.
+import { stopEnvWatch } from './env/watch';
 import {
   beginCredentialShutdown,
   joinCredentialShutdown,
@@ -444,6 +448,14 @@ export async function disposeMainCapabilities(): Promise<MainDisposeOutcome> {
   // a slow interval, and both must be released whatever the rest of teardown
   // does. It is synchronous and cannot throw.
   stopLoginsWatch();
+  // PHASE 276. Then the shell-config watch, for the same reason and in the same
+  // breath: it holds fs.watch handles and a debounce timer. Disarming it also
+  // drops the cached login-shell answer, so no value outlives the thing that
+  // was watching for it to change, and it refuses every later start, which is
+  // what stops a quit landing inside the boot chain from installing handles
+  // after this disposer has finished with the domain. Synchronous, cannot
+  // throw, and calling it twice is calling it once.
+  stopEnvWatch();
   // PHASE 232. Then stop the launch sign-in's retries: every timer cleared, the
   // link subscription released and any new arm refused, synchronously and
   // before the first await below, so no retry can start a process once the

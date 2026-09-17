@@ -456,6 +456,25 @@ export interface SettingsInvokeChannelMap {
    * never a string. NAMES ONLY — the shape has no field a value could ride on.
    */
   'settings:envRejections': { req: []; res: EnvRejections };
+  /**
+   * Ask the login shell again, now (Phase 276).
+   *
+   * Phase 276 caches the login-shell env answer for the life of the process, so
+   * a session costs a shell start once per launch instead of once per session,
+   * and it watches the person's shell config files so a rotated key still takes
+   * effect on the next session they start. This channel is for the class the
+   * watch provably cannot see: a key exported by a file the rc SOURCES, one read
+   * from a vault at shell start, a `.env` a plugin loads, a credential rotated
+   * in the keychain, a value the shell inherits.
+   *
+   * IT RESOLVES `void` WHATEVER HAPPENED, and that is a decision rather than an
+   * omission. Nothing the probe learned may cross this channel without risking
+   * Phase 269's names-only rule, and nothing a person needs is on the other
+   * side: a probe that failed cached nothing, so the next create probes anyway
+   * and the existing `env-unresolved` notice is the sentence that names the
+   * variable. A button that returns nothing can never lie.
+   */
+  'settings:envRefresh': { req: []; res: void };
 }
 
 /**
@@ -483,6 +502,11 @@ export interface GmuxSettingsExtras {
    * only, and every one of them is already safe to draw.
    */
   envRejections(): Promise<EnvRejections>;
+  /**
+   * Ask the login shell again, now (Phase 276). Resolves when the shell has
+   * answered, with nothing at all: no name and no value crosses back.
+   */
+  envRefresh(): Promise<void>;
   /** Fires in EVERY window whenever the persisted settings change. */
   onSettingsChanged(cb: (settings: GmuxSettings) => void): Unsubscribe;
 }

@@ -624,6 +624,21 @@
   height: 26px;
 }
 
+/* PHASE 276 - a section toolbar whose only child is the button.
+   .set-section-toolbar above is display:flex with no justification, so its
+   content sits LEFT. The Agents section never needed a rule because its
+   "Last scanned ..." age carries margin-right:auto and pushes the button
+   rightwards; the SpecStory section, which has no age, spells the same
+   declaration locally as .ss-toolbar (specstory.css:42-44). Launch defaults'
+   [Re-read shell] is the third instance of that shape and the second with
+   nothing to its left, so the declaration is written once here instead of a
+   third time in a third file. It adds no colour, no size and no spacing - one
+   justification, and .ss-toolbar can retire into it whenever somebody is in
+   that file. */
+.set-toolbar-end {
+  justify-content: flex-end;
+}
+
 .set-spinner {
   width: 12px;
   height: 12px;

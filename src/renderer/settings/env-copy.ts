@@ -372,3 +372,32 @@ export function envRejectedUnnamedLine(count: number): string {
     ? 'One entry was ignored because it is not a variable name.'
     : `${count} entries were ignored because they are not variable names.`;
 }
+
+// ---------------------------------------------------------------------------
+// The deliberate refresh (Phase 276)
+// ---------------------------------------------------------------------------
+
+/**
+ * PHASE 276 — the refresh. A short verb phrase, the shape of Re-scan in the
+ * Agents section and Re-check in the SpecStory one.
+ */
+export const ENV_REFRESH_BUTTON = 'Re-read shell';
+
+/** In flight, beside the spinner. The present participle both siblings use. */
+export const ENV_REFRESH_BUSY = 'Reading…';
+
+/**
+ * PHASE 276 — the whole explanation, and it lives behind HOVER.
+ *
+ * "Just enough words" puts explanation a person might want behind hover rather
+ * than on the resting face, and this is the sentence that earns it: the button
+ * is for the one case the shell-config watch cannot see, being a key a rc file
+ * SOURCES, one a vault hands over at shell start, or one a plugin loads from a
+ * .env. A person who does not have that case never needs to read it.
+ *
+ * IT SAYS "THE NEXT SESSION" AND NEVER "THIS WINDOW", which is rule 1 of this
+ * file holding. Nothing is read into the window by pressing it: the answer is
+ * dropped and re-taken in main, and the channel resolves with nothing at all.
+ */
+export const ENV_REFRESH_HINT =
+  'Ask your shell again. The next session you start gets the current values.';

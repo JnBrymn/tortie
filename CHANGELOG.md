@@ -14,6 +14,7 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 ### Changed
 
 - A shell variable you name in Settings now reaches a session that comes back after a quit or a reboot, not only a session you start fresh.
+- Starting a session no longer waits about a second on your login shell. Tortie asks your shell for the variables you named once per launch instead of once per session, and watches your shell config files, so rotating a key still takes effect on the next session you start with nothing to restart; a key that comes from somewhere those files do not show — a file your .zshrc sources, or a vault it calls — needs the new Re-read shell button under Settings, Launch defaults.
 
 ### Fixed
 

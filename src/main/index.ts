@@ -44,6 +44,9 @@ import { installHarnessKeychain } from './harness/keychain-harness';
 import { installMachineSeam } from './harness/machine-seam';
 // Phase 208: the one observe at boot, after the manifest is open.
 import { observeLoginsAtBoot, startLoginsWatch } from './logins/ipc';
+// Phase 276: the login-shell env answer, warmed once instead of once per
+// session, and watched so a rotated key still takes effect on the next session.
+import { startEnvWatch, warmEnvAtBoot } from './env/watch';
 // Phase 166: the one cache policy, applied before whenReady below.
 import { applyCachePolicy } from './cache/policy';
 // Phase 127. What counts as a harness launch, in one place. The three
@@ -591,6 +594,43 @@ app.whenReady().then(async () => {
     // subscription through src/main/watcher, so the FSEvents exclusion budget is
     // untouched. It is stopped in the one ordered quit disposer.
     .then(() => startLoginsWatch())
+    .catch(() => undefined);
+
+  // PHASE 276. The login-shell env answer, warmed once instead of once per
+  // session. TWO STEPS AND ONE CHAIN, and the split is the point.
+  //
+  // It is a SIBLING of the Phase 208 chain above and not a link in it, so a
+  // slow or failing `security` sweep can neither delay nor skip the warm-up,
+  // and a slow shell cannot delay the login observe.
+  //
+  // STEP ONE ARMS, AND IT DOES NOT WAIT. `startEnvWatch()` derives the watch
+  // set from $SHELL, opens the fs.watch handles and turns the cache on. It is
+  // synchronous, and it is here rather than above `proveNativeModules()`
+  // because fs.watch's setup is a kernel call and a home on a stalled mount
+  // BLOCKS IN THE KERNEL where a try/catch cannot reach it. That is Phase 274's
+  // argument, and it is the same call Phase 211 already makes on the same
+  // directory one second later.
+  //
+  // ARMING EARLY IS WHAT BUYS THE RESTORE BURST. Restore runs right after the
+  // core is open, so with the cache armed the FIRST restored session's probe
+  // fills the slot and every session after it hits. Waiting the full second to
+  // arm would have twenty restored sessions pay twenty login shells, which is
+  // what the parent does.
+  //
+  // STEP TWO PROBES, AND IT WAITS THE SAME SECOND THE LOGIN OBSERVE WAITS, for
+  // the same reason its comment gives: the first paint and the restore burst
+  // are not made to compete with a shell start. Nothing awaits either step, and
+  // `window-shown` is measured at the parent and at HEAD to prove it. A person
+  // who has named no shell variable spawns nothing here at all.
+  //
+  // A harness launch never reaches this line, because dispatchHarness returned
+  // above it, which is the same protection the Phase 208 chain has.
+  void getGmuxCore()
+    .then(() => {
+      startEnvWatch();
+    })
+    .then(() => new Promise<void>((r) => setTimeout(r, BOOT_OBSERVE_DELAY_MS)))
+    .then(() => warmEnvAtBoot())
     .catch(() => undefined);
 
   // Phase 31: the refusal surface. If the last run promised an install and

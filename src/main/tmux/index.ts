@@ -47,6 +47,19 @@ export {
   // Settings. NAMES ONLY — the probe behind it never reads a value.
   captureLoginShellEnvNames,
   loginShellEnvNames,
+  // PHASE 276 — the login shell is asked ONCE, not once per session. Every
+  // consumer of an env answer goes through `loginShellEnvFor`;
+  // `captureLoginShellEnv` above stays exported and stays what a disarmed cache
+  // is. The other four belong to src/main/env/watch.ts, which arms the cache
+  // after it opens its first fs.watch handle, drops the slot when one of the
+  // person's shell files moves, and disarms at quit. `loginShellEnvNamesHeld`
+  // hands back NAMES and there is no door out of here through which a VALUE
+  // leaves the cache.
+  dropLoginShellEnvCache,
+  enableLoginShellEnvCache,
+  loginShellEnvEpoch,
+  loginShellEnvFor,
+  loginShellEnvNamesHeld,
   captureLoginShellPath,
   extraBinDirs,
   fallbackPath,

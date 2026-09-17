@@ -198,12 +198,18 @@ const HELPER = 'electron-run.mjs';
  * run that opens one folder under two spellings and reads ONE tab, ONE project
  * row and one session strip back.
  *
+ * PHASE 276 RAISED IT FROM 137 TO 138, for build/p276/probe-p276.mjs, the app
+ * run that counts login shells from OUTSIDE the app off a wrapper's own log —
+ * six warm creates and a second agent must start none — and then rotates a
+ * scratch `~/.zshrc` eleven ways a real editor writes a file and reads back
+ * which GENERATION of an invented sentinel each pane received.
+ *
  * RAISE IT WHEN YOU ADD ONE, in the same commit, and that is not optional
  * bookkeeping. Adding a probe cannot turn this gate red, so a floor left where
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-const HELPER_USER_FLOOR = 137;
+const HELPER_USER_FLOOR = 138;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

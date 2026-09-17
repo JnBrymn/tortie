@@ -646,7 +646,14 @@ export async function createLocalSession(
   let resolvedEnv: Record<string, string> = {};
   let envProbe: tmux.CaptureEnvResult | null = null;
   if (spec.envPassthrough !== undefined && spec.envPassthrough.length > 0) {
-    envProbe = await tmux.captureLoginShellEnv(spec.envPassthrough);
+    // PHASE 276. `loginShellEnvFor` and not `captureLoginShellEnv`: while
+    // src/main/env/watch.ts is watching the person's shell files, this answer
+    // comes out of one process-lifetime slot and the create costs milliseconds
+    // instead of the second measured above. It falls back to the probe itself
+    // whenever the slot cannot answer — cold, dropped, disarmed, or missing a
+    // name this row asks for — so a session never starts without a key the
+    // person set in order to save that second.
+    envProbe = await tmux.loginShellEnvFor(spec.envPassthrough);
     resolvedEnv = envProbe.values;
   }
 

@@ -144,6 +144,22 @@ export interface SettingsStoreState {
   envRejections: EnvRejections;
 
   /**
+   * PHASE 276. Is the login shell being asked again right now?
+   *
+   * The one thing that rate-limits the [Re-read shell] button in Launch
+   * defaults, and it does the whole job: the action returns early while it is
+   * set and the button is `disabled` while it is set, which is the same shape
+   * `scanning` gives Re-scan two sections up. There is no floor, no cooldown
+   * and no toast, because pressing it spawns one login shell and a person who
+   * pressed it asked for exactly that.
+   *
+   * NOTHING ELSE CROSSES. The channel resolves `void`, so this boolean is the
+   * only thing this window learns from a refresh — not a name, not a count, and
+   * never a value.
+   */
+  envRefreshing: boolean;
+
+  /**
    * PHASE 175. Read the settings once and subscribe to main's broadcast, and
    * NOTHING else. Idempotent, and `init()` calls it so the two cannot drift.
    *
@@ -178,6 +194,17 @@ export interface SettingsStoreState {
   update(patch: GmuxSettingsPatch): Promise<GmuxSettings | null>;
   /** Settings → Agents [Re-scan]: drop main's cache and re-probe. */
   rescan(): Promise<void>;
+  /**
+   * PHASE 276. Settings → Launch defaults [Re-read shell]: drop main's cached
+   * login-shell answer and ask the shell again.
+   *
+   * It exists for the one class main's shell-config watch provably cannot see,
+   * being a key exported by a file the rc SOURCES, one a vault hands over at
+   * shell start, or one a plugin loads from a `.env`. Nothing comes back: the
+   * spinner running and the button returning to rest is the whole feedback, and
+   * the next session a person starts gets the current values.
+   */
+  refreshShellEnv(): Promise<void>;
 
   /** Re-read the config rows and their confirmation state from main. */
   refreshConfig(): Promise<void>;
@@ -259,6 +286,7 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => ({
   archOptionsLoaded: false,
   envCandidates: {},
   envRejections: noEnvRejections(),
+  envRefreshing: false,
 
   watchSettings() {
     if (watching) return;
@@ -365,6 +393,29 @@ export const useSettingsStore = create<SettingsStoreState>()((set, get) => ({
       set({ scan, scanning: false });
     } catch {
       set({ scanning: false });
+    }
+  },
+
+  /**
+   * PHASE 276. Ask main to drop its cached login-shell answer and take a fresh
+   * one, then let the button come back to rest.
+   *
+   * THE GUARD IS THE WHOLE RATE LIMIT, the same shape `rescan()` uses above: a
+   * second press while one is in flight returns immediately, and the button is
+   * disabled while it is. A failed refresh is not an error a person has to
+   * read, because main cached nothing when the probe failed and the next
+   * session probes for itself, so the `catch` only clears the flag.
+   */
+  async refreshShellEnv() {
+    const b = bridge();
+    if (typeof b?.envRefresh !== 'function' || get().envRefreshing) return;
+    set({ envRefreshing: true });
+    try {
+      await b.envRefresh();
+    } catch {
+      // Nothing to say. Main cached nothing, and the next session asks again.
+    } finally {
+      set({ envRefreshing: false });
     }
   },
 

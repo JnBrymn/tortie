@@ -352,6 +352,7 @@ import { runSmokeShadow } from './shadow';
 import { runSmokeShim } from './shim-smoke';
 import { runShot } from './shot';
 import { seedArch } from './arch-seed';
+import { seedEnvWatch } from './env-watch-seed';
 import { installFoldStub } from './fold-stub';
 import { seedFold } from './fold-seed';
 import { seedOverviewSessions } from './overview-seed';
@@ -690,6 +691,15 @@ export async function dispatchHarness(deps: HarnessDeps): Promise<boolean> {
     if ((process.env['GMUX_SUMMARY_SEED'] ?? '') !== '') {
       await seedSummaries();
     }
+    // PHASE 276. The shell-config watch, so a driven app run can reach the
+    // login-shell cache at all. It carries the same two refusals the seeds
+    // above carry, and it calls the SHIPPED pair `src/main/index.ts` calls
+    // below `dispatchHarness` — nothing here reimplements the watch and
+    // nothing here seeds a value. Without it a GMUX_SHOT launch measures the
+    // parent's behaviour while claiming to measure this phase's: the first
+    // run of probe:p276 read one login shell and about 960 ms for every one
+    // of eighteen creates, warm and cold alike. See ./env-watch-seed.ts.
+    await seedEnvWatch();
     await runShot(shot, deps);
     return true;
   }

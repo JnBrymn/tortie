@@ -67,6 +67,18 @@
  * THE INLINE FIELD AND ITS `<datalist>` ARE GONE from both cards. `Add…` now
  * opens `EnvPickerSheet`, which scrolls, filters and takes several names at
  * once — see that file's header for the measurements that ended the datalist.
+ *
+ * PHASE 276 ADDED ONE BUTTON TO THIS PAGE AND NOTHING ELSE: [Re-read shell].
+ *
+ * That phase made main ask the login shell ONCE per launch instead of once per
+ * session, which is a second saved on every create, and it watches the person's
+ * shell config files so a rotated key still takes effect on the next session
+ * they start with nothing to restart — Phase 269's promise, kept. The button is
+ * for the class that watch provably cannot see: a key exported by a file the rc
+ * SOURCES, one read from a vault at shell start, a `.env` a plugin loads. It is
+ * drawn only when this person has named a shell variable somewhere, its whole
+ * explanation is behind hover, and pressing it reads nothing into this window —
+ * the channel resolves with nothing at all.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -84,6 +96,9 @@ import {
   ENV_CONFIRM_BODY_2_MANY,
   ENV_CONFIRM_CANCEL,
   ENV_GROUP_LABEL,
+  ENV_REFRESH_BUSY,
+  ENV_REFRESH_BUTTON,
+  ENV_REFRESH_HINT,
   ENV_SET_CAPTION,
   ENV_SHARED_CONFIRM_BODY_1,
   ENV_SHARED_CONFIRM_BODY_2,
@@ -699,6 +714,9 @@ export function LaunchDefaultsSection(): React.JSX.Element {
   const settings = useSettingsStore((s) => s.settings);
   const update = useSettingsStore((s) => s.update);
   const refreshEnvRejections = useSettingsStore((s) => s.refreshEnvRejections);
+  // PHASE 276. The [Re-read shell] control's two pieces of state.
+  const envRefreshing = useSettingsStore((s) => s.envRefreshing);
+  const refreshShellEnv = useSettingsStore((s) => s.refreshShellEnv);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const [picker, setPicker] = useState<PickerState | null>(null);
   const [pendingEnv, setPendingEnv] = useState<PendingEnv | null>(null);
@@ -712,6 +730,18 @@ export function LaunchDefaultsSection(): React.JSX.Element {
   useEffect(() => {
     void refreshEnvRejections();
   }, [refreshEnvRejections, settings]);
+
+  // PHASE 276. Has this person named a shell variable ANYWHERE, on the shared
+  // list or on any agent's own? The [Re-read shell] control is drawn only when
+  // they have. Somebody who has never named one has no cached shell answer to
+  // drop, would get nothing at all from pressing it, and never meets the
+  // control — the same instinct as `envInheritLine`, which is drawn only when
+  // the shared list is non-empty. It reads the settings and asks main nothing.
+  const anyEnvNames =
+    settings.envPassthroughShared.length > 0 ||
+    Object.values(settings.envPassthrough).some(
+      (names) => (names?.length ?? 0) > 0
+    );
 
   const launchable = (scan?.agents ?? []).filter((a) => a.launchable);
   // Detected agents first (S13), registry order within each half.
@@ -784,6 +814,50 @@ export function LaunchDefaultsSection(): React.JSX.Element {
         be set here. Tortie ignores one that was added by editing its settings
         file, because the agents you run can write that file too.
       </p>
+
+      {/* PHASE 276. Right-aligned and alone, the same shape the Agents section
+          uses for Re-scan and the SpecStory one for Re-check. It is here, in
+          the section toolbar, rather than beside either of them: Agents'
+          Re-scan is about which binaries are installed on this Mac, and folding
+          "re-read my shell" into it would make both labels vaguer, while the
+          Every agent card's subject is the shared LIST and a person with only
+          per-agent names would never look there. This toolbar's subject is the
+          page, which is where every shell-variable list on this machine is.
+
+          NO AGE LINE, following SpecStory rather than Agents, and its comment
+          gives the reason: an age that climbs while you watch it turns a
+          control a person almost never needs into a nag. The explanation lives
+          behind hover, which is Just enough words.
+
+          It is assembly and not invention — `.set-section-toolbar`, `.btn
+          .btn-secondary .set-rescan` and `.set-spinner` are all already in
+          settings.css. The ONE declaration this phase adds is
+          `.set-toolbar-end`, because `.set-section-toolbar` does not right-align
+          on its own: Agents gets that from its age line's `margin-right: auto`
+          and SpecStory spells `justify-content: flex-end` locally as
+          `.ss-toolbar`. This is the third instance of the shape and the second
+          with nothing to its left, so the declaration is written once in
+          settings.css rather than a third time in a third file. */}
+      {anyEnvNames ? (
+        <div className="set-section-toolbar set-toolbar-end">
+          <button
+            type="button"
+            className="btn btn-secondary set-rescan"
+            title={ENV_REFRESH_HINT}
+            disabled={envRefreshing}
+            onClick={() => void refreshShellEnv()}
+          >
+            {envRefreshing ? (
+              <>
+                <span className="set-spinner" aria-hidden="true" />
+                {ENV_REFRESH_BUSY}
+              </>
+            ) : (
+              ENV_REFRESH_BUTTON
+            )}
+          </button>
+        </div>
+      ) : null}
 
       {/* Phase 275. Drawn ONCE, above the agent cards, because the list it
           holds is keyed by nothing. It is drawn whether or not the scan

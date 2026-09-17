@@ -994,7 +994,11 @@ export async function restoreSessionInTmux(
   let resolvedEnv: Record<string, string> = {};
   let envProbe: tmux.CaptureEnvResult | null = null;
   if (restorePassthrough !== undefined && restorePassthrough.length > 0) {
-    envProbe = await tmux.captureLoginShellEnv(restorePassthrough);
+    // PHASE 276. `loginShellEnvFor` and not `captureLoginShellEnv`, the same
+    // door the local create takes. Restore is where it pays most: a restore
+    // burst used to spawn one login shell per session, and with the cache armed
+    // the FIRST restored session fills the slot and every session after it hits.
+    envProbe = await tmux.loginShellEnvFor(restorePassthrough);
     resolvedEnv = envProbe.values;
   }
 

@@ -304,6 +304,18 @@ export const CHECKS = [
     'macOS hdiutil, to create and attach a case-sensitive APFS disk image with no sudo, detached and deleted in a finally; and a mkdtemp under /private/tmp so the /tmp row has its own twin spelling',
     'never skips; on a host with no hdiutil it says in ONE LINE which column is therefore not covered rather than passing quietly, and P274_REQUIRE_IMAGE=1 turns that degradation into a failure'
   ),
+  // Phase 276. The login-shell answer, cached once per launch instead of once
+  // per session: build/conformance-shellenv.mjs runs three lanes of
+  // build/shellenv-conformance-probe.mts, which drives the SHIPPING cache in
+  // src/main/tmux/resolve.ts and the SHIPPING watcher in src/main/env/ over the
+  // modules' own seams — a counting fake for the capture, a fake directory
+  // watcher the gate fires by hand, a fake clock so the 400 ms debounce and the
+  // 5,000 ms floor are read as numbers rather than waited out — then reads the
+  // refusals out of the tree. It SPAWNS NO SHELL, which is the point rather than
+  // a convenience: the phase exists because `zsh -lic` is about a second on the
+  // operator's machine. No Electron, no tmux, no ssh, nothing under the person's
+  // home, and nothing written anywhere.
+  pure('conformance:shellenv'),
   pure('conformance:filehistory'),
   pure('conformance:historysearch'),
   // Phase 202. The logins domain: it runs build/conformance-logins.mjs, which
@@ -1135,6 +1147,41 @@ export const CHECKS = [
   // the profile, the manifest, the logs and settings.json and must be in none
   // of them.
   electron('probe:p275'),
+  // PHASE 276, THE APP RUN. ONE Electron at a time on a scratch profile with a
+  // scratch HOME whose .zshrc sleeps 900 ms before it exports anything — the
+  // calibrated slow home, because on the operator's machine oh-my-zsh, nvm and
+  // rbenv init are what make `zsh -lic` 970 to 1160 ms while `zsh -lc` is 10 ms.
+  // $SHELL points at a WRAPPER named `zsh` that appends one line per login shell
+  // and then execs the real one, so the headline is counted from OUTSIDE the app
+  // by a different method from anything the app instruments: six warm creates and
+  // a create for a second agent must start ZERO shells, and a settings write that
+  // is not a shell variable must start zero too. Then eleven save shapes — append,
+  // truncate, rename-over, unlink-and-recreate, a file created for the first time,
+  // a write through a symlinked path, an edit to a dotfiles-repo target, a touch,
+  // and the one indirection the watcher provably cannot see — each followed by a
+  // real session whose stand-in agent reads its OWN environ and writes down which
+  // GENERATION of an invented sentinel it received, never a value. The sourced-file
+  // row must read STALE and the Re-read shell button must then deliver it.
+  // P276_BOOT_ONLY=1 is the boot arm: six launches with the feature on and six with
+  // GMUX_NO_ENV_CACHE=1, reading `window-shown` through the shipped diagnostics
+  // channel, with `path-ready` as the control that SHOULD move. It spawns no agent
+  // and spends no token.
+  electron('probe:p276'),
+  // PHASE 276's attack on its own gate. It breaks THIRTY-TWO clauses one at a time —
+  // the coverage key weakened to "there is a slot", the projection handing out the
+  // slot's own record and iterating the slot's order, a miss that narrows, a cap
+  // that truncates, the in-flight pointer assigned behind an await, a join taken
+  // without the coverage test, the generation stamp a drop must beat, the
+  // probeFailed install guard, `??` changed to `||` for ZDOTDIR, both watch arms,
+  // the basename filter, the immediate drop, the five second floor, the settings
+  // comparison, the env knob and the late-landing refusal — and proves each reddens
+  // THE RULE THAT OWNS IT, measured as a DELTA against the base so an inherited
+  // failure cannot be mistaken for a caused one. Like ablation:p275 it never writes
+  // into the working tree: it clones src/ and build/ with `cp -Rc` under
+  // /private/tmp, symlinks node_modules, edits the CLONE and removes it in a
+  // `finally` and on a signal, because a phase runs three builders in one worktree
+  // at once. About 44 s. No Electron, no tmux, no shell, no agent, no token.
+  pure('ablation:p276'),
   // PHASE 261 item 1. The harness socket refusal, DRIVEN. ONE Electron at a
   // time, never two, on a scratch profile with a scratch HOME under its own
   // GMUX_HARNESS_DIR and the socket gmux-p261-<pid>. Five arms: the real app

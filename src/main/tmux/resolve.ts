@@ -16,9 +16,19 @@
  *     budget and `ensureServer` for the client rule.
  *
  *  1b. Login-shell env capture BY NAME (Phase 33, captureLoginShellEnv). Same
- *     probe shape as the PATH capture, run once per launch and once per
- *     restore for a row that names variables under `launch.envPassthrough`.
- *     The values go to that one pane and are written nowhere.
+ *     probe shape as the PATH capture, for a row or a settings list that names
+ *     variables under `launch.envPassthrough`. The values go to that one pane
+ *     and are written nowhere.
+ *
+ *     PHASE 276 MOVED WHO PAYS FOR IT. It used to run once per launch and once
+ *     per restore, and on the operator's machine that is about a second every
+ *     time, because the probe is an INTERACTIVE shell and `.zshrc` is what
+ *     sources oh-my-zsh, nvm and rbenv. Callers now go through
+ *     `loginShellEnvFor`, which answers out of one process-lifetime slot while
+ *     src/main/env/watch.ts is watching the person's shell files, and falls
+ *     straight back to this probe whenever it is not. `captureLoginShellEnv`
+ *     itself is unchanged, the `-i` stays because it is the only thing that
+ *     reads `.zshrc`, and no value is written anywhere by either path.
  *
  *  2. Binary resolution: argv[0] → absolute path against the captured PATH
  *     plus the known install dirs GUI apps miss. The manifest stores ONLY
@@ -709,6 +719,15 @@ export function captureLoginShellEnvNames(
  * edited their shell profile and reopens the picker gets a FRESH answer,
  * which is the whole reason there is no cache: the value of this list is that
  * it says what the shell exports right now.
+ *
+ * PHASE 276 CACHED THE OTHER ONE AND NOT THIS ONE, so the difference is now
+ * deliberate and gets a sentence. `loginShellEnvFor` below holds its answer for
+ * the life of the process because it is paid on every create, a person is
+ * waiting on it, and it has a watcher and a visible refresh behind it. This list
+ * is paid once, while a person watches a picker open, and its whole job is to
+ * say what the shell exports at the moment they are looking — so a slot here
+ * would save nothing anybody notices and would cost the one property the field
+ * has.
  */
 let envNamesInFlight: Promise<CaptureEnvNamesResult> | null = null;
 
@@ -776,6 +795,391 @@ export function userPathEpoch(): number {
 export function resetUserPathCache(): void {
   userPathPromise = null;
   lastCapture = null;
+}
+
+// ---------------------------------------------------------------------------
+// The login-shell env answer, asked once instead of once per session (Phase 276)
+// ---------------------------------------------------------------------------
+//
+// WHAT THIS BUYS AND THE MEASUREMENT THAT PAID FOR IT. `captureLoginShellEnv`
+// above spawns `$SHELL -lic`, which is a LOGIN and INTERACTIVE shell, and on the
+// operator's own machine that costs about a second. Three runs each, identical
+// trivial work:
+//
+//     zsh -lic 'printenv PATH >/dev/null'   1160 ms   970 ms   980 ms
+//     zsh -lc  'printenv PATH >/dev/null'     10 ms    10 ms    10 ms
+//
+// A hundredfold, and all of it is the `i`. His ~/.zshrc is what sources
+// oh-my-zsh, nvm and rbenv, and .zshrc is read by an interactive shell and by
+// nothing else.
+//
+// THE `i` IS LOAD-BEARING AND IT STAYS. A provider key exported in .zshrc is the
+// whole of issue 20, and a shell started without the `i` never reads that file.
+// Dropping it makes the probe fast and the feature useless, which is the mistake
+// PR #21 made. So the second is not removed here. It is paid ONCE.
+//
+// PHASE 275 MADE IT URGENT RATHER THAN MERELY WASTEFUL. A name on the SHARED
+// list applies to every agent, so the probe that used to fire for the one agent
+// somebody had configured now fires for all of them, on every create. This is
+// the second half of that phase's own bill.
+//
+// THREE SENTENCES ARE THE WHOLE DESIGN.
+//
+//   COVERAGE PROTECTS THE NAME SET. A slot answers an ask only when it holds
+//   every name that ask mentions, so a name a person has just added in Settings
+//   can never be served out of an answer that does not mention it. No listener,
+//   no event and no timer takes part in that — it is a property of the read, and
+//   it is why this is the load-bearing half.
+//
+//   THE WATCHER PROTECTS THE VALUES. src/main/env/watch.ts holds fs.watch over
+//   the files the person's shell actually reads and calls
+//   `dropLoginShellEnvCache()` the moment one of them moves, so a rotated key is
+//   picked up by the next session started with nothing to restart — which is
+//   Phase 269's promise stated exactly.
+//
+//   THE REFRESH PROTECTS WHAT NEITHER CAN SEE. A key a plugin loads, a value
+//   read out of a vault at shell start, a file the rc sources indirectly: none
+//   of those move when the watched files move. Settings then Launch defaults
+//   draws a button that drops and re-warms on purpose.
+//
+// AND THE CACHE IS OFF UNTIL SOMETHING IS WATCHING IT. `envCacheArmed` starts
+// false, and only `enableLoginShellEnvCache(true)` — which the watcher calls
+// after it has derived a watch set and opened at least one handle — turns it on.
+// While it is false this whole section is bypassed and `loginShellEnvFor` IS
+// `captureLoginShellEnv`, byte for byte the behaviour of the parent commit, down
+// to refusing even the in-flight join.
+//
+// That is the structural property the safety argument rests on, and it is a
+// proof rather than a convention: a stale key needs the cache on, and the cache
+// being on needs the invalidation armed. So every way the watcher can fail to
+// build itself — an unrecognised $SHELL, a home no watcher can open, a quit that
+// overtook the boot chain, a harness launch that never reaches the boot chain at
+// all — lands on today's cost rather than on a cache nothing can invalidate.
+//
+// NO VALUE IS PERSISTED. The slot lives in this module for the life of the
+// process and is written nowhere: not the manifest, not settings, not a log, not
+// an argv, not a channel. `loginShellEnvNamesHeld()` is the only door out of it
+// and it hands back NAMES. That rule is Phase 269's and keeping the answer
+// longer tightens it rather than loosening it.
+//
+// WHAT AN INVALIDATION DOES NOT REACH IS A RUNNING PANE. The value left this
+// process on the `-e` argv and now lives in the tmux server's session
+// environment. Dropping the slot revises nothing already running, and that is
+// not a limitation to apologise for — it is the promise above, stated exactly.
+
+/**
+ * The most names one slot will hold before it is REPLACED rather than widened.
+ *
+ * Each settings door caps its list at `OVERLAY_LIMITS.maxEnvPassthroughNames`
+ * (16) and `LAUNCHABLE_AGENT_IDS` is 13 rows, so a configuration can declare at
+ * most 13 x 16 + 16 = 224 names. 256 is that with room.
+ *
+ * Past it the slot is replaced by the caller's own names rather than grown. It
+ * is never a partial merge and never a truncation of what the CALLER asked for:
+ * a truncated ask would report a name as `missing` that the shell was never
+ * asked about, which is a lie the person cannot act on. A population past 224 is
+ * a manifest full of old agents.json rows rather than a configuration, and that
+ * is the case this cap exists for.
+ */
+const ENV_SLOT_MAX_NAMES = 256;
+
+/** One answered capture and the names it was asked for. NEVER handed out. */
+interface EnvSlot {
+  /** The de-duplicated set the probe was asked for, invalid names included. */
+  readonly names: ReadonlySet<string>;
+  /** What that probe answered. `probeFailed` is always false — see below. */
+  readonly result: CaptureEnvResult;
+}
+
+/** The one slot. Null before the first install and after every drop. */
+let envSlot: EnvSlot | null = null;
+
+/** The capture in flight, and the names it was started for. */
+let envInFlight: {
+  names: ReadonlySet<string>;
+  promise: Promise<CaptureEnvResult>;
+} | null = null;
+
+/** Fills and drops, counted. Monotonic, and a drop never rewinds it. */
+let envGeneration = 0;
+
+/** Off until something is watching. See the section header. */
+let envCacheArmed = false;
+
+/**
+ * The capture the cache calls. Production never moves it.
+ *
+ * It exists so `conformance:shellenv` can drive the coverage relation, the
+ * projection, the widening, the in-flight join and the failure rule without
+ * spawning a login shell — the gate hands a counting fake and fires its own
+ * clock. A seam that takes a function IN is not a door a value comes OUT of, so
+ * it does not weaken the rule above.
+ */
+let envCapture: (names: readonly string[]) => Promise<CaptureEnvResult> =
+  captureLoginShellEnv;
+
+/**
+ * One asked-for list answered out of a wider slot.
+ *
+ * IT IS `finish`'s OWN RULE OVER A WIDER INPUT, not a second rule.
+ * `captureLoginShellEnv`'s `finish` already decides `missing` as *asked, and not
+ * in `values`*: an unset name, an empty value and a value over
+ * {@link ENV_CAPTURE_MAX_VALUE_BYTES} all fall through to `missing` and never
+ * reach `values`. So a name the slot does not hold a value for is `missing` here
+ * for exactly the reason it would have been `missing` had the probe been run for
+ * this caller alone.
+ *
+ * THREE PROPERTIES, AND EACH OF THEM IS LOAD-BEARING.
+ *
+ * A FRESH OBJECT EVERY ASK. `create-local.ts` does `resolvedEnv = envProbe.values`,
+ * which ALIASES the record it was handed. Every caller gets a new object from
+ * `finish` today; handing out the slot's own record would let one create's
+ * downstream mutate the cache for every later one.
+ *
+ * THE CALLER'S ORDER, NEVER THE SLOT'S. `finish` builds `values` by iterating
+ * the ASK, so key insertion order is the ask's own row-then-per-agent-then-shared
+ * order; `paneEnvFor` spreads it and `createSession` emits one `-e` per key from
+ * `Object.entries`. Phase 275 promised that no argv order changes for a person
+ * who never uses the shared list (src/shared/launch-env.ts). A projection that
+ * iterated the slot's set would move that order, so the loop is over `names` and
+ * the dedupe keeps first-seen order.
+ *
+ * `probeFailed` IS FALSE, AND THAT IS PROVABLE RATHER THAN ASSERTED, because
+ * `loginShellEnvFor` refuses to install a failed result into the slot.
+ *
+ * THE READ IS AN OWN-PROPERTY READ ON PURPOSE. `ENV_NAME_RE` admits `__proto__`,
+ * and `values['__proto__']` on a plain object answers `Object.prototype` rather
+ * than `undefined` — a truthy non-string that would then be copied out as if it
+ * were a value. The slot can never HOLD that name (the same assignment silently
+ * no-ops inside `finish`), so reading own properties only is what makes the
+ * cached answer for that name the honest one: unresolved, and named as such.
+ */
+function projectEnvValues(
+  held: Readonly<Record<string, string>>,
+  names: readonly string[],
+  probeFailed: boolean
+): CaptureEnvResult {
+  const values: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const name of new Set(names)) {
+    const value = Object.prototype.hasOwnProperty.call(held, name)
+      ? held[name]
+      : undefined;
+    if (value === undefined) {
+      missing.push(name);
+      continue;
+    }
+    values[name] = value;
+  }
+  return { values, missing: missing.sort(), probeFailed };
+}
+
+/**
+ * The one door. Every consumer of a login-shell env answer goes through it.
+ *
+ * Disarmed, it is `captureLoginShellEnv(names)` and nothing else. Armed, an ask
+ * is a HIT if and only if every name in it is in the slot, and the answer is
+ * projected onto the ask; otherwise the probe runs for the UNION of the ask and
+ * the slot, and the answer becomes the new slot.
+ *
+ * WHY COVERAGE AND NOT EQUALITY, because equality is the obvious key and it is
+ * wrong twice. It makes the boot warm-up unusable: nothing at boot knows which
+ * agent a person is about to create, so the set the warm-up probed with would
+ * equal no later ask and every create would miss. And it thrashes per agent —
+ * agent X asking [SHARED, X_KEY] and agent Y asking [SHARED, Y_KEY] is two
+ * entries, two probes and two copies of the shared values under an equality map,
+ * and one slot and one probe here.
+ *
+ * WIDENING ON A MISS IS FREE, MEASURED RATHER THAN ASSUMED. The cost is the
+ * shell start and not the number of printfs: on the calibrated slow home,
+ * `zsh -lic` for ONE name read 811, 818, 828, 834, 838 ms and for FIFTY-TWO
+ * names read 918, 853, 850, 854, 839 ms. So probing for more names than the
+ * caller asked for costs nothing, and it is what stops two agents with different
+ * per-agent lists from evicting each other.
+ *
+ * THE PER-CREATE PROBE IS STILL THE FALLBACK, and that is the rule this function
+ * exists to keep. A cold slot, a dropped slot, a disarmed cache, a miss, a
+ * failed probe: every one of them lands on `captureLoginShellEnv` at today's
+ * cost. A session that starts without a key a person set is worse than a session
+ * that takes a second.
+ *
+ * NEVER REJECTS, because `captureLoginShellEnv` never rejects — its own
+ * docstring says so and every arm of it proves it. That is also why the failure
+ * rule below is written as a `.then` and never as a `.catch`.
+ */
+export function loginShellEnvFor(
+  names: readonly string[]
+): Promise<CaptureEnvResult> {
+  // TODAY'S PATH, BYTE FOR BYTE, and it is the first line for a reason. No slot
+  // read, no slot write, and no in-flight join while nothing is watching.
+  //
+  // THE IN-FLIGHT JOIN IS REFUSED HERE DELIBERATELY. Sharing one probe between
+  // two concurrent creates would be safe on its own and would help a restore
+  // burst, and it is still refused, because an in-flight share IS a cache with a
+  // lifetime of one second and the rule is that no answer is reused while
+  // nothing is watching. One create, one probe, nothing to argue about.
+  if (!envCacheArmed) return envCapture(names);
+
+  const asked = [...new Set(names)];
+
+  // An empty ask spawns nothing at the parent and spawns nothing here. It is
+  // short-circuited rather than run through the slot because `every` over an
+  // empty list is vacuously true, so an empty ask would otherwise "hit" any
+  // slot at all and, on a cold cache, install an empty one.
+  if (asked.length === 0) return envCapture(names);
+
+  const slot = envSlot;
+  if (slot !== null && asked.every((n) => slot.names.has(n))) {
+    return Promise.resolve(projectEnvValues(slot.result.values, asked, false));
+  }
+
+  // THE IN-FLIGHT JOIN, by the same coverage test as the slot read. Under the
+  // widening below the second branch is nearly dead — the probe in flight is
+  // usually the warm-up's full declared cover and every real ask is a subset of
+  // it — but it has to exist, because the alternative is answering a caller out
+  // of a probe that does not mention the name it asked for.
+  //
+  // TWO CALLERS SHARING A CAPTURE DO NOT SHARE AN ANSWER. Each projects onto its
+  // OWN list, so create A never sees agent B's values and never gets B's names
+  // on its `-e` line or in its `env-unresolved` notice.
+  const inFlight = envInFlight;
+  if (inFlight !== null && asked.every((n) => inFlight.names.has(n))) {
+    return inFlight.promise.then((result) =>
+      // A FAILED SHARED PROBE IS PROJECTED TOO, and `probeFailed` is carried
+      // through. `result.values` is empty on a failure, so every asked name
+      // lands in `missing` — which is exactly the answer this caller would have
+      // got had it run the failing probe alone.
+      projectEnvValues(result.values, asked, result.probeFailed)
+    );
+  }
+
+  // WIDEN, NEVER NARROW.
+  let ask = new Set(asked);
+  if (slot !== null) {
+    for (const held of slot.names) ask.add(held);
+    if (ask.size > ENV_SLOT_MAX_NAMES) ask = new Set(asked);
+  }
+
+  // THE GENERATION IS STAMPED BEFORE THE PROBE STARTS, and this is a race this
+  // phase CREATES rather than one it inherits. `resetUserPathCache` has no
+  // production caller, so the equivalent race next door has never fired. This
+  // cache has a production invalidator — the watcher — so a probe started before
+  // a rotation can land after it and install a pre-rotation answer over a slot
+  // the watcher has just cleared. That is a stale key delivered silently, the
+  // blocking finding of this phase, arriving by the back door. The stamp is the
+  // one line that closes it.
+  const started = envGeneration;
+  const askNames: ReadonlySet<string> = ask;
+  const probe: Promise<CaptureEnvResult> = envCapture([...ask]).then((result) => {
+    if (envInFlight?.promise === probe) envInFlight = null;
+    // A drop overtook us. Answer this caller and install nothing.
+    if (started !== envGeneration) return result;
+    // FAILURE IS NEVER CACHED AS SUCCESS. `probeFailed: true` is a RESOLVED
+    // value and not a rejection, so the naive memo would remember a failure for
+    // the life of the process and every session for the rest of the run would
+    // launch with no values and an `env-unresolved` notice — Phase 269's silent,
+    // provider-shaped failure re-created by our own optimisation.
+    //
+    // Clearing `envInFlight` above and installing nothing here is
+    // `installUserPath`'s rule ("a rejection clears the memo, so a retry after
+    // the user fixes their machine is a fresh attempt") adapted to a function
+    // that signals failure by value. It deliberately does NOT disarm, does NOT
+    // drop the slot and does NOT schedule a re-warm: a shell that timed out once
+    // under load is not a reason to throw away an answer that is still true, and
+    // a re-warm on failure is a retry loop against a machine already busy.
+    if (result.probeFailed) return result;
+    // A PARTIAL ANSWER IS NOT A FAILURE AND IT IS CACHED. `probeFailed: false`
+    // with names in `missing` means the shell answered and has no usable value
+    // for them — unset, empty, or over the value cap. That is a true statement
+    // about the shell.
+    //
+    // A reviewer will want to refuse this, and the refusal costs a person a full
+    // second per create forever, so the argument is written down: A STALE MISS IS
+    // SELF-ANNOUNCING AND A STALE HIT IS SILENT. A cached miss produces an
+    // `env-unresolved` notice naming the variable on every create, which is a
+    // sentence a person can act on and the exact sentence Phase 269 built. A
+    // cached hit that has gone stale says nothing at all. That asymmetry is why
+    // the miss is cached and the hit is the one routed through a watcher and a
+    // refresh.
+    envSlot = { names: askNames, result };
+    envGeneration += 1;
+    return result;
+  });
+  // SYNCHRONOUSLY, BEFORE ANY AWAIT, which is `getUserPath`'s own shape. Two
+  // callers on one tick share one capture because there is no window in which
+  // both see an empty pointer.
+  envInFlight = { names: askNames, promise: probe };
+  return probe.then((result) =>
+    projectEnvValues(result.values, asked, result.probeFailed)
+  );
+}
+
+/**
+ * Arm or disarm the cache. OFF until something is watching it.
+ *
+ * `src/main/env/watch.ts` arms it after it has opened at least one fs.watch
+ * handle and disarms it from the ordered disposer at quit. Disarming drops the
+ * slot, because an answer nobody is watching is an answer this module will not
+ * hold.
+ */
+export function enableLoginShellEnvCache(on: boolean): void {
+  envCacheArmed = on;
+  if (!on) dropLoginShellEnvCache();
+}
+
+/**
+ * Drop the slot and the in-flight pointer, and move the generation.
+ *
+ * The move is what makes a probe started before this call refuse to install
+ * after it. It is the whole of the late-landing guard above, and it is why the
+ * generation moves HERE rather than when a capture settles.
+ */
+export function dropLoginShellEnvCache(): void {
+  envSlot = null;
+  envInFlight = null;
+  envGeneration += 1;
+}
+
+/**
+ * How many times the slot has been filled or dropped in this process.
+ *
+ * It is the {@link userPathEpoch} idiom for the env answer rather than the PATH:
+ * anything that caches something computed AGAINST these values keys on this
+ * number and drops its answer when the values are replaced. Nothing does yet —
+ * the two call sites hold the pairs in a local and hand them straight to tmux —
+ * and the counter exists so the first thing that needs to can.
+ *
+ * It is NOT `userPathEpoch`, and they must not be folded together:
+ * src/main/agents/health.ts keys binary inspection on that one because it
+ * resolves binaries against the PATH, and no shell VALUE takes part in it.
+ */
+export function loginShellEnvEpoch(): number {
+  return envGeneration;
+}
+
+/**
+ * The names the slot covers, sorted. NAMES ONLY — there is no value door.
+ *
+ * A main-process read for the gate and for the unit suite beside it. It is
+ * deliberately NOT on the IPC contract and the probe does not need it: a hit is
+ * about 22 ms and a miss is about 1,000 ms, so hit-versus-miss is proved by the
+ * create's own duration, which is also this phase's headline number.
+ */
+export function loginShellEnvNamesHeld(): readonly string[] {
+  return envSlot === null ? [] : [...envSlot.names].sort();
+}
+
+/**
+ * Test hook. Replaces the capture the cache calls, or restores the real one.
+ *
+ * There is no production caller. `conformance:shellenv` and the unit suite hand
+ * a counting fake so the whole of the above can be driven without spawning a
+ * login shell.
+ */
+export function setLoginShellEnvCaptureForTests(
+  capture: ((names: readonly string[]) => Promise<CaptureEnvResult>) | null
+): void {
+  envCapture = capture ?? captureLoginShellEnv;
 }
 
 // ---------------------------------------------------------------------------

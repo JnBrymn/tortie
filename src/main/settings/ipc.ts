@@ -30,6 +30,10 @@ import { compiledLaunchEnvKeys } from '../agents/registry';
 // per concurrent ask, and no cross-ask cache, so a person who has just edited
 // their profile gets a fresh answer.
 import { loginShellEnvNames } from '../tmux';
+// Phase 276: drop the cached login-shell answer and take a fresh one. The
+// button behind it is in Launch defaults, beside the lists whose values it
+// re-reads.
+import { refreshEnvNow } from '../env/watch';
 import { disarmArchWatch } from '../arch/ipc';
 import { rebuildAppMenu } from '../menu';
 import { handle } from '../typed-ipc';
@@ -213,6 +217,28 @@ export function registerSettingsIpc(ipc: IpcMain): void {
       // that drew an error here would be reporting on its own failure to ask.
       return noEnvRejections();
     }
+  });
+
+  // PHASE 276. Ask the login shell again, now.
+  //
+  // Phase 276 caches the login-shell env answer for the life of the process and
+  // watches the person's shell config files so a rotated key still takes effect
+  // on the next session they start, with nothing to restart. This handler is
+  // the deliberate half, for the class the watch provably cannot see: a key
+  // exported by a file the rc SOURCES (measured, zero events on both watch
+  // arms), one read from a vault at shell start, a `.env` a plugin loads, a
+  // credential rotated in the keychain, a value the shell inherits.
+  //
+  // ONE CALL AND NOTHING ELSE. `refreshEnvNow()` drops the cache immediately,
+  // re-derives the watch targets so a config file created since the last derive
+  // is watched from this moment, then re-warms past the floor and awaits it, so
+  // the spinner in the window means the shell is actually being asked.
+  //
+  // IT RESOLVES `void` WHATEVER HAPPENED, including a probe that failed and a
+  // build where nothing is armed at all. Nothing this learned may cross back:
+  // not a value, not a name, not a count. See the channel's own doc comment.
+  handle(ipc, 'settings:envRefresh', async () => {
+    await refreshEnvNow();
   });
 
   // Phase 15: the SpecStory section's status pull + its two auth actions. It
