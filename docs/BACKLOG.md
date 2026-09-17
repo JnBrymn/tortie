@@ -28792,6 +28792,189 @@ research phase does not edit it. And it does not adopt the operator's own diagno
 the tap must change, and the phase's job is to find out rather than to agree.
 
 
+## Phase 281 — the Claude meter reads the item Claude Code reads (operator reported, 2026-09-16; cause found by Phase 280) QUEUED, UNRUN UNTIL HE APPROVES STEP 1
+
+**Subject.** `fix(credentials): address Claude's keychain item by service and account`
+
+**First body line.** `Phase 281: the Claude meter reads the item Claude Code reads`
+
+**Semver.** Patch. It changes which keychain item an existing read addresses and which sentence a failed
+read draws. It adds no surface and no setting.
+
+**Tier 3, on three counts.** It reads and writes the person's credential store ("does it hold his
+credentials?"). The operator reported the symptom, so the parent commit measurement is mandatory. And the
+change decides WHOSE numbers a login's card draws, which is the one way this domain can show one
+account's usage under another account's name.
+
+**Charter.** `docs/research/126-claude-usage-reliability.md` §7.2 (landed `19a3007c`), which binds this
+entry, and the Phase 280 entry's screenshot: the Claude row reading "Login: <his address>" and directly
+beneath it "Sign in with Claude Code to see usage." The research is the source of truth for every
+measurement below; this entry does not re-derive them.
+
+**WHY IT IS UNRUN.** The research names one obvious fix and needs no decision about accounts. It does
+need two things only he can approve, and the phase does not start until he approves the first:
+
+1. **Before building**, one attributes-only lookup on his machine:
+   `security find-generic-password -a "$USER" -s "Claude Code-credentials"`. It prints attributes and
+   never a payload (no `-w`, no `-g`). Read the exit status and `mdat`. Expect exit 0 and a date after
+   2026-09-10. **Exit 44 stops the phase**, because it means research 126's cause is wrong.
+2. **Before landing**, one app run at the parent and one at HEAD on his real profile (proof step 6). That
+   run sends his token to the usage endpoint, which is the product's ordinary poll, and he runs one turn
+   in a default-login claude session just before each.
+
+### What was measured, so no round re-derives it
+
+- **The cause.** Tortie asks for `Claude Code-credentials` by service name alone
+  (`src/main/usage/credentials.ts:120`). On his machine that name matches two items and `security`
+  returns a stray whose account attribute is `unknown`, created 2026-09-10T02:44:31Z and never written
+  since, which gives no usable credential. Claude Code reads and writes by service AND account
+  (`-a` from its account rule), in every installed version from 2.1.263 to 2.1.274 (research 126 §2.4,
+  §8.12).
+- **The log.** 71 Claude `signed-out` and 4 `expired` from 2026-08-15 to 2026-09-16, all 69 since
+  2026-09-10T21:01Z `signed-out`, zero Codex failures (§2.5).
+- **No login is chosen.** `logins.json` holds `"chosen": {}`, so the empty directory `162d9e5e3eeec40e`
+  is not the branch his meter runs (§2.1).
+- **The write side is wrong too.** Driven over a fake runner whose service-only lookup matches `unknown`
+  first, `storeTarget` and `defaultStoreTarget` (`src/main/credentials/stores.ts:285`, `:323`) both
+  commit `add -U -a "unknown"`, so a login switch today updates the stray, not Claude Code's item (§8.10).
+- **Branch B reads across accounts.** With `CLAUDE_CONFIG_DIR` set in Tortie's process,
+  `readClaudeCredential` asks the scoped item and then the plain one (`credentials.ts:237-238`), and
+  `claudeServicesFor` does the same (`src/main/usage/login-accounts.ts:140-142`). The Phase 280 verifier
+  drove it: account X's token, plan word and weekly number drawn under "Login: <Y's address>", with a Y
+  tap applied beside them. Claude Code never makes that read: its service name function (`mI` in
+  2.1.274) gives the scoped name alone whenever `CLAUDE_CONFIG_DIR` is non-empty. The caveat at
+  `credentials.ts:73-79` calling this unmeasured is refuted (§5).
+
+### The rule
+
+Tortie reads the item Claude Code reads, and only that item. Two small functions copy the vendor, and
+every call site uses them:
+
+- **The account** (`Cv` in 2.1.274): `env.USER || userInfo().username`, and `claude-code-user` when that
+  throws or fails `^[a-zA-Z0-9._-]+$`. Every `security` call aimed at a Claude Code vendor service
+  (`Claude Code-credentials` and every `Claude Code-credentials-<hash>`) carries `-a <account>`.
+- **The service name** (`mI`). `CLAUDE_SECURESTORAGE_CONFIG_DIR` defined and empty means the plain name,
+  defined and not empty means the scoped name of its NFC form. Otherwise a non-empty `CLAUDE_CONFIG_DIR`
+  means the scoped name of its NFC form and NOTHING ELSE. Otherwise the plain name. A login directory's
+  name hashes the directory's NFC form, so `claudeScopedService` normalizes to NFC before hashing.
+
+### The mechanism, file by file
+
+1. `src/main/usage/credentials.ts`. Add the account and service name functions beside
+   `claudeScopedService` (`:80-83`), which both domains already import. Pass `-a` in `keychainReader`
+   (`:120`). Decode through `decodeKeychainPayload` (`src/main/credentials/security.ts:209-219`) rather
+   than raw stdout; that helper exists, so do not write another.
+2. **No plain fallback when `CLAUDE_CONFIG_DIR` is set.** `readClaudeCredential` (`credentials.ts:237-238`)
+   and `claudeServicesFor` (`login-accounts.ts:140-142`) answer the one name the vendor rule gives.
+   Rewrite the refuted caveat at `credentials.ts:73-79` and the branch description at `:211-213`.
+3. **A miss is not a failure.** The keychain seam answers found, absent (`security` exit 44), or
+   unreadable (any other exit, a spawn error, the deadline). `readClaudeCredential` returns `missing` only
+   when every store it tried was absent; an unreadable store surfaces as `unavailable`. `fetchProvider`
+   already maps a thrown read to `unavailable` (`src/main/usage/service.ts:345-349`), so the stale policy
+   keeps the last numbers under the glyph. Exit 36 (the keychain refusing interaction, for example locked)
+   is deliberately NOT absent here, although Claude Code treats it so: a locked keychain is not a
+   sign-out.
+4. `src/main/usage/login-accounts.ts:423`. The presence check passes `-a`.
+5. `src/main/credentials/security.ts`. `keychainRead`, `keychainAccount`, `keychainModified`,
+   `keychainHasItem` and `keychainDelete` (`:222-335`) take the account for vendor services.
+   `keychainWrite` already does.
+6. `src/main/credentials/stores.ts`. `readStore` (`:147`, `:184`), `keychainTarget` (`:243-254`),
+   `storeTarget` (`:285`), `defaultStoreTarget` (`:323`) and the forget path (`:369-371`) address by the
+   vendor account. `ownAccountName` (`:329-335`) stops copying whatever item the service name matched and
+   answers the vendor rule. Rewrite the comments at `:280-284` and `:317-321`.
+7. `src/main/credentials/watch.ts:351-363`. The backstop fingerprints the vendor-account item.
+
+Tortie's own vault items (`src/main/credentials/vault.ts:160-169`) are not vendor items and stay as they
+are.
+
+### The fallback objection, answered
+
+**The objection:** a lookup that stops falling back will show "Sign in" to somebody whose plain item
+works, so keep a fallback to the service-only read or to the plain name.
+
+**The answer is no, both ways.** A fallback to the service-only read is exactly the read that lands on the
+stray today, so it brings the defect straight back on any machine holding two same-named items, and which
+of the two `security` returns is undocumented (§8.4). A fallback to the plain name under
+`CLAUDE_CONFIG_DIR` is the read the verifier drove to show one account's numbers under another account's
+name. In both cases Claude Code itself would find nothing, so a Claude Code session in that same
+configuration is signed out too, and the sign-in line is the honest answer. The phase copies the vendor
+exactly so that "Tortie says signed out" and "Claude Code is signed out" are the same fact.
+
+### The refusals it carries
+
+From Phase 280, unchanged: **no token byte** in any log, test output, probe output or commit body, and
+no token prefix or length; **`-w` and `-g` are never passed** to `security` in a presence check, an
+attribute call, a probe or a verifier's command; **nothing writes to his keychain, his logins directory,
+his `~/.claude` or any credential file** during the build or the verification (the one write path under
+test, a login switch, is driven over a scratch keychain only); no account attribute is logged; no agent
+is launched and no turn is spent by any agent.
+
+New in this phase:
+
+- No service-only lookup of a vendor item survives, and there is no fallback to one when the
+  account-qualified lookup misses.
+- Tortie never reads the payload of, rewrites or deletes a vendor-named item whose account is not the
+  vendor rule's. The stray item on his machine is left exactly as it is.
+- A chosen login still never falls back to the plain item (`credentials.ts:207-222`).
+- No reader, presence check, observe or write target asks the plain name after a scoped one when
+  `CLAUDE_CONFIG_DIR` is set.
+- The first observe after the fix mints no promotion when the account in `.claude.json` has not changed,
+  even though the item it now reads holds bytes seven days newer than the vault copy.
+- The scratch keychain is never added to the person's keychain search list and is deleted in a `finally`.
+
+### The proof, run rather than read
+
+1. **His approval, then the attributes-only lookup** above. Exit 44 stops the phase.
+2. **A hostile fixture, independent method one.** A scratch keychain under `/private/tmp` made with
+   `security create-keychain`, holding two items under `Claude Code-credentials` with synthetic payloads,
+   one under the vendor account and one under `unknown`, and a scoped pair built the same way. Drive the
+   shipping readers and the credentials domain's runner over it through their existing seams. At the
+   parent, record which item the service-only read lands on and arrange the fixture so it lands on the
+   stray. At HEAD every reader and writer lands on the vendor-account item. The branch B row:
+   `CLAUDE_CONFIG_DIR=D`, no scoped item for D, a plain item for another account — the parent answers
+   `ok`, HEAD answers `missing`. A directory name not in NFC form hashes to the vendor's scoped name.
+3. **The attack, independent method two.** A verifier who did not build it tries to construct a layout
+   where HEAD draws one account's numbers under another account's name: two same-named items in each
+   order, `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` set, empty and unset, a chosen login
+   whose scoped item is absent, a `USER` that fails the vendor's pattern. Any layout that does is
+   blocking.
+4. **Gate rules** in `conformance:credentials` and `conformance:logins`: every `find-`, `add-` and
+   `delete-generic-password` argv aimed at a vendor service carries `-a`, read from source over every
+   call site with the call-site count pinned; and no service list names the plain name after a scoped
+   one. Ablate `-a` at each site: the gate goes red and the fixture reads the stray. Put back the branch B
+   fallback: the gate goes red and the branch B row answers `ok`.
+5. **The miss and failure split.** The shipping `keychainReader` over children exiting 44, 36 and 1, one
+   that cannot spawn and one that never answers. Only 44 draws "Sign in with Claude Code to see usage.";
+   the others keep a tap's numbers under the stale glyph.
+6. **The observe and the switch over the fixture.** A switch writes the vendor-account item and never the
+   stray. The first observe after the fix mints no promotion.
+7. **The parent commit, on real data, with his approval.** One app run at the parent and one at HEAD,
+   never at once, Claude switch on, two polls apart, each after he runs one turn in a default-login claude
+   session. The parent logs `usage.read.failed claude signed-out`; HEAD logs no `signed-out`, and an
+   `expired` after that turn fails the step. Successes are not logged (`service.ts:651`), so the run also
+   reads the row's state and plan word from the app at each poll. The main session runs this, not an
+   agent, through `build/electron-run.mjs` in a `finally`.
+8. **The gates.** typecheck, build, test, smoke:t1, `conformance:credentials`, `conformance:logins`.
+
+### What is NOT in this phase
+
+- **No change to the status-line tap**, its script, its stamp, its throttle, or the precedence between
+  the tap and the poll. Research 126 §4.2 names its ordering defects (a post carries no observation time;
+  a poll sent before a tap overwrites it), and the research recommends them as the phase after this one.
+  **This phase alone will not make the Claude row as steady as Codex**, and its report says so.
+- No cross-account fallback, and no account check before drawing numbers.
+- No deletion, repair or migration of the stray item, and no surface that tells a person about it. Its
+  deletion is his call (research 126 §7.3 says how to find its writer in Keychain Access).
+- `CLAUDE_SECURESTORAGE_CONFIG_DIR` changes only the default login's service name. The storage lock it
+  also moves stays the limit `src/main/credentials/locks.ts:59-62` states, and a chosen login under that
+  variable is not handled.
+- The two unexplained `signed-out` answers on 2026-09-06 and the four `expired` answers, all from before
+  the stray item existed, are not explained or fixed here (§7.3, §8.8).
+- No change to Tortie's vault item addressing, and no change to Codex. The Codex observe refusal logged
+  2,329 times between 2026-09-04 and 2026-09-16 is its own entry.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -29515,3 +29698,7 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 278 LANDED, a confirmed variable name survives a filled cap (audit F3's cap half), `85b76948`, version 0.107.0 unmoved, no tag, pushed.** The auditor's counterexample failed 1 of 2 at `b4569686` and ships unedited, passing 2 of 2: sixteen names written into settings.json by hand ahead of a name the person confirmed used up the sixteen-name cap in FILE ORDER before the seal ran, so the confirmed name was dropped and nothing said which. **It failed closed and still does** — no unconfirmed name was ever admitted and no value resolved. The repair recomputes each list from the file's own entries in the file's own order once the seal is open, keeping only what the seal covers, and it answers Phase 275's recorded objection that "a sanitizer that reorders admits a list nobody wrote" by MEASURING that it does not reorder: names written ZULU, ALPHA, MIKE, BRAVO against a seal sorted the other way came back ZULU, ALPHA, MIKE, BRAVO on both lists. **THE VERIFIERS FOUND A BUG THAT WOULD HAVE UNDONE IT**: closing the Settings window wrote `cached.settings` — the list already cut at sixteen — back to settings.json with its seal, so a confirmed name survived the load and was lost on disk the next time Settings closed; the bounds save now re-reads the file and replaces only `settingsWindowBounds`. **A TEST THAT PINNED THE LIMIT AS CORRECT was rewritten rather than deleted**: `p275-env-shared-seal.test.ts` asserted the displacement as expected behaviour, went red for the right reason, and now asserts the name is delivered and all sixteen junk names still refused, passing here and failing at the parent. **The first verifiers were killed by the workflow harness for running a full suite under load**, so this phase ran with agents on short commands and the main session on the long gates; the attack verifier then drove 3,096 names through forged and copied seals, case, whitespace, NUL, zero-width and Cyrillic and Greek look-alikes and admitted nothing, and both verifiers found that no committed test went red if the repair itself was removed. The fix round added `p278-env-cap.test.ts`, 23 tests proved by 21 ablations each restored by sha256. The half-built `conformance:envcap` probe the stalled gate builder left had no judge and was deleted. Gates on the committed bytes: typecheck 0, build 0, npm test 0 at 915 files and 14,521 tests, conformance:agents 0, conformance:installs 0, smoke:t1 0, smoke:t3 0, probe:p275 PASS with the sentinel value in no file the app wrote; his tmux read 50 sessions throughout. **What is still not true**: restore still passes the manifest's names on unsealed, as it passes the recorded argv, and recipe authentication stays the separate design the audit names.
 
 - 2026-09-17, **PHASE 277 LANDED, a write clears only the text it wrote (audit F1 and F2), `29f47742`, version 0.107.0 unmoved, no tag, pushed.** The auditor's counterexample failed 3 of 4 at `b4569686` and ships unedited, passing 4 of 4, with `conformance:save` rule 24 now failing the build if it is ever edited to pass. **F1**: a save's answer patched `dirty: false` for the text it had written while the buffer already held newer typing, then cancelled the timer that would have caught up, and close asks only when dirty is true, so the newest typing was lost without a question; the unconditional clean patch PREDATES Phase 268. One completion rule now ends all four doors and derives dirty from the buffer, keyed by the Monaco model instance so an answer cannot reach a reopened tab. **F2**: a pending timer never re-read the mode; the store's settings subscription now revokes it and `run` re-checks permission before saving. **THE VERIFIERS FOUND THREE REGRESSIONS THIS PHASE HAD INTRODUCED** in its first save queue — a queued auto save wrote after Off, under a "Save changes to …?" dialog, and into a reopened tab — and a hung write held the slot across lifetimes; now a timer is never queued, it is re-armed after the save it waited on, and only a person's request waits. **Three OLDER losses of work were fixed in the same phase, each with a test red before the fix**: `refreshRepo` wiped typing that landed during its disk read, a remote tab in a folder the person allowed editing never marked itself unsaved so closing it asked nothing (since Phase 101), and the close prompt's Save closed a tab still dirty when its save answered. **THE GATE WAS HARDENED AND AN EXISTING ABLATION WAS FOUND BROKEN**: rules 1 and 11 were retargeted at `saveOnce`, rule 1c became an exact comparison after the fix round walked three shapes past its substring test, rules 18 to 24 are new, and `ablation:p268` had been crashing on its first arm since the first build (and its symlink-hole arm planted the hole in the wrong function) — repaired and grown to 18 arms, 18 of 18 red on the rule that owns them. **The first integrator was killed three times by the workflow harness for running a full suite under machine load**, so agents now run short commands and the main session runs the long gates. `probe:p277` is new (HELPER_USER_FLOOR 138 → 139) and every arm PASS, including that closing a tab holding unsaved typing shows "Save changes to 'notes.md'?" read off the window, and that a pending ten-second timer writes nothing after a switch to Off or On focus change against a control that does write. Gates on the committed bytes, after rebasing onto Phase 278: typecheck 0, build 0, npm test 0 at 919 files and 14,588 tests, conformance:save 0; before the rebase also conformance:redline-write 0, conformance:redline 0, smoke:t1 0, smoke:t3 0, probe:p268 PASS; no scratch Electron left and his tmux read 50 sessions throughout. **Still open**: the close prompt's re-check reads dirty, which can trail the Redline view by one effect turn — found by reading, not driven.
+
+- 2026-09-17, **PHASE 280 LANDED, why Claude usage goes blank, `19a3007c`, research only, no shipping byte, pushed.** The Claude row names him and says "Sign in with Claude Code to see usage." because Tortie looks up `Claude Code-credentials` by service name alone, and on his machine that name matches a stray keychain item with account `unknown` (created 2026-09-10T02:44:31Z) that gives no usable credential, while Claude Code reads its own item by service AND account. 71 Claude signed-out answers in the log and zero Codex failures. **The entry's hypothesis is refuted**: no login is chosen, so the empty directory `162d9e5e3eeec40e` is not in play. **His diagnosis is partly right**: the tap did not cause the sign-in line (the poll wipes what the tap posts, which is the "update and reset"), but the tap has ordering defects that will still move the number after the fix. The attack verifier returned needs_work (a cross-account read under `CLAUDE_CONFIG_DIR` the first draft of the fix kept, a tap verdict too broad, `expired` ignored, the second item provable by deduction); the fix round confirmed all four against the vendor bundle and rewrote the document. No token read, no `-w`/`-g`, no network, no turn; a credential-shape scan found nothing, and the one address the panel draws is written as `<his address>`.
+
+- 2026-09-17, **PHASE 281 QUEUED AND LEFT UNRUN, the Claude meter reads the item Claude Code reads, Tier 3.** Research 126 names one obvious fix: copy Claude Code's account rule and service-name rule at every vendor call site, let only `security` exit 44 draw the sign-in line, and remove the plain-name fallback under `CLAUDE_CONFIG_DIR` that draws one account's numbers under another's name. **It waits on him for one thing before it starts**: approval of the attributes-only `security find-generic-password -a "$USER" -s "Claude Code-credentials"` (no `-w`, no `-g`; exit 44 stops the phase). It needs him again before it lands, for one app run at the parent and at HEAD on his real profile after a turn in a claude session. It will not on its own make Claude as steady as Codex; the tap ordering defects are recommended as the phase after it.
