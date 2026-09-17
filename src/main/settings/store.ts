@@ -71,8 +71,10 @@ import {
   clampAutoSaveDelay,
   clampSavedScrollbackLines,
   clampScrollbackLines,
+  confirmedEnvNames,
   dangerKey,
   defaultGmuxSettings,
+  envFileEntryNames,
   envNameKey,
   envSharedKey,
   foldKey,
@@ -93,6 +95,9 @@ import {
   sanitizeWorkAreaFont,
   sanitizeWorkAreaFontCustom
 } from '@shared/settings';
+// Phase 278. The echo bound on the backstop below, from the one place the
+// number is declared. Nothing else in this file reads the overlay's limits.
+import { OVERLAY_LIMITS } from '@shared/agent-overlay';
 import {
   archRecipeFor,
   archSemanticRecipeFor,
@@ -370,6 +375,26 @@ export interface SealEnvRejections {
   shared: string[];
   /** Per-agent names the seal did not cover, by agent id. */
   perAgent: Partial<Record<LaunchableAgentId, string[]>>;
+  /**
+   * PHASE 278 — THE BACKSTOP'S ANSWER, and it is the other direction. The two
+   * fields above are names the file HOLDS and the seal does not cover. These
+   * two are names the SEAL covers — a person confirmed them in this window —
+   * that the finished lists do not contain. Counts, never lists, because a
+   * per-agent seal key would have to be split to get the bare name back and no
+   * seal key in this module is ever split.
+   *
+   * `sharedMissing` leaves out a sealed shared name the file still holds,
+   * because the shape layer's `sharedUnread` already names it on the same card
+   * (the Phase 278 fix round). `perAgentMissing` counts every one.
+   */
+  sharedMissing: number;
+  /** Sealed per-agent names the finished lists do not contain, by agent id. */
+  perAgentMissing: Partial<Record<LaunchableAgentId, number>>;
+}
+
+/** An empty report, so the four construction sites cannot drift apart. */
+function noSealEnvRejections(): SealEnvRejections {
+  return { shared: [], perAgent: {}, sharedMissing: 0, perAgentMissing: {} };
 }
 
 /**
@@ -388,13 +413,68 @@ export interface SealEnvRejections {
  * introduce the first parser over a key space whose whole safety argument is
  * that a key only has to be UNAMBIGUOUS, never PARSEABLE. So the loop that
  * knows which list a name came from records it there and then.
+ *
+ * ---------------------------------------------------------------------------
+ * PHASE 278 — TWO MECHANISMS, AND NEITHER IS REDUNDANT
+ * ---------------------------------------------------------------------------
+ *
+ * THE DEFECT, stated in its own terms. The shape layer caps each list at
+ * sixteen in FILE ORDER and this function asks who wrote them afterwards. So
+ * sixteen valid-looking names written by anything with write access to the home
+ * directory spent the whole budget before anything asked who wrote them, and
+ * the seventeenth — the one the person confirmed in the Settings window — was
+ * already gone when the seal got here. The seal then rejected the sixteen, the
+ * person ended with NO names, and the one line explaining it named sixteen
+ * strings they never typed and not the one they did. It FAILED CLOSED on every
+ * measured shape (`accepted = {}`), so nothing leaked and nothing extra was
+ * authorised; the defect is that a person lost a setting they made and was not
+ * told which one. The next save then made it permanent.
+ *
+ * 1. THE SEAL-AWARE PASS, which is what makes the person's key keep working.
+ *    When `candidates` is supplied — only `getSettings` supplies it — each env
+ *    list is recomputed from the FILE's own entries in the FILE's own order,
+ *    keeping only entries this seal covers and still stopping at sixteen. The
+ *    result is a SUBSEQUENCE of the list in the file: nothing added, nothing
+ *    moved. That is the answer to the objection Phase 275 recorded when it
+ *    half-closed this — "a sanitizer that reorders admits a list nobody wrote".
+ *    Nothing is reordered and no sanitizer changed; the rule added is "do not
+ *    spend the budget on names that are about to be thrown away one step
+ *    later", and WHEN a name is skipped is not an order.
+ *
+ * 2. THE BACKSTOP, which is what makes a lost confirmed name impossible to hide
+ *    anywhere else, including on the paths the pass cannot reach — a two
+ *    argument call, a name deleted from the file outright, a name a later build
+ *    refuses on shape. Every key the seal covers that the FINISHED lists do not
+ *    contain is pushed onto `rejected` and returned in `missing`.
+ *
+ * The auditor's own fixture proves neither substitutes for the other: it calls
+ * this function with TWO arguments over already-sanitized settings, so the pass
+ * never runs there and the fixture passes on `reported` rather than on
+ * `retained`. The pass is what a person gets; the backstop is what a test can
+ * prove from outside. See `__tests__/audit-0914-env-cap.test.ts`.
+ *
+ * THE FIRST LAYER DOES NOT MOVE. `isSealed` below is the same question this
+ * function has always asked, made no wider. A name no human confirmed is
+ * dropped, on every path, including both new ones.
  */
 export function withSealedDangerState(
   settings: GmuxSettings,
-  sealed: DangerState
+  sealed: DangerState,
+  candidates?: {
+    /** Raw per-agent entries from the file, in the file's own order. */
+    perAgent: Partial<Record<LaunchableAgentId, readonly string[]>>;
+    /** Raw shared entries from the file, in the file's own order. */
+    shared: readonly string[];
+    /** One agent's compiled `launch.env` keys. */
+    agentEnvKeys: (id: string) => readonly string[];
+    /** The union of those keys over every launchable agent. */
+    sharedRefusedEnvKeys: readonly string[];
+  }
 ): {
   settings: GmuxSettings;
   rejected: string[];
+  /** Phase 278. The sealed keys the finished lists do not contain. */
+  missing: string[];
   envRejected: SealEnvRejections;
 } {
   const sealedDefaults = new Set(sealed.defaults);
@@ -409,7 +489,8 @@ export function withSealedDangerState(
   // shared name holds none, and the two spaces are disjoint.)
   const sealedShared = new Set(sealed.envShared);
   const rejected: string[] = [];
-  const envRejected: SealEnvRejections = { shared: [], perAgent: {} };
+  const missing: string[] = [];
+  const envRejected: SealEnvRejections = noSealEnvRejections();
   // Phase 138. The fold choice is dropped back to None unless the seal covers
   // that exact pair, and it IS reported, so the Settings window can say one
   // sentence about it. A dropped fold choice costs nothing: the page draws
@@ -447,16 +528,63 @@ export function withSealedDangerState(
   // agent quietly stopped getting a variable has one line that says why. An
   // agent left with no surviving name is absent from the map rather than
   // present and empty, which is the shape `launchDefaults` above already has.
+  //
+  // PHASE 278 SPLIT THE REPORT FROM THE RESULT HERE, and the split is the whole
+  // repair. `filtered` below is the REPORT: it walks the SANITIZED list, which
+  // is capped at sixteen whatever the file holds, and it is what fills
+  // `rejected` and `envRejected`. `kept` is the RESULT: when candidates are
+  // supplied it is the seal-aware pass over the FILE's own entries. Keeping the
+  // report on the sanitized list is what keeps every drawn and logged list
+  // bounded by sixteen per list — nothing this phase adds can grow an echo.
   const envPassthrough: GmuxSettings['envPassthrough'] = {};
-  for (const [id, names] of Object.entries(settings.envPassthrough)) {
-    if (!Array.isArray(names)) continue;
+  // True when the pass answered differently from the plain filter. The only
+  // direction that difference can take is a RESTORE — the pass's output is
+  // always a superset of the filter's kept set, because both test the same
+  // seal and the pass starts from a superset of the same entries — but it is
+  // written as a difference so the identity return below stays correct even if
+  // that argument is ever wrong.
+  let envRestored = false;
+  // THE FIX ROUND. An id that arrives only through `candidates` must be one
+  // this build launches. `loadFile` already drops every other id, but this
+  // function is exported and pure, and without this filter it would put a name
+  // under `notanagent` or `constructor` whenever a seal covered that key. Both
+  // filters stay, and a test drives this one on its own.
+  const agentIds = new Set<string>([
+    ...Object.keys(settings.envPassthrough),
+    ...(candidates !== undefined
+      ? Object.keys(candidates.perAgent).filter((id) => LAUNCHABLE_SET.has(id))
+      : [])
+  ]);
+  for (const id of agentIds) {
+    const names = Object.prototype.hasOwnProperty.call(settings.envPassthrough, id)
+      ? (settings.envPassthrough as Record<string, unknown>)[id]
+      : undefined;
     const dropped: string[] = [];
-    const kept = names.filter((name) => {
-      if (sealedEnv.has(envNameKey(id, name))) return true;
-      rejected.push(envNameKey(id, name));
-      dropped.push(name);
-      return false;
-    });
+    const filtered = (Array.isArray(names) ? (names as string[]) : []).filter(
+      (name) => {
+        if (sealedEnv.has(envNameKey(id, name))) return true;
+        rejected.push(envNameKey(id, name));
+        dropped.push(name);
+        return false;
+      }
+    );
+    const kept =
+      candidates === undefined
+        ? filtered
+        : confirmedEnvNames(
+            (LAUNCHABLE_SET.has(id) &&
+            Object.prototype.hasOwnProperty.call(candidates.perAgent, id)
+              ? candidates.perAgent[id as LaunchableAgentId]
+              : undefined) ?? [],
+            // PHASE 275'S BELT ONE, HELD ON THE NEW PATH TOO. A per-agent name
+            // is asked of `sealedEnv` under its own agent id and of nothing
+            // else, so a name sealed for one agent still cannot be admitted for
+            // another and a shared agreement still cannot be replayed here.
+            (name) => sealedEnv.has(envNameKey(id, name)),
+            candidates.agentEnvKeys(id),
+            'agent'
+          );
+    if (!sameNames(kept, filtered)) envRestored = true;
     if (kept.length > 0) envPassthrough[id as LaunchableAgentId] = kept;
     if (dropped.length > 0) envRejected.perAgent[id as LaunchableAgentId] = dropped;
   }
@@ -466,15 +594,104 @@ export function withSealedDangerState(
   // `* ANTHROPIC_API_KEY` beside `claude FOO` and a person can tell WHICH list
   // lost a name — which matters more here than it did for one agent, because
   // the two lists are drawn on two different cards.
-  const envPassthroughShared = settings.envPassthroughShared.filter((name) => {
+  const sharedFiltered = settings.envPassthroughShared.filter((name) => {
     if (sealedShared.has(name)) return true;
     rejected.push(envSharedKey(name));
     envRejected.shared.push(name);
     return false;
   });
+  const envPassthroughShared =
+    candidates === undefined
+      ? sharedFiltered
+      : confirmedEnvNames(
+          candidates.shared,
+          (name) => sealedShared.has(name),
+          candidates.sharedRefusedEnvKeys,
+          'shared'
+        );
+  if (!sameNames(envPassthroughShared, sharedFiltered)) envRestored = true;
+  // PHASE 278 — THE BACKSTOP. Every key the seal covers that the FINISHED lists
+  // do not contain, named on the same `rejected` list the audit's fixture reads
+  // and returned separately in `missing` so a caller can tell the two classes
+  // apart without looking inside a key.
+  //
+  // NO SEAL KEY IS SPLIT. `present` is COMPOSED with `envNameKey`, never
+  // parsed. The one thing that has to be derived from a key is which agent CARD
+  // a missing name belongs to, and that is a prefix test against a COMPOSED
+  // prefix over the compiled closed set `LAUNCHABLE_AGENT_IDS` — the name half
+  // is never read. That test is unambiguous by the argument `envSharedKey`
+  // already makes in @shared/settings: `OVERLAY_ENV_KEY_PATTERN` forbids a
+  // space in a name and `OVERLAY_ID_PATTERN` forbids one in an id, so a key
+  // holds exactly one space and `claude ` cannot prefix a key belonging to
+  // `claude-x`.
+  //
+  // IT COVERS `env` AND `envShared` AND NOTHING ELSE on `DangerState`. A sealed
+  // launch default that vanishes from the file is drawn as an unchecked
+  // checkbox a person can SEE; a vanished variable name leaves no trace at all
+  // on the card. That difference is the whole reason this exists, and it is why
+  // the fold choice, the arch choice and the danger flags get no backstop.
+  //
+  // THE ECHO IS BOUNDED HERE TOO: at most sixteen keys per list are pushed and
+  // the rest are counted, so no seal, however it came to exist, can author a
+  // paragraph in app.log or in the Settings window.
+  const present = new Set<string>();
+  for (const [id, names] of Object.entries(envPassthrough)) {
+    for (const name of names) present.add(envNameKey(id, name));
+  }
+  const echoed = new Map<string, number>();
+  const echoBudget = (bucket: string): boolean => {
+    const used = echoed.get(bucket) ?? 0;
+    if (used >= OVERLAY_LIMITS.maxEnvPassthroughNames) return false;
+    echoed.set(bucket, used + 1);
+    return true;
+  };
+  for (const key of sealedEnv) {
+    if (present.has(key)) continue;
+    const owner = LAUNCHABLE_AGENT_IDS.find((id) => key.startsWith(envNameKey(id, '')));
+    if (owner !== undefined) {
+      envRejected.perAgentMissing[owner] =
+        (envRejected.perAgentMissing[owner] ?? 0) + 1;
+    }
+    // A key belonging to an agent this build no longer launches is still said
+    // in the log — it is a setting the person made and is not in effect — and
+    // it is counted on no card, because there is no card to draw it on.
+    if (!echoBudget(owner ?? '')) continue;
+    rejected.push(key);
+    missing.push(key);
+  }
+  const finalShared = new Set(envPassthroughShared);
+  // THE FIX ROUND. A sealed shared name the FILE still holds, and that is not
+  // on the finished list, was refused by the shape layer — a later build's
+  // denylist, or a seventeenth confirmed name — and `sharedUnread` already
+  // names it on the shared card, or `sharedUnreadOver` counts it. Counting it
+  // here as well drew a second sentence about the same name that told the
+  // person to add it again, which the Add sheet then refuses. So the CARD's
+  // count is only the names the file no longer holds. The LOG still says every
+  // one of them, because the shape layer writes nothing to app.log. Without
+  // candidates there is no file to ask, and every name is counted.
+  const fileShared =
+    candidates !== undefined ? new Set(candidates.shared) : new Set<string>();
+  for (const name of sealedShared) {
+    if (finalShared.has(name)) continue;
+    if (!fileShared.has(name)) envRejected.sharedMissing += 1;
+    if (!echoBudget('*')) continue;
+    rejected.push(envSharedKey(name));
+    missing.push(envSharedKey(name));
+  }
   const acks = settings.dangerAcknowledged.filter((k) => sealedAcks.has(k));
-  if (rejected.length === 0 && acks.length === settings.dangerAcknowledged.length) {
-    return { settings, rejected, envRejected };
+  // PHASE 278. The identity return is decided by what was DROPPED, what was
+  // RESTORED and what acks were FILTERED — never by the backstop. A sealed name
+  // the file no longer holds changes nothing about the settings object, and
+  // rebuilding it for a REPORT would move an object identity that renderers and
+  // memoised selectors read as "nothing changed". So the drop count is taken
+  // before the backstop pushed anything, rather than from `rejected.length`.
+  const dropped = rejected.length - missing.length;
+  if (
+    dropped === 0 &&
+    !envRestored &&
+    acks.length === settings.dangerAcknowledged.length
+  ) {
+    return { settings, rejected, missing, envRejected };
   }
   return {
     settings: {
@@ -501,8 +718,20 @@ export function withSealedDangerState(
         : settings.arch
     },
     rejected,
+    missing,
     envRejected
   };
+}
+
+/**
+ * Are these two name lists the same names in the same order (Phase 278)?
+ *
+ * Used for one decision only: whether the seal-aware pass answered differently
+ * from the plain filter, which is what "what was restored" means in the
+ * identity return above. Both lists are at most sixteen short strings.
+ */
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, i) => name === b[i]);
 }
 
 // ---------------------------------------------------------------------------
@@ -925,18 +1154,60 @@ let shapeEnvRejections: {
 };
 let sealEnvRejections: SealEnvRejections | null = null;
 
-function loadFile(): SettingsFile {
-  if (cached !== null) return cached;
+/**
+ * PHASE 278 — THE FILE'S OWN ENTRIES, in the file's own order, for the seal to
+ * filter once it is open.
+ *
+ * WHY IT IS HELD HERE. The repair is that the sixteen-name budget must be spent
+ * on names the seal covers rather than on the first sixteen entries anything
+ * with write access to the home directory appended. The seal is only open in
+ * `getSettings`, four steps after `sanitizeSettings` has already thrown the
+ * seventeenth entry away, so the read path needs the file's own list at that
+ * point. This is it, re-derived from the RAW parsed object the same way the
+ * shape report above is — see that comment for why the reporting is not
+ * smuggled out of the pure sanitizer through a side effect.
+ *
+ * THIS FIELD MAY NEVER BE PUT ON `SettingsFile`. `writeFile` serialises that
+ * object WHOLE into the person's own `settings.json`, so a later round that
+ * "tidied" the candidates onto `cached` would write an attacker's junk names
+ * back into the file the seal exists to distrust. It is cheap to break, it
+ * would look like a simplification, and it is the one rule about this field
+ * that matters.
+ *
+ * IT ADDS NO UNBOUNDEDNESS THAT IS NOT ALREADY PAID. `loadFile` reads the whole
+ * file with `readFileSync` and `JSON.parse`s it with no bound, and the shared
+ * sanitizer already walks every entry of the raw list. These names are a SUBSET
+ * of what that parse already held, every one of them is at most
+ * `OVERLAY_LIMITS.maxEnvKeyLength` bytes because `isDrawableEnvName` says so,
+ * and nothing derived from them is ever echoed: the pass caps at sixteen and
+ * the report loops run over the sanitized lists. It is cleared on the next
+ * load and on a successful write, so it is never held for the life of the
+ * process.
+ */
+let fileEnvEntries: {
+  perAgent: Partial<Record<LaunchableAgentId, string[]>>;
+  shared: string[];
+} = { perAgent: {}, shared: [] };
+
+/**
+ * `settings.json` parsed, or null when it is missing, corrupt or not an
+ * object. The one reader, shared by `loadFile` and `saveSettingsWindowBounds`.
+ */
+function readSettingsObject(): Record<string, unknown> | null {
   let parsed: unknown = null;
   try {
     parsed = JSON.parse(readFileSync(settingsPath(), 'utf8'));
   } catch {
     // Missing or corrupt → defaults. Preferences are recoverable by design.
   }
-  const obj =
-    parsed !== null && typeof parsed === 'object'
-      ? (parsed as Record<string, unknown>)
-      : {};
+  return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : null;
+}
+
+function loadFile(): SettingsFile {
+  if (cached !== null) return cached;
+  const obj = readSettingsObject() ?? {};
   const boundsRaw = obj['settingsWindowBounds'];
   const bounds =
     boundsRaw !== null &&
@@ -971,6 +1242,31 @@ function loadFile(): SettingsFile {
     sharedOver: sharedShape.refusedOver,
     unnamed: sharedShape.unnamed
   };
+  // PHASE 278. The file's own entries, kept beside the shape report and for the
+  // same reason: `getSettings` needs them once the seal is open, and the pure
+  // sanitizer must not grow a side effect to hand them over. Ids that are not
+  // launchable are dropped here, which is the one thing `envFileEntryNames`
+  // cannot do for itself — it answers about a LIST and this is a MAP.
+  const rawMap =
+    rawSettings !== null && typeof rawSettings === 'object'
+      ? (rawSettings as Record<string, unknown>)['envPassthrough']
+      : undefined;
+  const perAgentCandidates: Partial<Record<LaunchableAgentId, string[]>> = {};
+  if (rawMap !== null && typeof rawMap === 'object') {
+    for (const [id, names] of Object.entries(rawMap as Record<string, unknown>)) {
+      if (!LAUNCHABLE_SET.has(id)) continue;
+      const list = envFileEntryNames(names);
+      if (list.length > 0) perAgentCandidates[id as LaunchableAgentId] = list;
+    }
+  }
+  fileEnvEntries = {
+    perAgent: perAgentCandidates,
+    shared: envFileEntryNames(
+      rawSettings !== null && typeof rawSettings === 'object'
+        ? (rawSettings as Record<string, unknown>)['envPassthroughShared']
+        : undefined
+    )
+  };
   sealChecked = null;
   sealEnvRejections = null;
   return cached;
@@ -984,16 +1280,49 @@ function loadFile(): SettingsFile {
  * per-agent `claude FOO`. Nothing here parses one back apart — this function
  * joins opaque strings, which is all a seal key ever has to be.
  */
-function warnRejected(rejected: readonly string[]): void {
-  if (rejected.length === 0) return;
-  settingsLog.warn(
-    `ignoring ${rejected.length} setting(s) that decide what runs and were ` +
-      `not set in Tortie's Settings window: ${rejected.join(', ')}. Set them ` +
-      `in Settings if you want them.`
-  );
+function warnRejected(
+  rejected: readonly string[],
+  missing: readonly string[] = []
+): void {
+  // PHASE 278 — TWO SENTENCES, BECAUSE THE FIRST ONE IS FALSE OF HALF THE LIST.
+  // `rejected` now carries two different facts. A DROP is a setting that was in
+  // the file and that nobody set in the Settings window, and today's sentence
+  // is exactly right about it. A MISSING key is the opposite: a setting the
+  // person DID make here, which the file no longer carries, so telling them it
+  // "was not set in Tortie's Settings window" would be untrue about the only
+  // entries on the line they are not at fault for.
+  //
+  // ONE SET DIFFERENCE OVER OPAQUE STRINGS, and never a parse. Neither half of
+  // this function looks inside a key; `missing` arrives already spelled by the
+  // backstop that composed it.
+  const missingSet = new Set(missing);
+  const drops = rejected.filter((key) => !missingSet.has(key));
+  if (drops.length > 0) {
+    settingsLog.warn(
+      `ignoring ${drops.length} setting(s) that decide what runs and were ` +
+        `not set in Tortie's Settings window: ${drops.join(', ')}. Set them ` +
+        `in Settings if you want them.`
+    );
+  }
+  // THE FIX ROUND CORRECTED THE SECOND SENTENCE. It said the settings were
+  // "not in settings.json any more", and that is false of a confirmed name a
+  // later build refuses on shape, which the file still holds. It now says what
+  // is true of both causes, in the words the card uses.
+  if (missing.length > 0) {
+    settingsLog.warn(
+      `${missing.length} setting(s) you set in Tortie's Settings window are ` +
+        `not on the list Tortie reads any more, so they are not in effect: ` +
+        `${missing.join(', ')}. Set them again if you still want them.`
+    );
+  }
 }
 
-function writeFile(file: SettingsFile): void {
+/**
+ * Write `settings.json` atomically. It takes a `SettingsFile`, or, for the one
+ * caller that must leave the settings half alone, the object the file already
+ * holds with one key replaced (`saveSettingsWindowBounds`).
+ */
+function writeFile(file: SettingsFile | Readonly<Record<string, unknown>>): void {
   try {
     const path = settingsPath();
     mkdirSync(dirname(path), { recursive: true });
@@ -1019,6 +1348,12 @@ function persistSettings(next: GmuxSettings): GmuxSettings {
   const state = dangerStateOf(settings);
   const seal = sealDangerState(state);
   if (!isDangerStateEmpty(state) && seal === undefined) {
+    // PHASE 278. TWO ARGUMENTS, DELIBERATELY. This is the WRITE path and the
+    // question it asks is "what can be recorded right now", not "what did the
+    // file hold". Handing it the file's candidates would restore names into a
+    // save that cannot seal them, and an empty seal covers nothing anyway so
+    // its backstop reports no missing name and the log line below keeps exactly
+    // the meaning it has always had.
     const stripped = withSealedDangerState(settings, EMPTY_DANGER_STATE);
     settings = stripped.settings;
     settingsLog.warn(
@@ -1041,7 +1376,16 @@ function persistSettings(next: GmuxSettings): GmuxSettings {
   // still being ignored would be a sentence about a file that no longer says
   // what it said.
   shapeEnvRejections = { shared: [], sharedOver: 0, unnamed: 0 };
-  sealEnvRejections = { shared: [], perAgent: {} };
+  sealEnvRejections = noSealEnvRejections();
+  // PHASE 278. The candidates go with them, for the same reason and one more:
+  // `writeFile` below writes the seal-filtered settings, so the file's own
+  // entries are now the settings' own entries and holding the old ones would
+  // be a record of a file that no longer says what it said. THIS IS ALSO WHERE
+  // THE HEALING HAPPENS. At the parent commit this same save was what made the
+  // loss permanent — it wrote the settings the cap had already emptied and
+  // re-sealed to them. Now the pass has put the confirmed name back before this
+  // runs, so the save writes the confirmed name and drops the junk.
+  fileEnvEntries = { perAgent: {}, shared: [] };
   writeFile(cached);
   return settings;
 }
@@ -1058,26 +1402,61 @@ const listeners = new Set<SettingsListener>();
 export function getSettings(): GmuxSettings {
   const file = loadFile();
   if (sealChecked !== null) return sealChecked;
-  if (isDangerStateEmpty(dangerStateOf(file.settings))) {
+  // PHASE 278 — THE TRIPWIRE. A blob beside a danger state that READS as empty
+  // means a setting the person confirmed is not in effect. Without this clause
+  // such a file takes the short circuit below and nothing ever asks the seal
+  // what it covers — the one hole in the backstop, and exactly the shape a
+  // person hits when something empties their lists outright rather than
+  // pushing a name out of them.
+  //
+  // THREE THINGS PRODUCE THAT PAIR, AND TORTIE'S OWN WRITES ARE NOT ONE OF
+  // THEM. The file was edited underneath the app; the file was rolled back to
+  // an older copy; or the file holds a sealed value this build refuses on
+  // shape, so the SANITIZED state is empty while the file on disk is not. Each
+  // is a case the backstop exists to report, and each costs one keychain read.
+  // Tortie's writes were read rather than assumed: `sealDangerState` returns
+  // `undefined` on its first line when `isDangerStateEmpty(state)`, and
+  // `persistSettings` omits the `dangerSeal` key entirely when the seal is
+  // `undefined`. The Phase 278 fix round removed the one door that did write
+  // the pair — `saveSettingsWindowBounds` wrote the sanitized settings beside
+  // the old blob, so closing the Settings window could empty a state and keep
+  // its seal — and that door now leaves the settings half as the file holds it.
+  //
+  // IT COSTS AN ORDINARY INSTALL NOTHING. A file with no danger value has no
+  // blob at all, so `hasSeal` is false, the short circuit still runs and the
+  // keychain is still never touched — which is what keeps the cost sentence on
+  // the seal header above true.
+  const hasSeal = typeof file.dangerSeal === 'string' && file.dangerSeal.length > 0;
+  if (!hasSeal && isDangerStateEmpty(dangerStateOf(file.settings))) {
     // The common case, and the one that never touches the keychain. Phase 275:
     // a file whose only danger value is a SHARED name does not take this
     // branch, because `isDangerStateEmpty` asks about `envShared`. That clause
     // is the whole of layer one for this phase and it has an ablation.
     sealChecked = file.settings;
-    sealEnvRejections = { shared: [], perAgent: {} };
+    sealEnvRejections = noSealEnvRejections();
     return sealChecked;
   }
   const sealed = openDangerSeal(file.dangerSeal);
-  const { settings, rejected, envRejected } = withSealedDangerState(
+  const { settings, rejected, missing, envRejected } = withSealedDangerState(
     file.settings,
-    sealed ?? EMPTY_DANGER_STATE
+    sealed ?? EMPTY_DANGER_STATE,
+    // PHASE 278. The file's own entries, handed in rather than reached for, so
+    // `withSealedDangerState` stays pure and stays exported for tests. This is
+    // the ONLY shipping call site that supplies them: the write path in
+    // `persistSettings` does not.
+    {
+      perAgent: fileEnvEntries.perAgent,
+      shared: fileEnvEntries.shared,
+      agentEnvKeys: compiledLaunchEnvKeys,
+      sharedRefusedEnvKeys: sharedRefusedEnvKeys()
+    }
   );
   // A null seal means "not known yet" (app not ready). Answer safely now and
   // ask again on the next read rather than remembering the safe answer, and
   // do not announce a rejection that is not final.
   if (sealed !== null) {
     sealChecked = settings;
-    warnRejected(rejected);
+    warnRejected(rejected, missing);
     // Phase 275. Recorded on exactly the branch that announces, so the Settings
     // window never draws a rejection that is not final either.
     sealEnvRejections = envRejected;
@@ -1120,6 +1499,33 @@ export function getSettings(): GmuxSettings {
  * sentence, because "add it here" is the fix for one of them and a dead end for
  * the other.
  *
+ * PHASE 278 SUBTRACTS THE RESTORED NAMES, AND HERE IS WHERE BOTH HALVES ARE IN
+ * HAND. `shapeEnvRejections.shared` comes from `sanitizeEnvPassthroughShared`,
+ * which counts a name dropped for being PAST THE CAP as a shape drop. Since
+ * this phase the seal-aware pass may put such a name back, and drawing
+ * `envUnreadLine` over it would tell a person "Tortie will not read it" about a
+ * name Tortie is reading — the exact class of untruth the fix round above
+ * existed to end. So the shape layer's own answer is taken apart from the
+ * seal's exactly as before, and THEN every entry whose NAME Tortie reads is
+ * subtracted from it. `sanitizeEnvPassthroughShared` itself is untouched.
+ *
+ * THE FIX ROUND MADE THE SUBTRACTION COUNT ENTRIES, NOT NAMES. The first build
+ * subtracted restored NAMES from a report that counts ENTRIES, so a restored
+ * name written twice past the cap made `sharedUnreadOver` GROW, and the card
+ * said "and 1 more" about a copy of a name Tortie reads. The same rule now
+ * also covers a copy of a name the shape layer kept, which Phase 275 drew as
+ * "Tortie will not read them" while Tortie read it. The count is exact because
+ * of two facts about the shape layer: every drawable entry it refuses is
+ * either echoed or counted, never both and never neither; and of all the
+ * entries that carry one name it keeps at most one, the first. So the file's
+ * entries carrying a name Tortie reads, less one for each such name the shape
+ * layer kept, are exactly the refused entries to take away, and the ones not
+ * echoed come off the count.
+ *
+ * PHASE 278 ALSO CARRIES THE BACKSTOP'S TWO COUNTS. They are the other
+ * direction — a name the person confirmed that the finished lists do not hold —
+ * and the card draws a third sentence from them.
+ *
  * NAMES ONLY. There is no field on `EnvRejections` that could carry a value,
  * and every name on it passed the shape gate before it got here.
  */
@@ -1131,6 +1537,34 @@ export function envRejectionsNow(): EnvRejections {
   answer.sharedUnread = [...shapeEnvRejections.shared];
   answer.sharedUnreadOver = shapeEnvRejections.sharedOver;
   answer.perAgent = { ...(seal?.perAgent ?? {}) };
+  answer.sharedMissing = seal?.sharedMissing ?? 0;
+  answer.perAgentMissing = { ...(seal?.perAgentMissing ?? {}) };
+  // The module fields the subtraction needs, read where they already sit:
+  // `sealChecked` is the finished shared list of this load, `cached` is the
+  // SANITIZED one it was built from, and `fileEnvEntries` is the file's own
+  // entries. Before the first read of a load `sealChecked` is null and this is
+  // a no-op. After a save the shape report is empty, and so is this.
+  const finalShared = new Set(sealChecked?.envPassthroughShared ?? []);
+  if (
+    finalShared.size > 0 &&
+    (answer.sharedUnread.length > 0 || answer.sharedUnreadOver > 0)
+  ) {
+    const unread = answer.sharedUnread.filter((name) => !finalShared.has(name));
+    const echoedRead = answer.sharedUnread.length - unread.length;
+    const shapedShared = new Set(cached?.settings.envPassthroughShared ?? []);
+    let refusedRead = 0;
+    for (const name of fileEnvEntries.shared) {
+      if (finalShared.has(name)) refusedRead += 1;
+    }
+    for (const name of finalShared) {
+      if (shapedShared.has(name)) refusedRead -= 1;
+    }
+    answer.sharedUnread = unread;
+    answer.sharedUnreadOver = Math.max(
+      0,
+      answer.sharedUnreadOver - Math.max(0, refusedRead - echoedRead)
+    );
+  }
   return answer;
 }
 
@@ -1160,5 +1594,20 @@ export function saveSettingsWindowBounds(bounds: SettingsWindowBounds): void {
   // settings half of the file, so a window move can neither launder an
   // unsealed danger flag onto disk nor delete a sealed one.
   cached = { ...loadFile(), settingsWindowBounds: bounds };
-  writeFile(cached);
+  // THE PHASE 278 FIX ROUND MADE THE COMMENT ABOVE TRUE. This used to write
+  // `cached`, and `cached.settings` is the SANITIZED settings: every list cut
+  // at sixteen in file order, and every value this build does not offer
+  // dropped. So closing the Settings window, which calls this, wrote sixteen
+  // junk names to disk and dropped the confirmed seventeenth. The seal-aware
+  // pass had put that name back for this run, and at the next launch there was
+  // nothing left for it to find. The same write removed a sealed launch default
+  // this build does not offer, and left the seal beside an empty danger state.
+  //
+  // So the file is read again and ONE key is replaced. Everything else is
+  // written back exactly as the file holds it, including the seal blob. Nothing
+  // new can be admitted this way, because nothing is sealed here and the next
+  // load asks the seal about every name, exactly as it asks today. A missing or
+  // unreadable file has no settings half to keep, and gets `cached` as before.
+  const onDisk = readSettingsObject();
+  writeFile(onDisk !== null ? { ...onDisk, settingsWindowBounds: bounds } : cached);
 }

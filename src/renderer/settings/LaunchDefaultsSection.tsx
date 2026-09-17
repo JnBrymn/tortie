@@ -109,6 +109,7 @@ import {
   envConfirmTitleMany,
   envEmptyLine,
   envInheritLine,
+  envMissingLine,
   envRejectedLine,
   envRejectedUnnamedLine,
   envUnreadLine,
@@ -294,6 +295,7 @@ export function EnvNamesGroup({
   unread,
   unreadOver,
   unnamed,
+  missing = 0,
   onOpen,
   onRemove
 }: {
@@ -326,6 +328,18 @@ export function EnvNamesGroup({
   unreadOver: number;
   /** Entries main dropped that could not be named safely enough to draw. */
   unnamed: number;
+  /**
+   * How many names THE SEAL covers that this list no longer holds (Phase 278).
+   * The other direction from the two above: the person added these here and
+   * they are not in effect. A COUNT and never a list, because recovering the
+   * bare name from a per-agent seal key would mean splitting a key, and no seal
+   * key in this repository is ever split.
+   *
+   * OPTIONAL, DEFAULTING TO ZERO, which is the honest resting shape: a caller
+   * with nothing to report says nothing, exactly as `inheritCount` is drawn
+   * only when it is not zero. Both shipping call sites pass it.
+   */
+  missing?: number;
   onOpen: () => void;
   onRemove: (name: string) => void;
 }): React.JSX.Element {
@@ -390,9 +404,23 @@ export function EnvNamesGroup({
           "adding it here will not help", and joining them under the seal's
           words told a person their own confirmed key had never been added.
           Each is one short sentence and the block is drawn at all only when
-          somebody has edited settings.json by hand. */}
-      {rejected.length > 0 || unread.length > 0 || unnamed > 0 ? (
+          somebody has edited settings.json by hand.
+
+          PHASE 278 ADDS A FOURTH AND PUTS IT FIRST. It is the only one of the
+          four about a name the person themselves added, so it leads: the other
+          three are all about entries in the file that are being ignored, and
+          this one is about a setting that is missing. Phase 278's repair means
+          the ordinary cap case never reaches it — that name is on the card
+          above now — so what is left here is the deleted name and the name a
+          later build refuses. On the shared card only the deleted name
+          reaches it, because the unread line already names the other. */}
+      {missing > 0 || rejected.length > 0 || unread.length > 0 || unnamed > 0 ? (
         <p className="set-env-note error">
+          {missing > 0 ? envMissingLine(missing) : null}
+          {missing > 0 &&
+          (rejected.length > 0 || unread.length > 0 || unnamed > 0)
+            ? ' '
+            : null}
           {rejected.length > 0 ? envRejectedLine(rejected) : null}
           {rejected.length > 0 && (unread.length > 0 || unnamed > 0) ? ' ' : null}
           {unread.length > 0 ? envUnreadLine(unread, unreadOver) : null}
@@ -552,6 +580,8 @@ function SharedDefaultsCard({
         unread={rejections.sharedUnread}
         unreadOver={rejections.sharedUnreadOver}
         unnamed={rejections.unnamed}
+        // Phase 278. Names the seal covers that this list no longer holds.
+        missing={rejections.sharedMissing}
         onOpen={() => onOpenPicker(SHARED_TARGET)}
         onRemove={(name) => {
           // Removing never confirms, exactly as disabling a preset never does.
@@ -602,6 +632,13 @@ function EnvNames({
       unread={[]}
       unreadOver={0}
       unnamed={0}
+      // PHASE 278. The one half of this block an agent card DOES draw, and it
+      // widens no contract: the three above stay hard-coded because Phase 269's
+      // per-agent SANITIZER is silent by a contract this phase did not edit,
+      // and that silence is about the SHAPE layer. This count comes from the
+      // seal, which has always reported per agent, so there is nothing here to
+      // widen — only a fact that was being kept from the person.
+      missing={rejections.perAgentMissing[agentId] ?? 0}
       onOpen={() => onOpenPicker({ kind: 'agent', agentId, agentName })}
       onRemove={(name) => {
         // Removing never confirms, exactly as disabling a preset never does.

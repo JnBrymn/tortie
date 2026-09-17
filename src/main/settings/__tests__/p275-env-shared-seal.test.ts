@@ -617,6 +617,19 @@ describe('THE FIX ROUND — the shape layer and the seal layer are told apart', 
    * because the cap counts kept-so-far in FILE ORDER. The verified build then
    * drew that name FIRST, under "they were not added here". It had been added
    * here — it is in the seal.
+   *
+   * PHASE 278 REMOVED THE LIMIT THIS TEST USED TO PIN, and the test moved with
+   * it rather than being deleted. It asserted the displacement as the expected
+   * state — `envPassthroughShared` reading `[]`, the confirmed name on the
+   * SHAPE list — because Phase 275 shipped the reporting half and recorded the
+   * order as a limit. Phase 278 (audit F3, the cap half) recomputes the list
+   * from the file's own entries in the file's own order once the seal is open,
+   * keeping only what the seal covers, so the junk no longer spends the cap the
+   * confirmed name needs. The title's promise is unchanged and is still
+   * asserted: the name is never drawn as "not added here". What changed is the
+   * stronger half: it is now DELIVERED, and it is on no drop list because
+   * nothing dropped it. The sixteen unconfirmed names are still refused by the
+   * seal, which is the half that may never move.
    */
   it('never tells a person a name they DID confirm was not added here', async () => {
     const junk = Array.from({ length: 16 }, (_v, i) => `P275_JUNK_${String(i)}`);
@@ -625,14 +638,16 @@ describe('THE FIX ROUND — the shape layer and the seal layer are told apart', 
       { ...emptyState(), envShared: [SHARED] }
     );
     const store = await freshStore();
-    // It still FAILS CLOSED: the name is not delivered, whatever the card says.
-    expect(store.getSettings().envPassthroughShared).toEqual([]);
+    // The confirmed name survives the junk ahead of it.
+    expect(store.getSettings().envPassthroughShared).toEqual([SHARED]);
     const r = store.envRejectionsNow();
-    // The confirmed name is on the SHAPE list, whose sentence says adding it
-    // here will not help — which is true, because the cap is what dropped it.
-    expect(r.sharedUnread).toEqual([SHARED]);
-    // And it is NOT on the seal's list, whose sentence would be a lie about it.
+    // It was not dropped, so it is on neither drop list.
+    expect(r.sharedUnread).toEqual([]);
+    expect(r.sharedUnreadOver).toBe(0);
     expect(r.shared).not.toContain(SHARED);
+    // And a delivered name is never also counted as missing (the fix round).
+    expect(r.sharedMissing).toBe(0);
+    // And every unconfirmed name is still refused by the seal.
     expect(r.shared).toEqual(junk);
   });
 
