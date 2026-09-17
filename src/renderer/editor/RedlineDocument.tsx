@@ -875,14 +875,19 @@ export function RedlineDocument({
   // picture: a watcher read can move the bytes without moving the composed
   // picture — a dirty buffer is drawn instead — and the release's second
   // clause, bytes somebody wrote after the rewind, must still be asked.
+  // PHASE 282'S FIX ROUND added `tab.dirty`, which is the rule's third answer
+  // rather than a fourth dependency: a dirty tab is never re-read, so neither
+  // of the other two clauses can ever become true again and a landed hold
+  // would refuse every accept on the tab for the life of the mount.
   useLayoutEffect(() => {
     const host = hostRef.current;
     releaseHolds(
       rewindHolds.current,
       host === null ? [] : changeElements(host).map(identityOf),
-      tab.savedContents
+      tab.savedContents,
+      tab.dirty
     );
-  }, [composed, tab.savedContents]);
+  }, [composed, tab.savedContents, tab.dirty]);
   // PHASE 251. THE ROOM THE PAGE HAS, and the token that re-measures the rail
   // bar when the panel is dragged. It observes the SCROLLER rather than the
   // view, because the scroller is exactly the box the page lives in, so the

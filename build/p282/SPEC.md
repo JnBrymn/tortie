@@ -706,3 +706,104 @@ or removed.
   before `applyModelText(`. Each with an arm in `build/p268/ablation.mjs`, red on its own rule; the three
   typing ablations above are measured red on the red-first tests already.
 - `CLAUDE.md`'s `conformance:save` row names `adoptWritten`.
+
+---
+
+## 10. CORRECTIONS AFTER VERIFICATION (the fix round of 2026-09-17)
+
+Three independent verifiers ran against `f155860d`. Two rulings above are corrected here; everything else in
+this file stands. Each correction names the ruling it replaces, the reading that forced it, and the test that
+is red without it.
+
+### 10.1 §2.2 clause 2: THE FOLLOWER IS FOUND BY ITS BASELINE OFFSET, not by `sameChange`
+
+§2.2 said "return the first index whose drawn identity is `sameChange(drawn, want)`", and §2.4's stated limit
+put the fallback among the exceptional cases. A verifier who wrote its own landing oracle in the CURRENT-side
+coordinate — a coordinate the shipping code never uses — measured the fallback being reached by an ORDINARY
+shape on 10 of 2,366 quiet presses, and landing wrong on 8 of 2,007 presses once an agent's line arrived in
+the same redraw.
+
+The trigger, re-derived here from the bytes: accepting a change ABOVE a whole-line deletion makes the differ
+peel the trailing newline off the deletion's group. The follower comes back at EXACTLY the offset the
+accept's `ins.length - del.length` shift computes, with a `del` one `\n` shorter, so `sameChange` — which
+asks `off` AND `del` — refuses it and `indexAfterRemoval` answers instead. Quietly the fallback happened to
+agree; with a write above it answered the AGENT's brand-new change at index 0, which the next ⌥↩ in the
+rhythm would have accepted, and a per-change accept has no undo.
+
+**RULED: the offset alone.** An offset names at most one change in a drawn picture — `./rewind`'s own header
+records offsets strictly increasing across one draw over 2,998 draws with 0 non-increasing pairs — so the
+offset IS an identity here, and asking `del` as well can only make the match fail when the RE-CUT moved the
+follower's own text, which is the one case the follower is still the change that came next. The verifier's
+shadow measured the offset form at 0 wrong on 2,366 quiet presses and 0 wrong on 2,007 raced ones against the
+`sameChange` form's 8. The wait clause (§2.2 clause 1) still asks all three fields and does not move;
+`sameChange` keeps its own definition and its own job, which is deciding the CURRENT change.
+
+Red without it: `p282-move-on.test.ts`, "and with an agent's line arriving at the top in the same redraw, the
+landing is still the follower and never the agent's new change".
+
+### 10.2 §1.4's release rule gains its third answer: A DIRTY TAB LETS EVERY LANDED HOLD GO
+
+§1.4 gave `releaseHolds` two clauses, and both wait for a READ. `refreshRepo` skips a dirty tab by rule
+(`tab-io.ts`), so `savedContents` can never move again, and the picture is composed from the buffer, which
+still draws the change the rewind wrote away. A verifier drove the whole chain through the shipping modules:
+a rewind whose adoption refused — the ordinary state of a file an agent is writing — then ONE keystroke, then
+100 watcher ticks, and read the hold still standing and every accept on the tab answering `held` with "A
+change in <name> is still being rewound, so nothing was accepted" when nothing was. The only ways out were
+⌘S, switching tabs and back, or closing the tab, and the sentence named none of them.
+
+**RULED: a LANDED hold is released at once on a dirty tab.** `releaseHolds` takes the flag (a fourth
+argument, required rather than optional, so no caller can forget it), and the view's release effect lists
+`tab.dirty` in its dependencies — which is load-bearing rather than tidy, because §3.1's typing rule marks
+the tab dirty BEFORE its text reaches the buffer, so there is a render where the flag moved and the picture
+did not. A hold buys nothing on a dirty tab either way: `pressRedline` refuses a rewind there FIRST, and an
+accept of the bytes in front of the person is what an accept has always meant. A hold still IN THE AIR is
+NOT released by this, because the write really is landing and §1.2's RACE A is exactly a chord made inside
+that window.
+
+§8 limit 8 named the shape one step further along, after a ⌘S and an Overwrite; that step ends the hold on
+its own, because the saved bytes are then neither `landed.saved` nor `landed.was`. The hole was the stretch
+BEFORE the save, while the tab is dirty and nothing will read it, and that stretch has no end without this
+clause.
+
+Red without it: `p282-one-press.test.ts`, "ONE KEYSTROKE AFTER A REFUSED ADOPTION DOES NOT FREEZE THE HOLD",
+with "CONTROL: a hold still IN THE AIR is not let go by a dirty tab" beside it.
+
+### 10.3 Mechanism 5 is completed: ONE WALK OF A REPO AT A TIME
+
+The entry's mechanism 5 and §3's `refreshRepo` clause — `live.savedContents === savedBefore` — say "the
+baseline moved since before my read", which says nothing about WHICH read is newer. A verifier drove two
+reads of one tab overlapping, which is what two watcher ticks do: `refreshRepo` is fire and forget from
+`./store`'s `onRepoChanged`, the bus debounces only 150 ms, and one walk awaits a directory read, a file read
+and a `git show HEAD` PER TAB. The older read answered first and moved `savedContents`; the newer one —
+issued later, so carrying bytes at least as new — then failed the clause, was dropped WHOLE, and left the tab
+showing an agent's second-to-last write with nothing scheduled to read again. Measured here at `f155860d` and
+again at the parent `9217ae0d`, where the newer read is applied: it is this phase's own regression.
+
+**RULED: the clause stays exactly as it is, and `refreshRepo` is serialized per repo.** The clause is right
+about the fact it names; what was wrong is that two reads of one tab could be in the air at once. With one
+walk in flight, the only thing that can move `savedContents` under a read is a WRITER — an adoption or a
+`completeSave` — and a writer leaves the tab holding the newest bytes, which is exactly the interleaving the
+clause was written to drop. Refused alternatives, by name: a per-tab read SEQUENCE (it is a second kind of
+state, it would rewrite `conformance:save` rule 26 and two `ablation:p268` arms for a clause that is not
+wrong, and it leaves the read storm in place); and RE-READING once when the clause fires (it spends an extra
+read on every adoption and can race again).
+
+At most ONE walk is queued behind the running one, because a second and a third would re-read the same files
+for the same reason. The running walk is forgotten in a `finally`, so a walk that throws never blocks the
+next. `refreshRepo` itself — the walk, which `conformance:save` rules 22 and 26 read by name — is unchanged;
+the serializer is what `createTabIo` returns.
+
+Red without it: `p282-overlapping-refresh.test.ts`, "leaves the tab on the bytes that are really on disk, not
+on the older read's", with the one-at-a-time and the coalescing controls beside it.
+
+### 10.4 What the verifiers checked and did not move
+
+`live-text.ts` is byte-identical to main's. The identity move is right on 2,366 of 2,366 quiet presses and on
+the whole walk of 1,183 accept runs and 1,183 rewind runs judged against an offset-free oracle. The accept's
+`ins.length - del.length` shift is exact over 3,046 follower spans derived from the bytes. The hold refuses
+RACE A before it reads a byte. The key repeat runs only the two arrows. The rewind takes the keyboard only
+from a change wrapper this view is about to replace. The synchronous dirty mark's tab-switch consequence is
+one store transition wide and heals, as §3.2 states. `probe:p268`'s arm G is ruled out at the unit level: no
+value of `repoPath`, the project roots, the remote flag or the read-only answer makes `autoSaveSkipReason`
+answer null for a file outside every open root over 20,000 random tabs, and `tab-io.ts`'s `save` carries a
+second independent guard over the same predicate.

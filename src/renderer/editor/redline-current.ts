@@ -271,20 +271,35 @@ export function pressMoveOf(
  *    triple and NOT `sameChange`, which is what PR 28 waited on: a change at
  *    the same span with different words is an agent's new change, and waiting
  *    on it parked the move until the person walked away.
- * 2. THE FOLLOWER, by `sameChange`. An accept replaces `del` with `ins` in the
- *    BASELINE, so a follower drawn after it moved by the difference; one that
- *    came round from the top sits before the accepted span and did not. A
- *    rewind writes the baseline's own bytes back into the FILE and leaves the
- *    baseline where it was, and an agent's write elsewhere moves no baseline
- *    offset either (research 83 policy Z), so nothing shifts. `sameChange` and
- *    not the triple, because an agent may have rewritten the follower's words
- *    and it is still the change that came next.
- * 3. THE INDEX, only when the follower is no longer drawn: merged away, split,
+ * 2. THE FOLLOWER, BY ITS BASELINE OFFSET. An accept replaces `del` with `ins`
+ *    in the BASELINE, so a follower drawn after it moved by the difference;
+ *    one that came round from the top sits before the accepted span and did
+ *    not. A rewind writes the baseline's own bytes back into the FILE and
+ *    leaves the baseline where it was, and an agent's write elsewhere moves no
+ *    baseline offset either (research 83 policy Z), so nothing shifts.
+ *
+ *    THE OFFSET ALONE, AND NOT `sameChange`, WHICH IS PHASE 282'S FIX ROUND.
+ *    An offset names at most one change in a drawn picture — ./rewind's own
+ *    header records offsets strictly increasing across one draw over 2,998
+ *    draws with 0 non-increasing pairs — so the offset IS the identity here,
+ *    and asking `del` as well only makes the match fail when the RE-CUT
+ *    changed the follower's own text. That is an ordinary shape rather than an
+ *    exotic one: accepting a change above a whole-line deletion peels the
+ *    trailing newline off the deletion's group, so the follower comes back at
+ *    exactly the offset this computes with a `del` one `\n` shorter, the match
+ *    fails, and the fallback answers. The verifier measured that fallback
+ *    landing the person on an AGENT's brand-new change at index 0 when a write
+ *    above arrived in the same redraw — and the next press in the rhythm would
+ *    have accepted it, with no undo. Over the verifier's 410 generated
+ *    pictures the offset match read 0 wrong on 2,366 quiet presses and 0 wrong
+ *    on 2,007 raced ones, against 8 wrong for the `sameChange` form.
+ * 3. THE INDEX, only when nothing is drawn at that offset: merged away, split,
  *    or there was none. {@link indexAfterRemoval} is that fallback.
  *
- * Stated limit, not fixed: when the follower is gone AND an agent's write
- * above moved the count in the same redraw, the fallback can land one change
- * off, which is PR 28's rule in the one case nothing better is known.
+ * Stated limit, not fixed: when nothing is drawn at the follower's offset AND
+ * an agent's write above moved the count in the same redraw, the fallback can
+ * land one change off, which is PR 28's rule in the one case nothing better is
+ * known.
  */
 export function landingAfterPress(
   drawn: readonly (ChangeIdentity | null)[],
@@ -299,8 +314,8 @@ export function landingAfterPress(
   if (move.follower !== null) {
     const shift =
       move.verb === 'accept' && move.followerAfter ? pressed.ins.length - pressed.del.length : 0;
-    const want = { ...move.follower, off: move.follower.off + shift };
-    const found = drawn.findIndex((id) => id !== null && sameChange(id, want));
+    const want = move.follower.off + shift;
+    const found = drawn.findIndex((id) => id !== null && id.off === want);
     if (found !== -1) return found;
   }
   return indexAfterRemoval(drawn.length, move.at);

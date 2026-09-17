@@ -143,6 +143,20 @@ export function landHold(
  * - A hold still in the air is NEVER let go by a draw: the picture cannot have
  *   caught up with a write that has not happened. Only the press itself ends
  *   it, on a refusal or a throw.
+ * - A landed hold goes AT ONCE ON A DIRTY TAB, and this is Phase 282's fix
+ *   round. Both clauses below wait for a READ: `refreshRepo` (./tab-io) skips
+ *   a dirty tab by rule, so `saved` can never move again, and the picture is
+ *   composed from the buffer, which still draws the change the rewind wrote
+ *   away. So on a dirty tab the hold was waiting for an event that cannot
+ *   happen, and it outlived the press for as long as the view was mounted: the
+ *   verifier drove a rewind whose adoption refused (the tab trailed disk, which
+ *   is the ordinary state of a file an agent is writing), one keystroke, then
+ *   100 watcher ticks, and read every accept on that tab answered `held` with
+ *   "a change is still being rewound" when nothing was. A hold buys nothing on
+ *   a dirty tab either way: `pressRedline` refuses a rewind there FIRST, and
+ *   an accept of the bytes in front of the person is what an accept has always
+ *   meant. A hold still IN THE AIR is not released by this, because the write
+ *   really is landing and RACE A is exactly a chord made inside that window.
  * - A landed hold goes when no drawn change equals it on all three fields —
  *   the redraw the rewind was waiting for.
  * - OR when the tab has read bytes that are neither what it held right after
@@ -159,11 +173,17 @@ export function landHold(
 export function releaseHolds(
   holds: RewindHold[],
   drawn: readonly (PressedChange | null)[],
-  saved: string
+  saved: string,
+  /** Unsaved edits in the buffer NOW: a tab nothing will read again. */
+  dirty: boolean
 ): void {
   for (let at = holds.length - 1; at >= 0; at -= 1) {
     const hold = holds[at] as RewindHold;
     if (hold.landed === null) continue;
+    if (dirty) {
+      holds.splice(at, 1);
+      continue;
+    }
     const stillDrawn = drawn.some((id) => id !== null && samePress(id, hold.pressed));
     const newer = saved !== hold.landed.saved && saved !== hold.landed.was;
     if (!stillDrawn || newer) holds.splice(at, 1);
