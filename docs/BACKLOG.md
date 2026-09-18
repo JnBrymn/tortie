@@ -29675,6 +29675,84 @@ only the failed items, live; then stop. A second `needs_work` returns to the ope
 - No release.
 
 
+## Phase 284.1 — the fix round the reverify asked for (operator, 2026-09-17) QUEUED
+
+**Subject.** `fix(chrome): the editor's foot follows its body, and the hover check settles`
+
+**First body line.** `Phase 284.1: the fix round the reverify asked for`
+
+**Semver.** Patch on top of Phase 284's minor; the two land together.
+
+**Tier 2.** A rendered surface with no new state, plus the phase's own probe. One app run drives every
+claim; the independent method is the same reverifiers re-running the failed items live.
+
+**Charter.** The operator, 2026-09-17: Phase 284's reverify answered `needs_work` after its one fix round,
+which by `docs/method/HOW-WE-VERIFY-THIS.md` §1 stops the workflow and hands the verdict to him. He chose
+the first of the two options offered: "one more targeted fix round (the margin change, the probe's hover
+check), followed by a fresh reverify." This entry is that round, as its own phase so the method's rule
+that a fix runs once per phase still holds.
+
+### What the reverify found, so this round fixes exactly that
+
+Both reverifiers of `wf_87f6de73-8da` reproduced the same defect, introduced by Phase 284's fix round:
+
+1. **B1 / N1, major.** The editor-foot lift added to keep Monaco's scrollbar off the frame's arc,
+   `.ed-body { padding-bottom: var(--space-4) }` plus `.ed-panel .ed-body > * { bottom: var(--space-4) }`
+   in `src/renderer/editor/editor.css`, reaches `.arch-map-tab` (`src/renderer/arch/arch.css`, `position:
+   relative` since Phase 162 for its drill overlay, and a DIRECT child of `.ed-body` because
+   `React.Suspense` adds no node). A relative box with `bottom: 8px` and `top: auto` moves UP 8px, so the
+   Architecture map paints over the last 8px of the editor tab strip and ends 16px above the frame instead
+   of 8. Every other root is absolute (lifted as intended) or static (unaffected). The CSS comment's premise
+   "an in-flow root ignores `bottom`" holds for static roots only.
+2. **B3, minor.** `probe:p284`'s R9 reads each resizer's `:hover` once, 350 ms after a single synthetic
+   `mouseMoved`, and that read is flaky: one HEAD run produced four R9 findings with boxes, gutters and
+   keyboard widths identical to two runs that passed. A Blink synthetic-hover timing flake, pre-existing in
+   the probe, that would red a commit-time run at random.
+3. **B2, nit.** Under the report, map and context tabs the 8px foot reads as a darker step (`--bg-canvas`
+   under a `--bg-surface` root). Cosmetic; the fix below changes which colour shows, not that a step exists.
+
+Everything else the reverify re-ran held: every corner and gutter reads the surround on dark, light and a
+turned hue outside focus mode; exactly one outline in every state; the split ring follows the curve at a
+shared corner over eight live states; geometry to the pixel over ten cases and against tmux's column
+counts; the 240px floor at 960px both ways.
+
+### The mechanism
+
+1. **One declaration instead of two.** Replace the body padding and the per-child `bottom` with
+   `margin-bottom: var(--space-4)` on `.ed-body`, so every root, absolute or in flow, follows the body's
+   box with no per-child positioning; or, if the fixer measures that the margin does not survive the
+   panel's flex layout, keep the padding and add `top: 0` beside the `bottom` so an over-constrained
+   relative box ignores it. The fixer measures both in the app before choosing and says which and why in
+   `build/p284/SPEC.md` §14.4. `src/renderer/app/__tests__/p284-work-frame.test.ts`'s "the editor's foot"
+   describe is rewritten to the rule that ships.
+2. **A rendered check for the map's foot**, not a text-only rule: `probe:p284` opens the Architecture pane
+   over its scratch repository (the shape `probe:p258` uses) and reads `.arch-map-tab`'s bottom against
+   `.ed-body`'s and the frame's; if the pane cannot open in the harness, the probe says so in a NOTE and
+   the check reads the map tab's root in the fixer's own Electron run, quoted in the commit body.
+3. **The hover check settles.** In `resizerArm` (`build/p284/probe-p284.mjs`), move the pointer, move it
+   again by 1px, then settle-poll `:hover` for up to about 800 ms before grading, the way the other arms use
+   `settled()`, with the reason in the header.
+4. **B2 stated** in SPEC §14.4 as accepted.
+
+### The proof, run rather than read
+
+- The same two reverifiers, independent of the fixer, re-run B1/N1, B3 and B2 live and attack the new
+  diff; typed verdicts; a second `needs_work` stops again and returns to him.
+- The main session then runs the full battery (typecheck, build, test, smoke:t1, gate:electron,
+  gate:checks, conformance:redline), `conformance:hue` once (about 13 minutes), `probe:p284` at HEAD and at
+  the parent, `probe:sessionfocus` and `probe:p1811`, and reads the light, hue and rail screenshots.
+- Landing: Phase 284's commit, then this phase's commit, pushed together so main never carries the map
+  defect alone.
+
+### What is NOT in this phase
+
+- Nothing beyond the three findings. No new surface, no change to Phase 284's decisions, no third fix
+  round: if the reverify says `needs_work` again, it stops and the spec is rewritten.
+- Not Phase 286 (entering session focus takes the keyboard out of the session), which lands as an entry
+  with Phase 284 and runs on its own.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -30424,3 +30502,5 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 281.1 QUEUED, the reverify the Claude meter's fix round is owed, Tier 3.** He chose it after CLAUDE.md was corrected (`19c317ef`) to carry the lane `Verify -> [Fix -> Reverify]` from docs/method: Phase 281 landed with its fix round unreverified, plus two later edits nobody independent read (SPEC §8.2, where the main session wrote down the vendor verifier's findings after the fix round's brief had cut them off, and `probe:p281`, the app run that reads his real keychain). The reverify re-runs exactly those items: the corrected `security` fakes against the real program on a guarded scratch keychain, the locked-keychain claim, the vendor rows §8.2 states as limits, §8.2 itself against the verifier's journal and the installed bundle, and the probe's safety by reading and by one run with the Claude switch off. Then one fix if needed, then the same verifiers on the failed items, then stop. Runs after 284; the real-keychain run is not repeated without his approval.
 
 - 2026-09-17, **PHASE 282.1 QUEUED, the reverify the save surface is owed, Tier 3 for two items and Tier 2 for one.** He asked for both reverify subphases. This one re-runs, independently and live, the fix rounds that landed today without a reverify and share the save surface: Phase 282's last fix round `117e7a85` (the hold released on a dirty tab, one `refreshRepo` walk per project, the follower matched by baseline offset), Phase 277's fix round `29f47742` (the three regressions its first build introduced, and the `conformance:save` rules the main session rewrote itself), and Phase 278's settings-window bounds re-read. Attack and re-derive per item, one fix if needed, the same verifiers on the failed items, then stop. Runs after 284 and 281.1.
+
+- 2026-09-17, **PHASE 284 STOPPED AT ITS REVERIFY, and PHASE 284.1 QUEUED AND STARTED to answer it, Tier 2.** Phase 284's verify found two probe errors and two minor look defects; its one fix round answered all four; the reverify then reproduced ONE defect the fix round introduced (the editor-foot lift moves the Architecture map up 8px too far, over the tab strip's feet) plus a flaky hover read in the probe, and everything else held (every corner and gutter the surround on dark, light and hue outside focus mode; one outline in every state; the split ring on the curve; geometry to the pixel; the 240px floor). By the method a second needs_work stops the workflow and goes to him; he chose one more targeted fix round with a fresh reverify, so it runs as its own phase. 284 and 284.1 land together.
