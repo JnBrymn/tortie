@@ -55,7 +55,14 @@
 /* Pinned to the rail's foot, mirroring the activity bar's settings gear at
    the window's other 48px edge. `margin-top: auto` rather than a spacer
    element, so the empty state (no sessions, hence no .rail-list) still puts
-   it in the same place instead of letting it float under the band. */
+   it in the same place instead of letting it float under the band.
+
+   PHASE 288. That last sentence was true from Phase 18 until Phase 181.1 put
+   the mini meter above this footer with an auto margin of its own. Flexbox
+   hands free height to auto margins in EQUAL shares, so with no list to take
+   the space the meter took half and sat in the middle of the rail, which is
+   what the operator photographed. This margin is conditional now: the rule
+   below takes it away whenever a meter is drawn beside it. */
 .rail-footer {
   margin-top: auto;
   display: flex;
@@ -66,6 +73,14 @@
   /* The rail's own hairline, so the control reads as belonging to the rail
      rather than floating over the last session. */
   border-top: 1px solid var(--border);
+}
+
+/* When the meter is drawn it is the ONE auto margin in the column and takes
+   the whole free height, so it sits directly on the footer. When the meters
+   are off the meter is not in the DOM at all, this rule matches nothing, and
+   the footer keeps its own auto margin and stays at the foot. */
+.usage-mini + .rail-footer {
+  margin-top: 0;
 }
 
 .rail-list:focus-visible {

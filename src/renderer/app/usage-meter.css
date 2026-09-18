@@ -108,6 +108,17 @@
   border-top: 1px solid var(--border);
 }
 
+/* PHASE 288. The foot, even when the list is empty. Nothing else in the
+   expanded column carries an auto margin, and the stub that stands in for the
+   list has no `flex`, so without this the meter sat directly under "No
+   sessions yet" at the TOP of the pane and dropped to the foot the moment a
+   session was created. With the list (flex: 1) there is no free height and
+   nothing moves. A longhand on purpose: the shorthand above keeps the sides,
+   and a `margin` here would outrank it and take them. */
+.session-dock > .usage-full {
+  margin-top: auto;
+}
+
 .usage-full .usage-rows {
   display: flex;
   flex: 1 1 auto;

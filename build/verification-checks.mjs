@@ -1201,6 +1201,31 @@ export const CHECKS = [
   // has 0 findings and the parent fails R1, R2, R4, R5 and R11. It writes
   // photographs under out/p284. It spawns no agent and spends no token.
   electron('probe:p284'),
+  // PHASE 288's app run: the meters keep the foot of an empty session list.
+  // ONE Electron on a scratch profile with a scratch HOME under its own
+  // GMUX_HARNESS_DIR and the socket gmux-p288-<pid>, over one git project it
+  // builds itself, opened with NO session, which is the state the operator
+  // photographed. The meters are answered from a GMUX_USAGE_FIXTURE file
+  // exactly as probe:p202 launches, keyed by two synthetic bearers under
+  // scratch CLAUDE_CONFIG_DIR and CODEX_HOME, and it REFUSES to turn a meter
+  // on until main has said the fixture is installed, so no credential of the
+  // person is opened. Six arms, each able to run alone, read RECTANGLES and
+  // never a photograph: the rail and the expanded list with no session, both
+  // providers off, one provider on, one shell session for the populated case
+  // every rectangle of which must equal the other build's, and both densities
+  // at their width floors; focus mode is stated NOT DRIVEN because the mode
+  // refuses with no session. P288_PARENT_CHECKOUT points the same run at a
+  // BUILT parent worktree, one Electron and never two, and the parent must
+  // read the rail's gap as half the free height and the full meter under the
+  // stub. It writes readings under out/p288, spawns no agent and spends no
+  // token. `node build/p288/probe-p288.mjs --self-test` proves the graders on
+  // 36 fixtures and launches nothing. BUILD FIRST: the script carries no
+  // `npm run build &&` on purpose, so a verifier's re-run does not wait for a
+  // second build, and it REFUSES (exit 2, "out/ is older than the
+  // stylesheets; build first") when any of the five sources the geometry
+  // depends on is newer than the newest bundle under out/renderer/assets of
+  // the checkout it measures, before anything is launched.
+  electron('probe:p288'),
   // PHASE 281's app run, and the ONE probe in this table whose app reads the
   // person's real login keychain: the Claude meter's shipping reader, at the
   // parent and at HEAD, never at once, with P281_EXPECT naming the answer. A

@@ -29998,7 +29998,7 @@ to the middle, which is wrong."
   `usage-full` ends at the dock's foot and `.dock-stub` is at the top under the band; (c) both densities,
   meters OFF: the footer at the foot, no meter drawn; (d) one provider on; (e) one session created through
   the harness: every rectangle in item 3 equal to the parent's reading; (f) the rail at the width floor
-  `PROJECT_RAIL_MIN_WINDOW_W` and the expanded list at `DOCK_MIN`; (g) focus mode on and off around (a).
+  `PROJECT_RAIL_MIN_WINDOW_W` and the expanded list at `DOCK_MIN`; (g) focus mode around (a) was planned and is NOT DRIVEN, and the probe says so rather than reporting a pass: with no session `focusRefusal` answers that there is nothing to focus, and with one the mode hides the list outright (`.shell.session-focus [data-slot='session-dock']` is `display: none`, measured by the attack verifier), so there is no state in which the list and the mode are both on screen.
   `P288_PARENT_CHECKOUT` points the same run at a parent build, one after the other and never at once, and
   the parent must read the meter's gap to the footer as half the free height in (a) and the meter under
   the stub in (b). Under ~60 s so a verifier can run it inside the harness limit.
