@@ -30446,6 +30446,75 @@ not hold 0.108.0 for it.
 - No release.
 
 
+## Phase 291 — two more places the keyboard is left on nothing: closing the editor out of editor fill, and closing the shortcuts sheet (found by Phase 289's attack verifier, 2026-09-18)
+
+**Subject.** `fix(keyboard): closing the filled editor or the shortcuts sheet gives the keyboard back`
+
+**First body line.** `Phase 291: nothing that closes leaves the keyboard on nothing`
+
+**Semver.** Patch. After ⇧⌘B fills the window with the editor, ⌘E closes it and you can type into your
+session at once. After the shortcuts sheet closes, the same. Today both leave the keyboard on nothing
+until you click.
+
+**Tier 2, and the parent measurement is mandatory.** Two rendered surfaces, no new state, a proof that
+fits in one app run, and measured parent readings that must move. It is the defect Phases 286 and 289
+closed, in a third and a fourth surface, so its methods are theirs: the parent measurement, and an
+attack on the doors the builder did not drive.
+
+**Charter.** Phase 289's attack verifier, 2026-09-18 (`wf_1c2d4628-2bd`, findings A2 graded major and
+A4 graded minor), both measured identical at HEAD and at the parent, both outside that phase's charter
+and stated in its entry rather than widened into it. The reverifier noted that a stated finding is not
+a queued one; this is the queue.
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **A2, the filled editor.** ⇧⌘B then ⌘E: `fill afterCmdE: where=body typed-> []`, a string typed
+  with real keys arrived in no session, at both builds, re-measured on Phase 289's fixed bytes.
+  `src/renderer/editor/EditorPanel.tsx:180` `focusTerminal()` runs in the same task as `hidePanel()`
+  (`:558`) and `exitEditorFill()` (`:570`), while nothing in the work row is drawn yet, so the
+  terminal's textarea refuses the focus. Phase 289 rewrote this door to ask the one helper and kept a
+  fallback to `[data-slot="terminal-stack"]`, which carries no `tabIndex` and so takes nothing. The
+  comment at `:176` records the reading.
+- **A4, the shortcuts sheet.** With the ⌘/ sheet open over Catch Me Up, ⇧⌘U closes the page behind
+  the sheet; Phase 289's guard correctly leaves the keyboard in the sheet's input; Escape then closes
+  the sheet and the keyboard falls to `body`. Four ordinary keys, identical at the parent.
+- **The rule both break** is the one Phases 286 and 289 wrote down: an element that is not drawn
+  refuses the keyboard, so a close that focuses in the same task as the store write that un-hides the
+  work focuses nothing.
+
+### The mechanism
+
+1. **The filled editor's close gives the keyboard back once the work row is drawn**, in the shape
+   Phase 289 ships: `afterOverviewLeavesTheDom` in `src/renderer/overview/overview-flight.ts` is a
+   one-shot `MutationObserver` on the fact being waited for. Grep for it before writing a second one:
+   the honest shape is one helper that waits for a named class to leave the shell, used by both. No
+   timer with a number, no frame, cancelled if the editor is filled again first, and it does nothing
+   when the person has put the keyboard somewhere else in between.
+2. **⇧⌘U is swallowed while a modal layer is open**, the way `focusChordSwallowed()`
+   (`src/renderer/app/keyboard.ts:84`) already swallows ⇧⌘↩, so the page cannot close behind a sheet;
+   and the sheet's own close hands the keyboard back where it was when the sheet opened, else to the
+   terminal, which is Phase 289's rule.
+3. **Nothing is sent to a session that was not there before.** Both closes give the keyboard back
+   where it was, and to `focusTerminal()` only when nothing was recorded or the element is gone.
+
+### The proof, run rather than read
+
+- Phase 289's attack probe (`scratchpad/p289-attack/attack.mjs`, arms `fillleave` and `modal`) adopted
+  as a launch of `probe:p137` or a probe of this phase's own: red at the parent on `body`, green at
+  HEAD, a typed string read from the pane.
+- Unit cases beside `p289-leave-keyboard.test.ts`, red at the parent.
+- Gates: typecheck, build, test, smoke:t1, probe:sessionfocus and probe:p284 because a keyboard rule
+  changed under them.
+
+### What is NOT in this phase
+
+- The ended outlined pane (Phase 289's A3): when the outlined pane's session has ended, every door
+  gives the keyboard to the first live pane while the outline stays on the ended one. Whether an ended
+  pane should take nothing is the operator's ruling.
+- No change to what ⇧⌘B or ⌘E do, to the sheet's contents, or to `focusTerminal()`.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -31228,4 +31297,6 @@ cycle rather than only the evening it was written.
 - 2026-09-18, **PHASES 282.1 AND 282.2 LANDED TOGETHER, the save surface's fix rounds re-verified and the way out the sentence promises, `14658526` + `280def9f`, version 0.107.0 unmoved, no tag, pushed.** In the Redline view, after a rewind lands on a file you were typing in, ⌥↩ says "Save or undo your edits first, then accept", and the undo half now works: against the 282.1 bytes the app still answers "still being rewound" 1,515 ms after ⌘Z, and at HEAD the change is accepted 12 to 16 ms after it. **282.1 is the reverify three phases had landed without**: it withdrew a release clause Phase 282's own fix round had added, which let an accept draw a rewound change backwards; it made conformance:save's rules 11 and 18 to 20 read the refusal rather than the order two names are mentioned in; and it stopped the Settings window's close from writing a cut list over a confirmed shell variable name when the file cannot be read. Both of its reverifiers then found the undo road did not complete, a second needs_work went to him, and he chose the read over a reworded sentence. **282.2's attack verifier found a real bug in that read**: a second ⌘Z landing inside it let the hold go on a dirty buffer's empty picture, and one ⌘⇧Z later ⌥↩ accepted the rewound change with nothing said; a hold whose adoption refused is now let go by bytes and never by a picture alone, the attack's own rig is adopted with five of seven cases red at the 282.1 bytes, and probe arm Z is red before the fix and green after. The gate's new clause could not see which way the flag was tested and now can. **STILL NOT TRUE, HIS RULING, AND QUEUED NEXT AS PHASE 290**: the hold belongs to the mounted view, so a tab switch, the mode chip to File and back, or an undo made in the File view forgets it, and then the rewound change is accepted silently and a later ⌥⌫ writes the agent's words back over the rewind (`[wrote REWOUND, wrote AGENT]`); identical on main before these commits, and it needs a keystroke inside a rewind's write to begin. He read it at 16:40, said land it, and the release is not held for it. One ⌘Z too many un-applies the pulled read and redo is lost once it lands; both stated. Gates: the whole battery green, ablation:p268 32 of 32, conformance:redline with 15 of 15 ablations, probe:p277, probe:p268 and probe:redlinemoveon.
 
 - 2026-09-18, **PHASE 290 QUEUED, a rewind's caution belongs to the file and not to the view that is open, Tier 3.** Phase 282.2's two verifiers independently measured that the hold lives in the mounted Redline view: a tab switch, the mode chip to File and back, or an undo made in the File view forgets it, after which the rewound change is accepted with nothing said and a later ⌥⌫ writes the agent's words back over the rewind. Identical on main before and after 282.2, and it needs a keystroke inside a rewind's write to begin. He read the three options at 16:40 and took the first: a per-tab mark set where the adoption refuses, cleared by a read or a save, with the clean transition and a Redline mount both pulling the read and ⌥↩ asking the mark. The release is not held for it; it runs after 0.108.0.
+
+- 2026-09-18, **PHASE 289 LANDED, the keyboard goes back where it was when Catch Me Up closes, `59ed244b`, version 0.107.0 unmoved, no tag, pushed.** After ⇧⌘U and Escape you can type at once. At the parent the keyboard sat on `body`, never inside a terminal in 500 ms of 5 ms samples, and a string typed with real keys arrived in no session; at HEAD it is back within a few milliseconds and the string arrives. The leave focused the terminal in the same task as the store write, while the work was still not drawn; it now waits for the class to leave the shell with a one-shot observer, no timer and no frame. **In a split the keyboard now goes to the OUTLINED pane from every door**: `focusTerminal` asks Phase 286's selector first, and five doors that spelled the first-pane query for themselves call it; driven in a four-pane split with the last pane outlined, the strip rows, the dock, the view chord, the editor's close and the jump out of the page all typed into the outlined pane at HEAD and into the first at the parent. **THE ATTACK VERIFIER CHANGED THE DESIGN**: the first build sent every leave to the terminal, so with the keyboard in an open file ⇧⌘U, Escape and the next typed line went to the outlined session, whose shell RAN it; the opening gesture now records where the keyboard was and the leave gives it back THERE, the terminal only as the fallback, which amends Phase 137's documented leave. The reverifier passed each item live. **Phase 291 is queued from it**: closing the editor out of editor fill, and closing the shortcuts sheet after the page closed behind it, both leave the keyboard on nothing, identical at the parent. His to rule: whether an ended outlined pane should take the keyboard. Gates: typecheck, build, npm test at 937 files and 14,985 tests, smoke:t1, conformance:overview, probe:p137 0 at HEAD and 1 at the parent by design, probe:sessionfocus, probe:p284.
 
