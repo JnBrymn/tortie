@@ -46,6 +46,10 @@
    rule whatever order the bundler puts the stylesheets in. `.ed-panel.ed-fill`
    and `.session-dock.collapsed` are both two-class selectors, and a hide that
    depends on import order is a hide that fails once.
+
+   PHASE 284. Section 7, at the END of this file, turns the work's frame off
+   in the mode: no gutter, no curve, no line. It is last on purpose, and its
+   own note names the test that would otherwise find the wrong rule first.
 --------------------------------------------------------------------------- */
 
 /* ---------------------------------------------------------------------------
@@ -280,4 +284,57 @@
 .shell.session-focus > .focus-wash,
 .shell.gmux-focusing > .focus-wash {
   opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   7. The work's frame is OFF (Phase 284)
+
+   ./work-area.css gives the work one outline, a curve and a gutter between it
+   and the surround. The mode's promise is that the session surface gets the
+   whole window, the surround is not drawn, and a frame around nothing is the
+   refusal in DESIGN.md §0 turned inside out. So the margin, the radius and the
+   line all go, and the mode's geometry is byte for byte what it was before
+   the frame existed. The children's corner radii follow through `inherit`,
+   and the focused-split box's corner through `--frame-corner`.
+
+   BOTH CLASSES IN ONE RULE, EACH TIME, for the reason at the top of this
+   file. focus-flight.ts adds `.gmux-focus-measure` on an enter and REMOVES
+   `.session-focus` on a leave, inside one task, to ask where the surface will
+   be. A frame that turned off under one class and not the other would send
+   the photograph to a rect one gutter out, which is 8px.
+
+   Three class-or-attribute terms against the two of work-area.css's sidebar
+   adjacency rule, so the left gutter goes too, and the sidebar is still the
+   previous sibling while section 1 has it `display: none`.
+
+   `.shell.overview-open` is deliberately NOT here. The Catch Me Up page does
+   not draw the work area at all (../overview/overview.css), so there is no
+   frame to turn off.
+
+   THIS SECTION IS LAST ON PURPOSE. focus-mode.test.ts finds section 1 with
+   `rules.find` on a body of exactly `display: none` under `.session-focus`,
+   and the line's rule below has that same shape. Moved above section 1 it
+   would be the first match and the test would read the wrong selector list.
+
+   WHAT IS NOT BUILT. The line does not fade with the chrome. On an enter it
+   stays drawn under the growing photograph, which covers it within a frame or
+   two. On a leave it is simply there at the swap while the chrome fades in.
+   `[data-focus-arriving]` is pinned at exactly eight regions, and an opacity
+   on a pseudo-element of the terminal's own container is not worth arguing
+   with DESIGN-SPEC S12.7 over.
+--------------------------------------------------------------------------- */
+
+.shell.session-focus .work-area,
+.shell.gmux-focus-measure .work-area {
+  margin: 0;
+  border-radius: 0;
+  /* The focused-split box's corner follows the frame off too (work-area.css,
+     the two rules at its end): the surface fills the window here and its
+     corners are square. */
+  --frame-corner: 0;
+}
+
+.shell.session-focus .work-area::after,
+.shell.gmux-focus-measure .work-area::after {
+  display: none;
 }

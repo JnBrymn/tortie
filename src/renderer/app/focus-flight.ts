@@ -34,11 +34,24 @@
  * sends the chord either here or to the editor's own fill. Escape and the
  * native View row still call this module directly, because both of them mean
  * the session and nothing else. Nothing in this file changed for that.
+ *
+ * THE WORK'S FRAME SINCE PHASE 284. The work area wears one rounded outline
+ * (./work-area.css) and the mode turns it off (focus-mode.css section 7), so
+ * one end of every flight is framed and the other is not. The photograph is
+ * above the frame's clip, so it wears the curve itself: `fly` reads the frame
+ * at its framed end, with no toggle and no forced layout of its own, and hands
+ * it to ./focus-copy.ts. Nothing is animated for it. The radius is a static style
+ * on the copy and `transform` is still the only property a keyframe names.
  */
 
 import type { SessionStatus } from '@shared/types';
 import { effectiveStatusOf, useApp } from '../state/store';
-import { buildStillCopy, type FlightRect, type StillCopy } from './focus-copy';
+import {
+  buildStillCopy,
+  type CopyFrame,
+  type FlightRect,
+  type StillCopy
+} from './focus-copy';
 
 export type { FlightRect };
 
@@ -81,6 +94,12 @@ export const ARRIVE_ATTR = 'data-focus-arriving';
 /** The surface, and the gate. Absent means there is nothing to focus. */
 const SURFACE_SELECTOR = '[data-surface-leaves]';
 const SHELL_SELECTOR = '.shell';
+/**
+ * The work's frame (Phase 284): the ancestor of the surface that
+ * ./work-area.css rounds and outlines, and that focus-mode.css section 7
+ * squares off again while the mode is on.
+ */
+const FRAME_SELECTOR = '.work-area';
 
 /** Fallbacks for the two motion tokens, used only when they cannot be read. */
 const FALLBACK_MS = 200;
@@ -200,7 +219,8 @@ function rectOf(el: Element): FlightRect {
 }
 
 /**
- * Where the surface will be once the swap has happened.
+ * Where each of `elements` will be once the swap has happened, in the order
+ * they were given.
  *
  * The class is added and removed inside ONE task, so the browser never paints
  * the intermediate layout and the ResizeObserver in TerminalPane is never
@@ -211,19 +231,38 @@ function rectOf(el: Element): FlightRect {
  * Both directions share these three lines with the add and the remove
  * swapped, which is the reason the mode hides its chrome with a class rather
  * than with a memento.
+ *
+ * SEVERAL ELEMENTS, ONE TOGGLE (Phase 284). A leave needs the surface's
+ * destination AND the work's frame at that destination, because the frame is
+ * only drawn once the mode is off. Asking twice would be two toggles and two
+ * forced layouts inside the gesture. The first read after the class flips
+ * forces the one layout, and every read after it is answered from that same
+ * layout.
  */
+export function measureFocusRects(
+  shell: HTMLElement,
+  elements: readonly Element[],
+  to: FlightDestination
+): FlightRect[] {
+  const wasFocused = shell.classList.contains(FOCUS_CLASS);
+  if (to === 'focused') shell.classList.add(MEASURE_CLASS);
+  else shell.classList.remove(FOCUS_CLASS);
+  const rects = elements.map(rectOf);
+  if (to === 'focused') shell.classList.remove(MEASURE_CLASS);
+  else if (wasFocused) shell.classList.add(FOCUS_CLASS);
+  return rects;
+}
+
+/** Where the surface will be once the swap has happened. One element. */
 export function measureFocusRect(
   shell: HTMLElement,
   surface: Element,
   to: FlightDestination
 ): FlightRect {
-  const wasFocused = shell.classList.contains(FOCUS_CLASS);
-  if (to === 'focused') shell.classList.add(MEASURE_CLASS);
-  else shell.classList.remove(FOCUS_CLASS);
-  const rect = rectOf(surface);
-  if (to === 'focused') shell.classList.remove(MEASURE_CLASS);
-  else if (wasFocused) shell.classList.add(FOCUS_CLASS);
-  return rect;
+  const [rect] = measureFocusRects(shell, [surface], to);
+  // One element in is one rect out, so this is unreachable. It is an honest
+  // answer all the same: a surface with no size does not fly anywhere.
+  return rect ?? { left: 0, top: 0, width: 0, height: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +299,52 @@ export function flightTiming(): { ms: number; easing: string } {
   } catch {
     return { ms: FALLBACK_MS, easing: FALLBACK_EASING };
   }
+}
+
+/**
+ * The INNER radius of the work's frame, in CSS pixels (Phase 284).
+ *
+ * Read from the two tokens ./work-area.css draws the frame with, the outer
+ * radius less the width of the line, so the photograph and the live curve it
+ * covers cannot drift apart and no copy of either number lives in this file.
+ * Read at the moment the chord fires, as the timing above is.
+ *
+ * UNREADABLE MEANS ZERO, AND ZERO MEANS A SQUARE COPY, which is every flight
+ * before Phase 284 and is what a unit test gets, where there is no computed
+ * style to read.
+ */
+export function frameInnerRadius(): number {
+  try {
+    const styles = getComputedStyle(document.documentElement);
+    const outer = Number.parseFloat(styles.getPropertyValue('--r-frame'));
+    const edge = Number.parseFloat(styles.getPropertyValue('--frame-edge'));
+    if (!Number.isFinite(outer) || outer <= 0) return 0;
+    const inner = outer - (Number.isFinite(edge) && edge > 0 ? edge : 0);
+    return inner > 0 ? inner : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The work's frame at the ONE end of this flight that has one, or undefined
+ * when the copy should stay square.
+ *
+ * Session focus turns the frame off, so an enter is framed at `first` and a
+ * leave at `last`. `frameNow` is the frame's rect read before anything
+ * toggled, which is the framed end of an enter. `frameThen` is its rect from
+ * the same unpainted pass that measured the destination, which is the framed
+ * end of a leave.
+ */
+export function framedEnd(
+  to: FlightDestination,
+  frameNow: FlightRect | null,
+  frameThen: FlightRect | null,
+  radius: number
+): CopyFrame | undefined {
+  const frame = to === 'focused' ? frameNow : frameThen;
+  if (frame === null || !(radius > 0)) return undefined;
+  return { frame, end: to === 'focused' ? 'first' : 'last', radius };
 }
 
 /** Drop the arrival attribute now, and cancel any removal already scheduled. */
@@ -366,11 +451,34 @@ async function fly(to: FlightDestination): Promise<void> {
   let node: HTMLElement | null = null;
   try {
     const first = rectOf(surface);
-    const last = measureFocusRect(shell, surface, to);
+    // PHASE 284. The work's frame, so the photograph can wear its curve. The
+    // guard is for the unit tests' surface, which is a plain object with no
+    // `closest`. With no frame found the copy is square, as it always was.
+    const frame =
+      typeof surface.closest === 'function'
+        ? surface.closest(FRAME_SELECTOR)
+        : null;
+    // The framed end of an ENTER is now. Nothing has toggled and `first` above
+    // already forced this layout, so this read costs no second one.
+    const frameNow = frame !== null && to === 'focused' ? rectOf(frame) : null;
+    // The framed end of a LEAVE is the destination, so the frame rides along
+    // in the SAME toggle that measures the surface. One toggle, one layout.
+    const [measured, frameThen] = measureFocusRects(
+      shell,
+      frame !== null && to === 'ordinary' ? [surface, frame] : [surface],
+      to
+    );
+    const last = measured ?? first;
+    const framed = framedEnd(
+      to,
+      frameNow,
+      frameThen ?? null,
+      frame === null ? 0 : frameInnerRadius()
+    );
 
     let copy: StillCopy | null = null;
     try {
-      copy = await buildStillCopy(surface, first, last);
+      copy = await buildStillCopy(surface, first, last, undefined, framed);
     } catch {
       copy = null;
     }

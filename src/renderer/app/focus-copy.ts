@@ -163,6 +163,108 @@ export function backingStore(
   };
 }
 
+/**
+ * The work's frame, as one flight sees it (Phase 284).
+ *
+ * `./work-area.css` clips the work at a rounded inner arc and draws one line
+ * round it. The copy is a `position: fixed` node on `document.body`, above that
+ * line, so no clip of the frame's reaches it, and a square copy laid over a
+ * rounded surface pushes its corners through the curve for the length of the
+ * gesture. Session focus turns the frame OFF (focus-mode.css section 7), so
+ * exactly ONE end of every flight is framed, and this says which.
+ */
+export interface CopyFrame {
+  /** `.work-area`'s rect AT THE FRAMED END, in viewport pixels. */
+  frame: FlightRect;
+  /** `first` on an enter, where the frame is drawn now. `last` on a leave. */
+  end: 'first' | 'last';
+  /**
+   * The frame's INNER radius in CSS pixels, read from the tokens by
+   * ./focus-flight.ts. Zero, or anything that is not a positive number, builds
+   * the square copy every flight had before Phase 284.
+   */
+  radius: number;
+}
+
+/** One corner as the horizontal and the vertical radius, in CSS pixels. */
+export type CornerRadius = readonly [number, number];
+
+/** The four corners, named as the `border-*-radius` longhands name them. */
+export interface CopyCorners {
+  topLeft: CornerRadius;
+  topRight: CornerRadius;
+  bottomRight: CornerRadius;
+  bottomLeft: CornerRadius;
+}
+
+const SQUARE: CornerRadius = [0, 0];
+
+/**
+ * How close two edges must be to count as the same edge. Half a pixel absorbs
+ * a fractional layout at a zoomed window and is far under the 8px gutter, the
+ * 36px band and the 24px split header, which are the smallest real distances
+ * between the surface and the frame.
+ */
+const SAME_EDGE_PX = 0.5;
+
+/**
+ * Which corners of the copy wear the frame's curve, and at what radius.
+ *
+ * A corner is rounded only when the surface's two edges AT THE FRAMED END are
+ * the frame's own two edges there. The surface is the terminal body under the
+ * band, so in practice only its bottom corners can qualify, and neither does
+ * beside a split editor (the right one) or above a banner (both).
+ *
+ * THE RADIUS IS WRITTEN AT `last` AND SEEN AT `first`. The node is laid out at
+ * `last` and starts the flight scaled down to `first` by `scale(sx, sy)`
+ * (focus-flight.ts's `invertTransform`), and a transform scales a CSS radius
+ * with everything else. On a leave the framed end is `last`, the scale there
+ * is 1 and the radius is exact. On an enter the framed end is `first`, so the
+ * pair is divided by the scale, which makes the FIRST PAINTED FRAME show
+ * exactly `radius` on both axes over the live curve it covers. The pair is
+ * elliptical because the two axes scale differently.
+ */
+export function copyCornerRadii(
+  first: FlightRect,
+  last: FlightRect,
+  framed: Pick<CopyFrame, 'frame' | 'end'>,
+  radius: number
+): CopyCorners {
+  const none: CopyCorners = {
+    topLeft: SQUARE,
+    topRight: SQUARE,
+    bottomRight: SQUARE,
+    bottomLeft: SQUARE
+  };
+  if (!(radius > 0) || !(last.width > 0) || !(last.height > 0)) return none;
+  const sx = framed.end === 'first' ? first.width / last.width : 1;
+  const sy = framed.end === 'first' ? first.height / last.height : 1;
+  // A surface with no size at the framed end has no corner to round, and a
+  // scale of zero cannot be divided by.
+  if (!(sx > 0) || !(sy > 0)) return none;
+  const round: CornerRadius = [radius / sx, radius / sy];
+
+  const at = framed.end === 'first' ? first : last;
+  const same = (a: number, b: number): boolean =>
+    Math.abs(a - b) <= SAME_EDGE_PX;
+  const left = same(at.left, framed.frame.left);
+  const top = same(at.top, framed.frame.top);
+  const right = same(
+    at.left + at.width,
+    framed.frame.left + framed.frame.width
+  );
+  const bottom = same(
+    at.top + at.height,
+    framed.frame.top + framed.frame.height
+  );
+  return {
+    topLeft: top && left ? round : SQUARE,
+    topRight: top && right ? round : SQUARE,
+    bottomRight: bottom && right ? round : SQUARE,
+    bottomLeft: bottom && left ? round : SQUARE
+  };
+}
+
 /** A CSS colour as three channels. Anything unparseable reads as black. */
 export function parseColor(value: string): Rgb {
   const text = value.trim();
@@ -260,6 +362,21 @@ function place(el: HTMLElement, box: FlightRect): void {
   el.style.top = `${String(box.top)}px`;
   el.style.width = `${String(box.width)}px`;
   el.style.height = `${String(box.height)}px`;
+}
+
+/**
+ * One corner as the value of a `border-*-radius` longhand, or null when the
+ * corner is square. A circular corner is written as ONE length, which is how
+ * the browser serialises it back, so what a probe reads off the node is what
+ * was written. Four decimal places, as ./focus-flight.ts rounds its transform.
+ */
+function cornerCss(corner: CornerRadius): string | null {
+  const [rx, ry] = corner;
+  if (!(rx > 0) || !(ry > 0)) return null;
+  const px = (v: number): string => `${String(Number(v.toFixed(4)))}px`;
+  const horizontal = px(rx);
+  const vertical = px(ry);
+  return horizontal === vertical ? horizontal : `${horizontal} ${vertical}`;
 }
 
 /**
@@ -374,12 +491,21 @@ function describeScreenCanvases(term: Terminal): string[] {
  * Returns null only when nothing was photographed AND `FLY_WITHOUT_PIXELS`
  * is false. It throws nothing of its own, but a caller must still guard,
  * because a canvas with no 2d context is a DOM failure this cannot repair.
+ *
+ * `framed` (Phase 284) is the work's frame at the one end of the flight that
+ * has one. Absent, the copy is square, exactly as it was. Present, the node
+ * wears the frame's curve on the corners `copyCornerRadii` names. The radius
+ * is four inline styles on the node and NOTHING ELSE: `.gmux-focus-copy`
+ * already declares `overflow: hidden` (focus-mode.css section 5), which is the
+ * clip, and no child is added, so the document order the header test pins
+ * (canvas, header, canvas, header) is untouched.
  */
 export async function buildStillCopy(
   surface: Element,
   first: FlightRect,
   last: FlightRect,
-  background: Rgb = terminalBackground()
+  background: Rgb = terminalBackground(),
+  framed?: CopyFrame
 ): Promise<StillCopy | null> {
   const node = document.createElement('div');
   node.className = 'gmux-focus-copy';
@@ -391,6 +517,19 @@ export async function buildStillCopy(
   node.style.height = `${String(last.height)}px`;
   node.style.transformOrigin = '0 0';
   node.style.pointerEvents = 'none';
+  if (framed !== undefined) {
+    const corners = copyCornerRadii(first, last, framed, framed.radius);
+    // A square corner writes nothing, so a copy with no corner on the frame
+    // is byte for byte the node every flight built before Phase 284.
+    const topLeft = cornerCss(corners.topLeft);
+    const topRight = cornerCss(corners.topRight);
+    const bottomRight = cornerCss(corners.bottomRight);
+    const bottomLeft = cornerCss(corners.bottomLeft);
+    if (topLeft !== null) node.style.borderTopLeftRadius = topLeft;
+    if (topRight !== null) node.style.borderTopRightRadius = topRight;
+    if (bottomRight !== null) node.style.borderBottomRightRadius = bottomRight;
+    if (bottomLeft !== null) node.style.borderBottomLeftRadius = bottomLeft;
+  }
 
   const dpr = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
   const fill = rgbCss(background);

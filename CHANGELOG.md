@@ -9,6 +9,7 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 ### Changed
 
 - In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last.
+- The terminal and editor now sit inside one rounded outline with a little room around it, and the title bar, the sidebar and the session list lose the lines that divided them from it; the selected session and the active view are marked by a soft fill instead of a bar down the edge. Nothing works differently, and each open session is a few columns narrower.
 
 ### Fixed
 

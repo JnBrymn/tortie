@@ -11,7 +11,23 @@
   position: absolute;
   top: 0;
   right: 0;
-  bottom: 0;
+  /* THE LANE'S FOOT IS LIFTED (Phase 284). The work is clipped at a 13px inner
+     arc (app/work-area.css), and at live output the thumb rests at the lane's
+     foot, in the frame's bottom-right corner. Measured against that arc: the
+     thumb's right edge sits --scroll-thumb-inset (3px) in, where the arc is
+     4.69px deep (13 - sqrt(13² - 10²)), so up to 4.69px of it was under the
+     curve; at the hover width its left edge is 9px in, where the arc is 0.63px
+     deep. A clip that cuts the thumb is still a clipped scrollbar. --space-4
+     is 8px, which clears it, and it is the bottom padding `.xterm` already has
+     (styles/app.css), so the thumb's foot lines up with the last row's.
+     UNIFORM for every pane and not only the one in the frame's corner: CSS
+     cannot know which pane that is, and a lane that changes height when a
+     split is rearranged is worse than one that is 8px short.
+     TerminalScrollbar.tsx reads this track's `clientHeight`, so the thumb's
+     travel follows with no TypeScript change. The top needs nothing: a lane
+     always has a 36px band or a 24px split header above it, and the arc is
+     13px tall. */
+  bottom: var(--space-4);
   width: var(--scroll-lane);
   z-index: 1;
   /* No track fill: over a live terminal a track reads as a seam. The thumb

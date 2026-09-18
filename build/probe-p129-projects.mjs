@@ -31,10 +31,12 @@
  *    cannot be opened from the renderer, so that half is proven cheaply and
  *    exactly in src/main/__tests__/projects-position-menu.test.ts, which runs
  *    the real menu.ts against a template capturing Menu mock.
- *  - The narrow window branch (a window under 1028px draws the rail
- *    collapsed) is not driven here, because the app's own minimum window is
- *    960px and the harness does not resize the window. It is driven over the
- *    whole grid in src/renderer/state/__tests__/chrome-geometry.test.ts.
+ *  - The narrow window branch (a window under 1044px draws the rail
+ *    collapsed; it was 1028 until Phase 284 added the work's two 8px gutters
+ *    to PROJECT_RAIL_MIN_WINDOW_W) is not driven here, because the app's own
+ *    minimum window is 960px and the harness does not resize the window. It is
+ *    driven over the whole grid in
+ *    src/renderer/state/__tests__/chrome-geometry.test.ts.
  *  - No session is created, so no agent runs and no pane is attached. The
  *    terminal region is measured as a laid out box, which is the number the
  *    budget is about.

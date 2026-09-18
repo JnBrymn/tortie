@@ -50,8 +50,13 @@
   position: absolute;
   inset: 0;
   z-index: 1;
-  /* The activity bar already draws this hairline (border-right); a second one
-     here would double it, since nothing sits between them while filling. */
+  /* No seam while filling (rewritten in Phase 284). The panel's left edge IS
+     the work row's left edge, so there is no terminal beside it to be divided
+     from, and the work's one outline (app/work-area.css) already closes that
+     side. This note used to credit the activity bar's `border-right` with the
+     hairline; Phase 284 took that line's colour away, and the ruling stands
+     without it: `--border` directly inside `--border-strong` is a double
+     rule. */
   border-left: none;
 }
 
@@ -162,6 +167,17 @@
   user-select: none;
 }
 
+/* PHASE 284. In the "right" orientation no session strip is rendered, so
+   `.work-row` is the frame's FIRST child and this row sits at the very top of
+   the work, directly under the frame's own line (app/work-area.css). The top
+   hairline above exists to close the editor's box under the strip; with no
+   strip the frame's line closes it, and `--border` directly under
+   `--border-strong` is a 2px double rule. The colour goes and the pixel
+   stays, so the row is still exactly 36px and no tab moves. */
+.work-area > .work-row:first-child .ed-tabs {
+  border-top-color: transparent;
+}
+
 /* Mode control + minimap toggle. Never shrinks: with ten tabs open the strip
    scrolls, the controls stay put. */
 .ed-tabs-actions {
@@ -236,6 +252,21 @@
   background: var(--bg-canvas);
   color: var(--text-primary);
   box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* PHASE 284. The ONE state in which an editor tab sits in the frame's
+   top-left corner: fill mode in the "right" orientation, where no strip is
+   above the row and the panel starts at the work's left edge. The frame clips
+   its children at a 13px inner arc, so a square first tab would have its 2px
+   accent inset stop dead at about x=6, where the arc is 2px deep, and its
+   inset focus ring would lose a corner. An inset `box-shadow` follows its own
+   box's radius, so the tab takes the inner radius itself and both FOLLOW the
+   curve instead of being cut by it. Its content starts 10px in, where the arc
+   is 0.35px deep. A tab scrolled under the corner is cut by it, which is what
+   scrolling content under a rounded edge does. The session strip's first tab
+   has the same rule in styles/app.css. */
+.work-area > .work-row:first-child > .ed-panel.ed-fill .ed-tab:first-child {
+  border-top-left-radius: calc(var(--r-frame) - var(--frame-edge));
 }
 
 .ed-tab-icon {
@@ -416,10 +447,51 @@
    Body + editor surfaces (Monaco mount for File mode, Pierre for Diff mode)
 --------------------------------------------------------------------------- */
 
+/* THE FOOT (Phase 284 fix round, corrected in Phase 284.1). The panel's
+   bottom-right corner is the work's bottom-right corner in every mode that
+   seats it there, and every root the body draws carries a scrollbar flush
+   with the panel's right edge: Monaco, the Pierre diff, the markdown preview,
+   the report, the map, an image. With a long file scrolled to its end,
+   Monaco's slider reached that corner and the frame's 13px arc cut it, the
+   same defect the terminal's scroll lane was lifted for
+   (terminal/scroll/scrollbar.css). The body ends 8px above the panel's
+   bottom, so the lane, the last terminal row and the editor's surfaces end
+   level, 8px above the work's bottom.
+
+   ONE declaration, a margin, and no rule on the roots. The body's box is the
+   roots' box in every kind they come in: an absolute root at `inset: 0` is
+   placed against it, and an in-flow root at `height: 100%` resolves against
+   it. The first form of this lift was a `padding-bottom` here plus
+   `.ed-panel .ed-body > * { bottom: var(--space-4) }` for the absolute
+   roots, on the premise that an in-flow root ignores `bottom`. A STATIC root
+   does. The map (arch/arch.css, `.arch-map-tab`) is `position: relative` for
+   its drill overlay, and a relative box with `bottom: 8px` and `top: auto`
+   moves UP 8px: measured in the running app, the map painted from y=66 under
+   a tab strip ending at 74 and stopped at 876, 16px above the frame at 892.
+   The margin was measured beside the `top: 0` repair and chosen over it:
+   both put every root at 884, and this one has no per-root rule to get a
+   third kind of root wrong (build/p284/SPEC.md S14.4). A nested surface
+   inside a root (the Monaco mount inside its host, a host inside a split
+   pane) keeps `inset: 0` and is lifted once, by its root. A BANNER drawn
+   under the body (a commit's file, a deleted or truncated file, a remote
+   read-only file, a compare) is the panel's last child and not the body's,
+   so the 8px foot sits between the body and the banner and the banner keeps
+   the panel's foot under the arc; accepted, see build/p284/SPEC.md S14.4.
+
+   The 8px under the body is the panel's own `--bg-canvas`. Under a root that
+   paints `--bg-surface` (the map, the report) it reads as a step; that is
+   the work's ground showing, the same ground the terminal's foot shows, and
+   it is accepted rather than painted per root (S14.4).
+
+   Monaco's slider is flush with the right edge, so at the foot the arc still
+   reaches 1px into its outermost column; that pixel is stated rather than
+   chased, because lifting by the arc's full depth would put the editor's
+   last line 13px above the terminal's. */
 .ed-body {
   position: relative;
   flex: 1;
   min-height: 0;
+  margin-bottom: var(--space-4);
   background: var(--bg-canvas);
 }
 

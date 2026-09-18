@@ -15,6 +15,13 @@
  *    without those attributes silently kills tab reorder and drag-to-split;
  *  - a width TRANSITION anywhere in the work row is a stream of
  *    ResizeObserver fits and therefore a stream of tmux resizes of live work.
+ *
+ * PHASE 284 made `.work-area` the FRAME, the one region that wears a complete
+ * outline, and the second describe block below holds the four things about it
+ * that are cheap to break and invisible until a terminal is on screen: the
+ * outline is an overlay that takes no pointer and no pixel from the work, the
+ * frame itself never clips (it would clip its own line), its children clip
+ * with `clip` and never `hidden`, and every number it uses is a token.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -97,5 +104,117 @@ describe('work area structure', () => {
 
   it('gives the work row a containing block for the fill and overlay editors', () => {
     expect(css).toMatch(/\.work-row\s*\{[^}]*position:\s*relative/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The frame (Phase 284)
+// ---------------------------------------------------------------------------
+
+/** The stylesheet with every comment removed. */
+const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/** The body of the ONE rule whose whole selector is `selector`. */
+function bodyOf(selector: string): string {
+  const bodies: string[] = [];
+  for (const m of bare.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const sel = (m[1] ?? '')
+      .replace(/@import[^;]*;/g, '')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (sel === selector) bodies.push(m[2] ?? '');
+  }
+  expect(bodies, `exactly one rule for "${selector}"`).toHaveLength(1);
+  return bodies[0] ?? '';
+}
+
+/** Declarations as `property` to `value`, both trimmed. */
+function decls(body: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const decl of body.split(';')) {
+    const at = decl.indexOf(':');
+    if (at === -1) continue;
+    out.set(decl.slice(0, at).trim(), decl.slice(at + 1).trim());
+  }
+  return out;
+}
+
+describe('the work’s frame (Phase 284)', () => {
+  it('pulls the frame’s three numbers in as its FIRST statement', () => {
+    // An @import that follows any rule is dropped by the CSS parser, silently,
+    // and every var() below it would then be invalid at computed-value time:
+    // no radius, no gutter and no line, with nothing red to say so.
+    expect(bare.trimStart().startsWith("@import './frame-geometry.css';")).toBe(
+      true
+    );
+    expect(bare.match(/@import/g)).toHaveLength(1);
+  });
+
+  it('draws the outline as an overlay that takes no pointer and sits OUTSIDE the box', () => {
+    const line = decls(bodyOf('.work-area::after'));
+    expect(line.get('content')).toBe("''");
+    expect(line.get('position')).toBe('absolute');
+    expect(line.get('pointer-events')).toBe('none');
+    // A NEGATIVE inset: the line is in the first pixel of the gutter, so the
+    // active tab's 2px accent and Phase 40's focused-split box, both on the
+    // work's outermost pixel ring, are never under it.
+    expect(line.get('inset')).toBe('calc(-1 * var(--frame-edge))');
+    expect(line.get('border')).toBe(
+      'var(--frame-edge) solid var(--border-strong)'
+    );
+    expect(line.get('border-radius')).toBe('var(--r-frame)');
+    // One above the editor overlay, in the root stacking context.
+    expect(line.get('z-index')).toBe('calc(var(--z-editor-overlay) + 1)');
+  });
+
+  it('never clips on the frame itself, which would clip the frame’s own line', () => {
+    const frame = decls(bodyOf('.work-area'));
+    expect([...frame.keys()].filter((p) => p.startsWith('overflow'))).toEqual(
+      []
+    );
+    // The containing block for the line, and NOT a stacking context: a
+    // z-index here would pull the editor overlay out of the root context.
+    expect(frame.get('position')).toBe('relative');
+    expect(frame.has('z-index')).toBe(false);
+    // The inner radius and the canvas under the seam between the two arcs.
+    expect(frame.get('border-radius')).toBe(
+      'calc(var(--r-frame) - var(--frame-edge))'
+    );
+    expect(frame.get('background')).toBe('var(--bg-canvas)');
+  });
+
+  it('clips on the CHILDREN, with clip and never hidden', () => {
+    // `hidden` makes a scroll container, and a browser scrolls one to reveal a
+    // focused element. xterm's helper textarea follows the cursor.
+    expect(decls(bodyOf('.work-area > *')).get('overflow')).toBe('clip');
+    expect(bare).not.toMatch(/overflow(-[xy])?\s*:\s*hidden/);
+    const first = decls(bodyOf('.work-area > :first-child'));
+    expect(first.get('border-top-left-radius')).toBe('inherit');
+    expect(first.get('border-top-right-radius')).toBe('inherit');
+    const last = decls(bodyOf('.work-area > :last-child'));
+    expect(last.get('border-bottom-left-radius')).toBe('inherit');
+    expect(last.get('border-bottom-right-radius')).toBe('inherit');
+  });
+
+  it('opens the gutters as margins: right and bottom always, left beside a sidebar, top never', () => {
+    expect(decls(bodyOf('.work-area')).get('margin')).toBe(
+      '0 var(--frame-gap) var(--frame-gap) 0'
+    );
+    expect(
+      decls(bodyOf("[data-slot='sidebar'] + .work-area")).get('margin-left')
+    ).toBe('var(--frame-gap)');
+    // No padding and no border on the frame: either one changes the box xterm
+    // is laid out in, in both axes, and the line is an overlay so that it
+    // costs the terminal nothing beyond the gap it sits in.
+    const frame = decls(bodyOf('.work-area'));
+    for (const prop of frame.keys()) {
+      expect(prop, `.work-area declares ${prop}`).not.toMatch(
+        /^(padding|border(?!-radius)|outline|box-shadow)/
+      );
+    }
+  });
+
+  it('writes no pixel length outside a comment, so the three tokens are the only numbers', () => {
+    expect(bare).not.toMatch(/\d(px|rem|em)\b/);
   });
 });

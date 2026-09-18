@@ -1,5 +1,27 @@
 # Research 75: the chrome's visual language, and what premium would actually mean here
 
+> **Addendum, 2026-09-17 (Phase 284, the quiet surround). The kept edges were reversed by the
+> operator, and this document is left as it was written.** The ask recorded below says the edges
+> are liked and kept and that nothing moves. On 2026-09-17 he ran a design study of his own with
+> Codex (`design/`, four variants of one fixture), chose option B from it in his own words, "i love
+> the queit surround", and confirmed that Phase 284 may override this earlier rule. That is the
+> opposite of the kept edges, and the phase follows the newer ask: the work alone takes one complete
+> 1px `--border-strong` outline on a 14px radius with 8px gutters, the titlebar, the activity bar,
+> the sidebar and the session list keep their 1px border on the side facing the work and draw it
+> `transparent`, and the selected session row and the active activity item trade their 2px `--accent`
+> bar for a `--bg-active` fill, the row with a 1px `--border-active` outline. `DESIGN.md` §0, §1.9,
+> §2.2 and §3 and `docs/DESIGN-SPEC.md` S1, S3, S4 and S12.9 were rewritten in the same commit to
+> describe what ships, and `build/p284/SPEC.md` holds the token arithmetic.
+>
+> What this document still is: every measurement below remains true OF THE TREE IT MEASURED,
+> `bd68cf4`. Two of its findings carried straight into Phase 284. C4, the hairline that does not
+> exist on a selected row, is what Phase 197 made `--border-active` for (1.105:1 on `--bg-active`),
+> and that token is now the selected row's outline, the exact use it was made for. And the 1.297:1
+> that option A's plan preserves for `--border` on the sidebar is the floor the new outline is held
+> to on both grounds and both bases (it reads 1.658 and 1.594 on dark, 1.866 and 2.002 on light).
+> What no longer describes the app is the premise that every region keeps its edge, and the mocks
+> under `docs/research/assets/75-chrome/`, which draw them.
+
 Written 2026-09-01 against the tree at `bd68cf4`. The ask, in the operator's words, is to make the
 full app chrome more premium, being the lines, the typography, the weights of the icons, slight
 fades and colouring, and the edges, which he likes and wants kept. He said plainly that nothing

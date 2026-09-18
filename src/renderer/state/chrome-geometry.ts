@@ -28,6 +28,10 @@
  *    floor; the editor refuses to SPLIT a row that cannot seat both its own
  *    minimum and the floor, and falls back to the overlay it already uses on
  *    narrow windows (where it covers the terminal instead of shrinking it).
+ *    Phase 284 added a fourth thing that takes width and is not a region at
+ *    all: the 8px gutter on each side of the work's frame. `workAreaWidth`
+ *    subtracts it, `sidebarMaxWidth` reserves it and
+ *    `PROJECT_RAIL_MIN_WINDOW_W` seats it, see `FRAME_GAP` below.
  *    Miss one of those and the arithmetic bottoms out at a 12px terminal —
  *    measured, at a 1400px window with the sidebar at 50% and the dock at 320.
  *    `terminalLayoutWidth()` below is that budget as one function, and
@@ -56,6 +60,61 @@ import { useSyncExternalStore } from 'react';
 
 /** The activity bar is a fixed rail; it is never resized. */
 export const ACTIVITY_BAR_W = 48;
+
+/**
+ * PHASE 284. The work's frame, the one outline in the window.
+ *
+ * The work area (session strip, terminal, editor) sits inside one 1px outline
+ * with a 14px radius, and an 8px gutter of the surround's ground separates it
+ * from whatever is beside it. The gutter is a MARGIN on `.work-area`
+ * (src/renderer/app/work-area.css), and a margin comes out of the box xterm is
+ * laid out in exactly as a region would, so it is a term of the row's budget
+ * and has to be written here. Leave it out and the model says 912px where the
+ * window draws 896, and the sidebar can be dragged 16px into the terminal's
+ * floor: the Phase 18 fix round's defect with a new term.
+ *
+ * Where the gutter is, because it is not the same on every side:
+ *   right   8, ALWAYS. With the dock on the right it is the gap to the dock,
+ *           and without one it is the inset from the window's edge;
+ *   left    8 only while the sidebar is drawn, 0 against the activity column;
+ *   bottom  8 always, and no arithmetic in this file reads a height;
+ *   top     0. The line lands on the titlebar's last pixel row.
+ *
+ * `FRAME_EDGE` IS NOT A WIDTH TERM, and that is the design rather than an
+ * omission. The outline is `.work-area::after` at `inset: -1px`, so it is
+ * drawn in the first pixel of the gutter and never over or inside the work. A
+ * real border or 1px of padding would keep the content clear of the line too,
+ * and either one would change the box xterm measures by 2px in both axes. It
+ * is exported for the radius arithmetic the stylesheets do
+ * (`--r-frame - --frame-edge` is the 13px inner arc the children clip to) and
+ * for the by-value test below. No function here reads it, or `FRAME_RADIUS`.
+ *
+ * THE ONE SANCTIONED SECOND COPY. The top of this file says no other module
+ * may define a layout constant. CSS cannot import a TypeScript constant, so
+ * src/renderer/app/frame-geometry.css declares `--frame-gap`, `--frame-edge`
+ * and `--r-frame` BY VALUE, and chrome-geometry.test.ts reads that file and
+ * holds the two to one number, the way it already holds `APP_MIN_WINDOW_W` to
+ * `minWidth: 960` in src/main/index.ts. Change one side alone and that test
+ * is red.
+ *
+ * Session focus turns the frame OFF (no margin, no radius, no line), and
+ * nothing here knows that, for the reason `chromeGeometryOf` gives in its
+ * Phase 80.1 note: these functions keep describing the ordinary layout while
+ * focus is on, their one consumer is a sidebar that is not drawn there, and a
+ * focus term would give the mode a way to move a width the person chose.
+ */
+export const FRAME_GAP = 8;
+export const FRAME_EDGE = 1;
+export const FRAME_RADIUS = 14;
+
+/**
+ * PHASE 284. Both gutters at once, 16px: the most the frame can ever take out
+ * of the row. It is for the two places whose answer must NOT move on ⌘B, which
+ * are the sidebar's ceiling (the sidebar is by definition drawn whenever its
+ * ceiling is asked for, so both gutters are) and the project rail's minimum
+ * window. Everything else reads `frameReservedWidth()`.
+ */
+export const FRAME_RESERVED_MAX = 2 * FRAME_GAP;
 
 /** DESIGN §2.2 floor for any first-class left view. Unchanged by Phase 18. */
 export const SIDEBAR_MIN = 220;
@@ -134,9 +193,10 @@ export const APP_MIN_WINDOW_W = 960;
  * this file applied to a third region: persist intent, clamp presentation.
  *
  * DERIVED, never typed. The row has to seat, at once: the activity bar, the
- * rail, the sidebar at its own floor, the session dock at ITS ceiling, and the
- * terminal's floor. Work it out with the numbers as they stand and it is
- * 48 + 200 + 220 + 320 + 240 = 1028.
+ * rail, the sidebar at its own floor, the session dock at ITS ceiling, the
+ * terminal's floor, and since Phase 284 both gutters of the work's frame. Work
+ * it out with the numbers as they stand and it is
+ * 48 + 200 + 220 + 320 + 240 + 16 = 1044. It was 1028 until Phase 284.
  *
  * Why the dock's CEILING rather than its live width, and why the sidebar's
  * floor rather than whether it is visible. Both answers are the same: the
@@ -149,23 +209,40 @@ export const APP_MIN_WINDOW_W = 960;
  *
  * The arithmetic this protects, written out because it is what breaks. With
  * the sidebar visible the work row is
- * `w - 48 - rail - dock - min(stored, sidebarMax)`, and `sidebarMax` bottoms
- * out at SIDEBAR_MIN. So the terminal falls under its floor exactly when
- * `w < 508 + dock + rail`. With no rail that is at worst 828px, under the
- * app's own 960px minimum window, which is why the budget held before this
- * phase. With a 200px rail it is 1028px, which is above it.
+ * `w - 48 - rail - dock - min(stored, sidebarMax) - 16`, and `sidebarMax`
+ * bottoms out at SIDEBAR_MIN. So the terminal falls under its floor exactly
+ * when `w < 524 + dock + rail`. With no rail that is at worst 844px, under the
+ * app's own 960px minimum window, which is why the budget holds without a
+ * rail. With a 200px rail it is 1044px, which is above it. (Before Phase 284
+ * those three numbers were 508, 828 and 1028.)
  *
  * PHASE 135 DOES NOT SUBTRACT ITS 48px FROM THIS NUMBER, and that is
  * deliberate. While the projects are on the left and the sidebar is showing,
  * the activity bar is a row and takes no width, so the row above could seat
- * the expanded rail at 980px rather than 1028px. Using that would make the
+ * the expanded rail at 996px rather than 1044px. Using that would make the
  * rail's rendered width depend on whether the sidebar is showing, so ⌘B would
  * change the rail's width, which would resize the work area and therefore
  * resize live sessions. The rule above is that the rail moves only when the
  * window does, and it still holds. The term stays `ACTIVITY_BAR_W`.
+ *
+ * PHASE 284 ADDS `FRAME_RESERVED_MAX` AND NOT `frameReservedWidth(...)`, for
+ * that same reason. The left gutter is drawn only while the sidebar is, so
+ * the live term is 8 or 16, and a threshold built on it would seat the rail
+ * 8px sooner with the sidebar hidden: ⌘B in a window between 1036 and 1043px
+ * would expand and collapse the rail, 152px of work area each time. The
+ * worst case is the one that has to fit, so the worst case is what is summed.
+ *
+ * What a person meets: a window 1028 to 1043px wide that drew the rail
+ * expanded before Phase 284 now draws it collapsed. The choice is kept and
+ * comes back with the window.
  */
 export const PROJECT_RAIL_MIN_WINDOW_W =
-  ACTIVITY_BAR_W + PROJECT_RAIL_W + SIDEBAR_MIN + DOCK_MAX + TERMINAL_FLOOR;
+  ACTIVITY_BAR_W +
+  PROJECT_RAIL_W +
+  SIDEBAR_MIN +
+  DOCK_MAX +
+  TERMINAL_FLOOR +
+  FRAME_RESERVED_MAX;
 
 /** Guard for hand-edited / corrupt persisted widths. */
 const MAX_SANE_WIDTH = 4096;
@@ -265,6 +342,17 @@ function clampPx(px: number, min: number, max: number): number {
  * you reserve a 200px dock; the prose was right and the code had dropped it.
  *
  * Use `dockRenderedWidth()` to compute the argument — never a raw stored width.
+ *
+ * PHASE 284. The room term also gives up `FRAME_RESERVED_MAX`, both 8px
+ * gutters of the work's frame. It is the MAX and takes no argument because
+ * the sidebar is by definition drawn whenever its ceiling is asked for, so
+ * the left gutter is drawn too, and the right one always is. Without it the
+ * ceiling is 16px too generous exactly where it binds: at the 960px minimum
+ * window with the dock at 320 the sidebar would reach 352 and leave the
+ * terminal `960 - 48 - 352 - 320 - 16 = 224`, inside the reflow band. With it
+ * the ceiling is 336 and the terminal is 240, the floor. Where half the window
+ * is the smaller term, which is every ordinary window, the ceiling does not
+ * move at all.
  */
 export function sidebarMaxWidth(
   windowWidth = currentWindowWidth(),
@@ -294,7 +382,12 @@ export function sidebarMaxWidth(
 ): number {
   const half = Math.round(windowWidth * SIDEBAR_MAX_FRACTION);
   const roomLeft =
-    windowWidth - activityBar - reservedLeft - reservedRight - TERMINAL_FLOOR;
+    windowWidth -
+    activityBar -
+    reservedLeft -
+    reservedRight -
+    FRAME_RESERVED_MAX -
+    TERMINAL_FLOOR;
   return clampPx(half, SIDEBAR_MIN, roomLeft);
 }
 
@@ -417,6 +510,32 @@ export function activityBarRenderedWidth(p: {
 }
 
 /**
+ * PHASE 284. How much WIDTH the gutters of the work's frame are taking out of
+ * the row right now, in the same shape as the three functions above.
+ *
+ * Two answers, and only two:
+ *   8   the sidebar is hidden, so the work sits against the activity column
+ *       with no gutter between them and only the right one is drawn. Editor
+ *       fill is this case too, because fill puts the sidebar away in the store;
+ *   16  the sidebar is drawn, so there is a gutter on each side of the work.
+ *
+ * The right gutter does not read the dock, and that is the point of it: it is
+ * 8px to the expanded dock, 8px to the 48px rail, and 8px to the window's edge
+ * when the sessions are across the top, so a dock drag, a dock collapse and
+ * an orientation change each move the work by the dock's own width and by
+ * nothing else. Hiding or showing the sidebar is the only thing that moves
+ * this term (⌘B, the sidebar's drag snap, editor fill), and each of those
+ * already resizes every visible session once.
+ *
+ * It takes `sidebarVisible` and nothing else, which `workAreaWidth` already
+ * receives, so no signature in this file changed for Phase 284 and no caller
+ * was edited.
+ */
+export function frameReservedWidth(p: { sidebarVisible: boolean }): number {
+  return FRAME_GAP + (p.sidebarVisible ? FRAME_GAP : 0);
+}
+
+/**
  * Item 2: the editor may take the whole work area except the terminal's floor.
  * This REPLACES `MAX_FRACTION = 0.65` outright — there is no fractional cap on
  * the editor any more, only the floor the terminal cannot go below.
@@ -448,7 +567,9 @@ export function editorIsOverlay(windowWidth: number, workArea: number): boolean 
 
 /**
  * Width available to the work area (session strip + terminal + editor) — i.e.
- * the window minus every fixed or resizable region beside it.
+ * the window minus every fixed or resizable region beside it and, since Phase
+ * 284, minus the gutters of the work's own frame. It is the width of the box
+ * INSIDE the outline, which is the box `.work-row` and xterm are laid out in.
  *
  * Takes STORED widths and clamps them the same way the regions render them, so
  * a caller can hand it raw store values and still get the on-screen answer.
@@ -492,9 +613,18 @@ export function workAreaWidth(w: {
         activityBar
       )
     : 0;
+  // PHASE 284 adds the frame's gutters as the LAST term, measured after the
+  // sidebar, and the order is the model here too. The three terms above go
+  // first because the sidebar's ceiling depends on them. This one depends on
+  // nothing but whether the sidebar is drawn, and the only thing that depends
+  // on it is that same ceiling, which reserves `FRAME_RESERVED_MAX` on its own
+  // rather than being handed this value: a sidebar that is being clamped is a
+  // sidebar that is drawn, and then the live term IS the maximum. So the two
+  // agree wherever both are asked, and the row is charged what is drawn.
+  const frame = frameReservedWidth({ sidebarVisible: w.sidebarVisible });
   return Math.max(
     0,
-    Math.round(w.windowWidth - activityBar - projects - sidebar - dock)
+    Math.round(w.windowWidth - activityBar - projects - sidebar - dock - frame)
   );
 }
 
@@ -508,6 +638,14 @@ export function workAreaWidth(w: {
  * call the same helpers, so this cannot quietly drift into being a model of a
  * different app: `workAreaWidth` here / in EditorPanel, `editorIsOverlay`
  * here / in EditorPanel, `clampEditorWidth` here / in panel-width.ts.
+ *
+ * PHASE 284 edits nothing in this body, and that is worth a line so nobody
+ * adds the frame a second time. The gutters arrive through `workAreaWidth`,
+ * and every clamp below reasons about the row that seats the editor and the
+ * terminal, which is exactly the row that function now returns. One thing
+ * moves as a result and is stated rather than discovered: with the dock on
+ * the right the row falls under `SPLIT_MIN_WORK_AREA` 16px sooner, so a few
+ * window and sidebar combinations that split the editor now overlay it.
  */
 export function terminalLayoutWidth(w: {
   windowWidth: number;

@@ -14,16 +14,40 @@
   background: var(--bg-canvas);
 }
 
+/* PHASE 284. THE GROUND BEHIND THE GUTTERS IS THE SURROUND'S.
+   The work is framed (app/work-area.css): an 8px gutter on its right and its
+   foot, another on its left while the sidebar is drawn, and four corner wedges
+   outside a 14px curve. Every one of those pixels belongs to this box and to
+   no child of it, so with no ground of its own it showed `.shell`'s canvas,
+   and the frame read as the work leaking past its own outline. --bg-sidebar is
+   the rung tokens.css already describes as the frame stepping under the work:
+   luminance 0.00482 under the canvas's 0.00701 on dark and 0.86209 under
+   0.92836 on light, so the surround is the DARKER ground on both bases and
+   DESIGN.md's refusal of a light frame around a dark terminal still holds.
+
+   `.shell` above stays canvas on purpose. It is the pre-paint agreement with
+   the window's own fill, and focus mode and the Catch Me Up layer, which draw
+   no surround, both rest on it. */
 .shell-body {
   display: flex;
   flex: 1;
   min-height: 0;
+  background: var(--bg-sidebar);
 }
 
 /* ---------------------------------------------------------------------------
-   S2 — Titlebar & project tabs (38px, bg-sidebar, hairline bottom)
+   S2 — Titlebar & project tabs (38px, bg-sidebar, no rule under it: the work's
+   own outline starts on the row a hairline used to take, Phase 284)
 --------------------------------------------------------------------------- */
 
+/* PHASE 284. THE COLOUR GOES AND THE PIXEL STAYS, here and on every other
+   hairline this phase quiets (the activity bar, the sidebar, the view header,
+   the session dock, its toolbar, the project rail's band and the activity
+   row). The band is `box-sizing: border-box`, so DELETING the border would
+   grow its content box from 37px to 38px and move every centred child half a
+   pixel; `transparent` moves nothing, which is what lets a rectangle read at
+   the parent commit be compared with one read here. app/focus-mode.css
+   already fades this same property to transparent and stays meaningful. */
 .titlebar {
   display: flex;
   align-items: center;
@@ -32,7 +56,7 @@
   padding-left: 76px; /* traffic-light inset */
   padding-right: var(--space-5);
   background: var(--bg-sidebar);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
   -webkit-app-region: drag;
   user-select: none;
   z-index: var(--z-titlebar);
@@ -357,10 +381,32 @@
   width: 48px;
   flex: 0 0 48px;
   background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
+  /* Phase 284: transparent, never removed. The column stays 48px with a 47px
+     content box, so no icon moves; see the titlebar's note in S2. With the
+     sidebar away the work's outline lands on this same pixel column, which
+     holds nothing: the chip below is inset 6px and `.ab-badge` sits 4px in. */
+  border-right: 1px solid transparent;
   user-select: none;
 }
 
+/* PHASE 284. THE ITEM IS A CHIP, AND THE CHIP IS THE BUTTON'S OWN BACKGROUND.
+   The fill used to be the whole 48px cell with a 2px accent bar down its left
+   edge. The operator chose the quiet surround on 2026-09-17, where the active
+   view is a soft filled chip and carries no bar. The chip is drawn by CLIPPING
+   this element's own background to its content box rather than by a
+   pseudo-element, because probe:p150 reads the computed `backgroundColor` of
+   the button under a real pointer and must keep reading --bg-raised there.
+
+   The arithmetic. 6px of padding in a 48px border-box cell leaves a 36px
+   content box, which is the chip. A background clipped to the content box
+   takes `max(0, radius - padding)` at each corner, so 12px on the box is --r-md
+   on the chip, the radius a row's selection fill already has. Nothing a person
+   aims at changes: the hit area is still the whole cell, the 24px codicon is
+   still centred by the flex box, and `.ab-badge` is positioned against the
+   padding box, which with no border IS the border box, so it does not move.
+
+   The update ring beside the gear is its own `.update-ring` button with a
+   fixed 18px SVG and is not an `.ab-item`, so this padding never reaches it. */
 .ab-item {
   position: relative;
   display: inline-flex;
@@ -368,6 +414,9 @@
   justify-content: center;
   width: 48px;
   height: 48px;
+  padding: var(--space-3);
+  border-radius: calc(var(--r-md) + var(--space-3));
+  background-clip: content-box;
   color: var(--text-muted);
   flex: 0 0 auto;
   /* Phase 150 added `background` here. The tab above transitions the same
@@ -391,38 +440,42 @@
    and both now read `rgb(32, 35, 41)`, still from this one rule.
 
    It reaches BOTH orientations from this one rule, because the row variant in
-   app/activity-bar.css overturns only size and marker position and never
-   restates a colour.
+   app/activity-bar.css overturns only the cell's size and the chip's inset
+   and never restates a colour.
 
-   TWO THINGS THIS MUST NOT DISTURB, and neither can be. The selected view's
-   2px marker is `.ab-item.active::before`, a positioned pseudo-element, and a
-   pseudo-element paints after its originating element's own background. The
-   change count badge is `.ab-badge`, a positioned child, and a child paints
-   after its parent's background too. Both were measured under the pointer
-   after this landed and both still draw at `--accent`.
+   THE ONE THING THIS MUST NOT DISTURB, and it cannot be. The change count
+   badge is `.ab-badge`, a positioned child, and a child paints after its
+   parent's background. It was measured under the pointer after Phase 150
+   landed and still drew at `--accent`. There used to be a second thing here,
+   the selected view's 2px marker; Phase 284 took it out, below.
 
-   The square is full bleed rather than a rounded chip. The tab is a chip in a
-   row of chips with space between them; an item here is a cell of a band that
-   the marker runs along the edge of, and a radius would cut the corner off
-   the marker. */
+   PHASE 284. `background-color`, NEVER THE `background` SHORTHAND. The
+   shorthand resets every background longhand it does not name, and
+   `background-clip` is one of them: it goes back to `border-box`, and the
+   chip becomes a full-bleed 48px square on hover and on hover only. That is
+   the easiest mistake in this block and app/__tests__/p284-quiet-surround
+   reads this rule for it.
+
+   The square WAS full bleed rather than a rounded chip, and the reason given
+   here was the marker: an item was a cell of a band the marker ran along the
+   edge of, and a radius would have cut the marker's corner off. The marker is
+   gone by the operator's ask of 2026-09-17, so the reason went with it, and
+   the chip is the project tab's own shape: a filled, rounded thing in a row
+   of them with the surround showing between. */
 .ab-item:hover {
-  background: var(--bg-raised);
+  background-color: var(--bg-raised);
   color: var(--text-secondary);
 }
 
+/* PHASE 284. The active view is a --bg-active chip and nothing else. The 2px
+   accent bar on the item's left edge (`.ab-item.active::before`) is deleted,
+   not hidden. The chip reads 1.314 against the surround on dark and 1.193 on
+   light, which is the project tab's selected fill on the same ground. This
+   rule FOLLOWS the hover rule at equal specificity, so a hovered active item
+   stays --bg-active, the ordering `.srow.selected` already relies on. */
 .ab-item.active {
   color: var(--text-primary);
-}
-
-/* Active view marker: 2px accent inset bar on the item's LEFT edge. */
-.ab-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--accent);
+  background-color: var(--bg-active);
 }
 
 .ab-item:focus-visible {
@@ -469,21 +522,47 @@
   flex-direction: column;
   min-width: 220px;
   background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
+  /* Phase 284: transparent, never removed, so the sidebar's content box is
+     the width it was at the parent commit. What separates the sidebar from
+     the work now is the 8px gutter and the work's own outline. */
+  border-right: 1px solid transparent;
   flex: 0 0 auto;
   min-height: 0;
 }
 
-/* Invisible 5px hit area over the 1px region divider (DESIGN §2.2). It is a
-   real `role="separator"` tab stop since Phase 18, so it needs a focus state
-   like every other control in the app — a divider that can be driven from the
-   keyboard but cannot be SEEN from the keyboard is half a control. */
+/* PHASE 284. THE HANDLE LIVES IN THE GUTTER, BECAUSE THE DIVIDER IS GONE.
+   This was an invisible 5px hit area straddling a 1px region divider, at
+   `right: -3px`. There is no divider under it any more: between the sidebar
+   and the work there is --frame-gap of surround, and the work's outline takes
+   the one pixel of it nearest the work (app/work-area.css draws the line
+   OUTSIDE the work's box). That leaves 7px free, and a 5px handle centred in
+   7px leaves 1px on each side, so the handle never touches the sidebar's
+   content and never sits on the line. The offset is written from the tokens
+   in app/frame-geometry.css so it stays centred if the gap ever moves:
+   (8 + 5 - 1) / -2 = -6px puts the handle's far edge 6px into the gutter, and
+   the trailing 1px is this aside's own transparent border, because an
+   absolutely positioned child is placed against the PADDING box, which ends
+   1px short of where the gutter starts. The old -3px was the same fact read
+   the other way: it centred 5px on that 1px border. So -7px, and the handle
+   takes gutter pixels 1 to 5 of 0 to 7, with the line on pixel 7.
+
+   It is a real `role="separator"` tab stop since Phase 18, so it needs a
+   focus state like every other control in the app: a handle that can be
+   driven from the keyboard but cannot be SEEN from the keyboard is half a
+   control. With no line at rest to hint at it, hover and focus are the whole
+   of how a person finds it, which design/directions.md names as this look's
+   one trade-off. The 2px radius is so a lit handle reads as a grip in the
+   gutter and not as a rule that came back.
+
+   It lives inside its own <aside>, so the work's clip cannot reach it, and
+   at z-index 2 it is under the outline's 301 and a pixel clear of it. */
 .sidebar-resizer {
   position: absolute;
   top: 0;
-  right: -3px;
+  right: calc((var(--frame-gap) + 5px - var(--frame-edge)) / -2 - 1px);
   width: 5px;
   height: 100%;
+  border-radius: var(--r-xs);
   cursor: col-resize;
   z-index: 2;
   /* Pointer capture owns the gesture; stop the platform claiming it first. */
@@ -495,10 +574,14 @@
   background: var(--border-strong);
 }
 
-/* Focused, the divider lights in accent rather than wearing a ring: a 5px bar
-   inside a 2px halo is 9px of glow leaking over the terminal, and the app
+/* Focused, the handle FILLS with accent, and that fill is the signal. A ring
+   alone would not do over the gutter: a 5px bar inside a 2px halo is 9px of
+   glow in a gutter 8px wide, soft at both ends where it meets the work's
+   outline and the sidebar, around a bar that is otherwise invisible. The app
    already says "this is the thing you are acting on" in accent everywhere
-   else. Hover keeps --border-strong, so the two states stay distinct. */
+   else. Hover keeps --border-strong, so the two states stay distinct. This
+   rule does not reset `box-shadow`, so globals.css's ring is still drawn
+   round the lit bar; Phase 284 left that as it found it. */
 .sidebar-resizer:focus-visible {
   outline: none;
   background: var(--accent);
@@ -528,7 +611,11 @@
   height: 36px;
   flex: 0 0 36px;
   padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--border);
+  /* Phase 284: the surround's header rules fall away, and the band's own rule
+     now lives INSIDE the work's outline alone. Transparent rather than
+     removed, so the header's content box stays 35px and the title does not
+     move half a pixel. */
+  border-bottom: 1px solid transparent;
   color: var(--text-muted);
   /* PHASE 149. --view-heading-text, not --text-xs, and the value is the same
      11px it has always been. The four side views now name ONE token for their
@@ -569,12 +656,23 @@
 }
 
 /* The band header above replaces FilesSection's internal 28px section
-   header — exactly one label and one hairline in the band (S1/S3B). */
+   header — exactly one label in the band (S1/S3B), and since Phase 284 no
+   rule under it. */
 .sidebar-view .section-files > .section-header {
   display: none;
 }
 
-/* Branch header [h:36] — the SCM view's band slice (SCM stream component). */
+/* Branch header [h:36] — the SCM view's band slice (SCM stream component).
+
+   PHASE 284. It goes quiet with `.view-header`, because it IS the view header
+   of Source Control: zoom/zoom.css names the two side by side as the
+   sidebar's band slices, and probe:p149 reads one OR the other as "the view's
+   header". build/p284/SPEC.md §9.3 lists eight rules and this is not among
+   them; its census of the surround's headers missed the one view whose header
+   has its own class. Left at --border, Explorer, Search, Context and
+   Architecture would have lost their rule and Source Control alone kept one,
+   so the sidebar's head would change as a person switched views. The colour
+   goes and the pixel stays, as everywhere else. */
 .branch-header {
   display: flex;
   align-items: center;
@@ -582,7 +680,7 @@
   height: 36px;
   flex: 0 0 36px;
   padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
   color: var(--text-secondary);
   min-width: 0;
 }
@@ -788,6 +886,29 @@
   box-shadow: inset 0 2px 0 var(--accent);
 }
 
+/* PHASE 284. THE FIRST TAB TAKES THE FRAME'S INNER CURVE ITSELF.
+   The strip is the first 36px of the framed work, and the work's children
+   clip themselves at the inner radius, 14 - 1 = 13px (app/work-area.css). The
+   first tab's text is safe: it starts 10px in, where the arc is 0.35px deep.
+   Its accent bar is not. The 2px inset above would stop dead at about x = 6.1,
+   where the arc is 2px deep, and an inset focus ring would lose a corner. An
+   inset box-shadow follows its own box's border-radius, so giving the tab the
+   radius makes the bar and the ring FOLLOW the curve instead of being cut.
+
+   A 14px lead-in was refused: StripUsageMeter budgets the band from the
+   header's children and its measured width, a pseudo-element is in neither
+   and padding is in the second, so either form makes the meter believe in
+   14px it does not have, which is the arithmetic probe:p1811 measures.
+
+   When the list is scrolled a middle tab sits under the curve and is cut by
+   it, which is what content scrolled under a rounded edge does. The band's
+   right end needs nothing: the + is 4px in and 6px down, 11.4px from the arc's
+   centre and so inside it. Both focus signals are untouched: --bandline sits
+   at y = 35 and the arc is 13px tall, so the curve never reaches the rule. */
+.stab-list > .stab:first-child {
+  border-top-left-radius: calc(var(--r-frame) - var(--frame-edge));
+}
+
 .stab-name {
   flex: 0 1 auto;
   min-width: 0;
@@ -978,16 +1099,27 @@
   min-width: 160px;
   max-width: 320px;
   background: var(--bg-sidebar);
-  border-left: 1px solid var(--border);
+  /* Phase 284: transparent, never removed, so the list's content box is the
+     width it was at the parent commit. The 8px gutter and the work's outline
+     are what stand between the work and this list now. */
+  border-left: 1px solid transparent;
   min-height: 0;
 }
 
+/* PHASE 284. The sidebar handle's mirror image; its comment in S3 has the
+   arithmetic. The gutter to this list's LEFT is 8px, the work's outline takes
+   the pixel furthest from here, and the 5px handle is centred in the 7px that
+   remain. `left` is measured from the padding box, which starts 1px inside
+   the transparent border above, hence the same trailing 1px: -7px. It sits in
+   the gutter in both densities, because the collapsed 48px rail keeps the
+   same 8px to its left. */
 .dock-resizer {
   position: absolute;
   top: 0;
-  left: -3px;
+  left: calc((var(--frame-gap) + 5px - var(--frame-edge)) / -2 - 1px);
   width: 5px;
   height: 100%;
+  border-radius: var(--r-xs);
   cursor: col-resize;
   z-index: 2;
 }
@@ -997,7 +1129,21 @@
   background: var(--border-strong);
 }
 
-/* List toolbar — this region's slice of the band ([h:36], S4). */
+/* PHASE 284. A DEFECT FIXED IN PASSING. `useResizeHandle` makes this handle a
+   real `role="separator"` tab stop exactly as it makes the sidebar's, and it
+   had NO focus rule: Tab reached it, the arrow keys moved the list, and
+   nothing on screen said where the keyboard was. It was survivable while a
+   hairline marked the spot. With the hairline gone a focused handle that
+   shows nothing is a control nobody can find, so it takes the sidebar's rule
+   word for word, an accent fill, for the reason written there. */
+.dock-resizer:focus-visible {
+  outline: none;
+  background: var(--accent);
+}
+
+/* List toolbar — this region's slice of the band ([h:36], S4). Since Phase
+   284 it carries no rule of its own: the surround's headers are bare, and the
+   pixel stays so the 35px content box and the controls in it do not move. */
 .dock-toolbar {
   display: flex;
   align-items: center;
@@ -1005,7 +1151,7 @@
   height: 36px;
   flex: 0 0 36px;
   padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
   color: var(--text-muted);
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
@@ -1122,19 +1268,29 @@
   background: var(--bg-raised);
 }
 
+/* PHASE 284. THE SELECTED ROW IS A SOFT FILL WITH A RESTRAINED OUTLINE.
+   The 2px accent bar on the row's left edge (`.srow.selected::before`) is
+   deleted, by the operator's ask of 2026-09-17. What marks the row is the
+   --bg-active fill it always had plus a 1px line drawn INSIDE its own box,
+   following the --r-md the row already carries.
+
+   `outline`, NOT an inset `box-shadow`. This rule is (0,2,0) and globals.css's
+   `:focus-visible { box-shadow: var(--focus-ring) }` is (0,1,0), so a
+   box-shadow here would silently take a focused row's ring away. The global
+   `:focus { outline: none }` is (0,1,0) too and loses to this, which is
+   wanted: a focused selected row keeps its outline and gains the ring.
+
+   --border-active is the token tokens.css defines as the hairline where it
+   sits on --bg-active, which is this exact use. It reads 1.105 on the fill on
+   dark and 1.271 on light, weaker than the study's 1.392 and kept anyway,
+   because what the eye reads at a chip's edge is the step to the ground
+   OUTSIDE it: 1.452 on dark and 1.516 on light, both above the 1.297 hairline
+   this phase takes away. If a photograph shows the line vanishing, the stated
+   fallback is --border-strong on this ONE declaration, and no new token. */
 .srow.selected {
   background: var(--bg-active);
-}
-
-.srow.selected::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 3px;
-  bottom: 3px;
-  width: 2px;
-  border-radius: var(--r-bar);
-  background: var(--accent);
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
 }
 
 .srow-agent {

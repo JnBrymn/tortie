@@ -90,9 +90,21 @@
 
 /* --- full: the foot of the expanded dock --------------------------------- */
 
+/* PHASE 284. THIS SEAM STAYS, inset. The quiet surround removes the rules
+   that FACE the work and the headers' rules; it recolours and insets this
+   one and removes nothing (design/prototypes/styles.css, option B: `margin:
+   0 6px` and 4px of side padding). So the line under the session list now
+   stops 6px short of both edges of the dock instead of running into a border
+   that is no longer drawn. The content's left edge moves from 8px to 6 + 4 =
+   10px in, and its width gives up 4px, which `.usage-full .usage-bar` absorbs
+   because it is the one flexible thing in the row. --border reads 1.297 on
+   the surround on dark and 1.299 on light, unchanged. The rail's mini meter
+   below is NOT touched: it is full bleed in a 48px rail and keeps its own
+   full-width rule. */
 .usage-full {
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  margin: 0 var(--space-3);
+  padding: var(--space-3) var(--space-2);
   border-top: 1px solid var(--border);
 }
 

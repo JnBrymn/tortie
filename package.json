@@ -85,6 +85,7 @@
     "probe:p276": "npm run build && node build/p276/probe-p276.mjs",
     "probe:p277": "npm run build && node build/harness-socket.mjs --fresh gmux-p277 'node build/p277/probe-p277-save.mjs'",
     "probe:p281": "npm run build && node build/harness-socket.mjs --fresh gmux-p281 'node build/p281/probe-p281-meter.mjs'",
+    "probe:p284": "npm run build && node build/harness-socket.mjs --fresh gmux-p284 'node build/p284/probe-p284.mjs'",
     "ablation:p268": "node build/p268/ablation.mjs",
     "ablation:p273": "node build/p273/ablation-vocabulary.mjs",
     "ablation:p274": "node build/p274/ablation.mjs",

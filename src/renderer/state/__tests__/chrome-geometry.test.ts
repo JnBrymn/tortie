@@ -6,8 +6,8 @@
  * window is an argument, never a hidden read.
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ACTIVITY_BAR_W,
@@ -16,6 +16,11 @@ import {
   APP_MIN_WINDOW_W,
   dockRenderedWidth,
   editorIsOverlay,
+  FRAME_EDGE,
+  FRAME_GAP,
+  FRAME_RADIUS,
+  FRAME_RESERVED_MAX,
+  frameReservedWidth,
   projectRailForcedNarrow,
   projectsRenderedWidth,
   PROJECT_RAIL_COLLAPSED_W,
@@ -62,25 +67,37 @@ describe('sidebarMaxWidth', () => {
 
   it("yields to the terminal's floor only in absurd windows", () => {
     // With NO dock reserved, the floor term overtakes the 50% term below
-    // 2 × (ACTIVITY_BAR_W + TERMINAL_FLOOR) = 576px. Reserve a dock and the
-    // crossover moves up to the ~976px the spec's prose named — which is the
-    // case the shipped version was missing; see the fix-round block at the
-    // bottom of this file.
-    const crossover = 2 * (ACTIVITY_BAR_W + TERMINAL_FLOOR);
-    expect(crossover).toBe(576);
+    // 2 × (ACTIVITY_BAR_W + TERMINAL_FLOOR + FRAME_RESERVED_MAX) = 608px.
+    // Reserve a dock and the crossover moves up to the ~976px the spec's
+    // prose named (1008 since Phase 284) — which is the case the shipped
+    // version was missing; see the fix-round block at the bottom of this file.
+    //
+    // PHASE 284 moved this pin. It read 2 × (48 + 240) = 576 and
+    // sidebarMaxWidth(560) = 272 while the row had no gutters. The frame's two
+    // 8px gutters are in the room term now, so both numbers move by exactly
+    // that term: the crossover by 2 × 16 and the ceiling under it by 16.
+    const crossover = 2 * (ACTIVITY_BAR_W + TERMINAL_FLOOR + FRAME_RESERVED_MAX);
+    expect(crossover).toBe(608);
+    expect(crossover - 2 * (ACTIVITY_BAR_W + TERMINAL_FLOOR)).toBe(
+      2 * FRAME_RESERVED_MAX
+    );
     expect(sidebarMaxWidth(crossover)).toBe(crossover / 2);
     // Just under it, the floor term is what answers…
-    expect(sidebarMaxWidth(560)).toBe(560 - ACTIVITY_BAR_W - TERMINAL_FLOOR);
+    expect(sidebarMaxWidth(560)).toBe(
+      560 - ACTIVITY_BAR_W - TERMINAL_FLOOR - FRAME_RESERVED_MAX
+    );
+    expect(sidebarMaxWidth(560)).toBe(256);
     // …and the floor never wins so hard that the sidebar goes under its min.
     expect(sidebarMaxWidth(400)).toBe(SIDEBAR_MIN);
     expect(sidebarMaxWidth(0)).toBe(SIDEBAR_MIN);
   });
 
   it('always leaves the terminal room at realistic widths', () => {
+    // Phase 284: the row is also charged both gutters of the work's frame.
     for (const w of [1024, 1280, 1440, 1920]) {
-      expect(w - ACTIVITY_BAR_W - sidebarMaxWidth(w)).toBeGreaterThanOrEqual(
-        TERMINAL_FLOOR
-      );
+      expect(
+        w - ACTIVITY_BAR_W - sidebarMaxWidth(w) - FRAME_RESERVED_MAX
+      ).toBeGreaterThanOrEqual(TERMINAL_FLOOR);
     }
   });
 });
@@ -142,20 +159,32 @@ describe('workAreaWidth', () => {
     dockWidth: DOCK_DEFAULT
   };
 
-  it('subtracts the activity bar, the sidebar and the dock', () => {
-    expect(workAreaWidth(base)).toBe(1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT);
+  // PHASE 284 moved every pin in this block by the frame's gutters and by
+  // nothing else: 16 with the sidebar drawn (a gutter on each side of the
+  // work) and 8 with it hidden (the right one alone). Each expectation keeps
+  // the arithmetic it had and subtracts the named term, so the term is
+  // visibly what moved the number.
+  it('subtracts the activity bar, the sidebar, the dock and the frame', () => {
+    expect(workAreaWidth(base)).toBe(
+      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - FRAME_RESERVED_MAX
+    );
+    expect(workAreaWidth(base)).toBe(1096);
     expect(workAreaWidth({ ...base, sidebarVisible: false })).toBe(
-      1440 - ACTIVITY_BAR_W
+      1440 - ACTIVITY_BAR_W - FRAME_GAP
     );
+    expect(workAreaWidth({ ...base, sidebarVisible: false })).toBe(1384);
     expect(workAreaWidth({ ...base, orientation: 'right' })).toBe(
-      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_DEFAULT
+      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_DEFAULT - FRAME_RESERVED_MAX
     );
+    expect(workAreaWidth({ ...base, orientation: 'right' })).toBe(896);
   });
 
   it('counts a collapsed dock as its rail, not as zero and not as its width', () => {
     expect(
       workAreaWidth({ ...base, orientation: 'right', dockCollapsed: true })
-    ).toBe(1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_RAIL_W);
+    ).toBe(
+      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_RAIL_W - FRAME_RESERVED_MAX
+    );
   });
 
   it('ignores a collapsed dock entirely in top orientation', () => {
@@ -171,7 +200,9 @@ describe('workAreaWidth', () => {
       windowWidth: 1280,
       sidebarWidth: 900
     });
-    expect(area).toBe(1280 - ACTIVITY_BAR_W - sidebarMaxWidth(1280));
+    expect(area).toBe(
+      1280 - ACTIVITY_BAR_W - sidebarMaxWidth(1280) - FRAME_RESERVED_MAX
+    );
   });
 
   it('never goes negative', () => {
@@ -322,9 +353,17 @@ describe('the terminal never lands in the reflow band (Phase 18 fix round)', () 
     // window below is now driven with the tabs on top (0px), with the rail
     // collapsed (48px) and with the rail expanded (200px or, under
     // PROJECT_RAIL_MIN_WINDOW_W, the 48px it is actually drawn at).
+    //
+    // PHASE 284 added 1043, 1044 and 1045, the three windows around the rail's
+    // NEW threshold, and 1248, where the top-orientation row now meets
+    // SPLIT_MIN_WORK_AREA. 1027 to 1029 and 1216 stay: they are where those
+    // two edges used to be, and the band between the old edge and the new one
+    // is exactly where a gutter term that was half applied would show. The
+    // invariant below did not change, and that is the point of the phase's
+    // geometry: 16px came out of the row and the floor still holds everywhere.
     const windows = [
-      960, 1000, 1027, 1028, 1029, 1100, 1216, 1280, 1400, 1440, 1500, 1600,
-      1920, 2560
+      960, 1000, 1027, 1028, 1029, 1043, 1044, 1045, 1100, 1216, 1248, 1280,
+      1400, 1440, 1500, 1600, 1920, 2560
     ];
     const orientations = ['top', 'right'] as const;
     const projectPositions = ['top', 'left'] as const;
@@ -453,12 +492,26 @@ describe('the terminal never lands in the reflow band (Phase 18 fix round)', () 
     // The dock term only bites below ~976px with the default 200px dock —
     // which is what the spec's prose said all along, and what the shipped
     // implementation had dropped.
-    for (const windowWidth of [1000, 1100, 1280, 1440, 1920, 2560]) {
+    //
+    // PHASE 284 moved that edge from 976 to 1008, because the room term gives
+    // up FRAME_RESERVED_MAX as well: `w - 48 - 200 - 16 - 240 = w - 504`
+    // meets `w / 2` at 1008. So 1000 left this list, where it read 500, and is
+    // pinned below at the 496 it reads now; and 960 moved from 472 to 456.
+    // Each moved by 16 or by less, and never by more.
+    for (const windowWidth of [1008, 1100, 1280, 1440, 1920, 2560]) {
       expect(sidebarMaxWidth(windowWidth, DOCK_DEFAULT)).toBe(
         Math.round(windowWidth / 2)
       );
     }
-    expect(sidebarMaxWidth(960, DOCK_DEFAULT)).toBe(472);
+    expect(sidebarMaxWidth(1007, DOCK_DEFAULT)).toBe(503);
+    expect(sidebarMaxWidth(1000, DOCK_DEFAULT)).toBe(496);
+    expect(sidebarMaxWidth(1000, DOCK_DEFAULT)).toBe(
+      1000 - ACTIVITY_BAR_W - DOCK_DEFAULT - FRAME_RESERVED_MAX - TERMINAL_FLOOR
+    );
+    expect(sidebarMaxWidth(960, DOCK_DEFAULT)).toBe(456);
+    expect(sidebarMaxWidth(960, DOCK_DEFAULT)).toBe(
+      960 - ACTIVITY_BAR_W - DOCK_DEFAULT - FRAME_RESERVED_MAX - TERMINAL_FLOOR
+    );
     expect(sidebarMaxWidth(960, DOCK_DEFAULT)).toBeLessThan(480);
   });
 
@@ -467,10 +520,12 @@ describe('the terminal never lands in the reflow band (Phase 18 fix round)', () 
    * could in principle cover the hoisted session strip — the exact bug item 3
    * exists to kill — so it must be unreachable in "top" orientation, where the
    * strip lives. It is, by arithmetic: with no dock, a sidebar at 50% leaves
-   * the row `w/2 - 48`, which only falls under SPLIT_MIN_WORK_AREA below
-   * 1216px, and everything under 1400px was already an overlay. The new
-   * condition therefore only ever fires with the dock on the right, where
-   * there is no strip to cover.
+   * the row `w/2 - 48 - 16` (the 16 is Phase 284's two gutters), which only
+   * falls under SPLIT_MIN_WORK_AREA below 1248px (1216px before Phase 284),
+   * and everything under 1400px was already an overlay. The new condition
+   * therefore only ever fires with the dock on the right, where there is no
+   * strip to cover. The 152px between 1248 and 1400 is the margin this
+   * guarantee has left, and the loop below drives every pixel of it.
    */
   it('never introduces a NEW overlay in top orientation (item 3 is safe)', () => {
     for (let windowWidth = APP_MIN_WINDOW_W; windowWidth <= 4096; windowWidth += 1) {
@@ -549,12 +604,22 @@ describe('the project rail (Phase 129)', () => {
   });
 
   it('derives its minimum window from the regions it has to share with', () => {
-    // 48 + 200 + 220 + 320 + 240. Written out so a later change to any of the
-    // five constants has to come past this line.
+    // 48 + 200 + 220 + 320 + 240 + 16. Written out so a later change to any
+    // of the six constants has to come past this line.
+    //
+    // PHASE 284 moved this pin from 1028 to 1044. The sixth term is both
+    // gutters of the work's frame, the MAX and never the live 8 or 16, so the
+    // rail still moves only when the window does.
     expect(PROJECT_RAIL_MIN_WINDOW_W).toBe(
-      ACTIVITY_BAR_W + PROJECT_RAIL_W + SIDEBAR_MIN + DOCK_MAX + TERMINAL_FLOOR
+      ACTIVITY_BAR_W +
+        PROJECT_RAIL_W +
+        SIDEBAR_MIN +
+        DOCK_MAX +
+        TERMINAL_FLOOR +
+        FRAME_RESERVED_MAX
     );
-    expect(PROJECT_RAIL_MIN_WINDOW_W).toBe(1028);
+    expect(PROJECT_RAIL_MIN_WINDOW_W).toBe(1044);
+    expect(PROJECT_RAIL_MIN_WINDOW_W - FRAME_RESERVED_MAX).toBe(1028);
     // And it is above the app's own minimum window, which is the whole reason
     // the narrow branch below has to exist at all.
     expect(PROJECT_RAIL_MIN_WINDOW_W).toBeGreaterThan(APP_MIN_WINDOW_W);
@@ -562,12 +627,17 @@ describe('the project rail (Phase 129)', () => {
 
   it('renders collapsed in a window too narrow to seat it expanded', () => {
     const asked = { projectsPosition: 'left' as const, projectsCollapsed: false };
-    expect(projectsRenderedWidth(asked, 1027)).toBe(PROJECT_RAIL_COLLAPSED_W);
-    expect(projectsRenderedWidth(asked, 1028)).toBe(PROJECT_RAIL_W);
+    // PHASE 284 moved this boundary from 1027 | 1028 to 1043 | 1044. The old
+    // edge is asserted too, on the collapsed side, because a window 1028 to
+    // 1043px wide is the one place a person meets this phase's geometry as
+    // something other than a narrower terminal.
+    expect(projectsRenderedWidth(asked, 1043)).toBe(PROJECT_RAIL_COLLAPSED_W);
+    expect(projectsRenderedWidth(asked, 1044)).toBe(PROJECT_RAIL_W);
+    expect(projectsRenderedWidth(asked, 1028)).toBe(PROJECT_RAIL_COLLAPSED_W);
     // Presentation clamps, intent persists: the caller's own value never moved.
     expect(asked.projectsCollapsed).toBe(false);
-    expect(projectRailForcedNarrow(asked, 1027)).toBe(true);
-    expect(projectRailForcedNarrow(asked, 1028)).toBe(false);
+    expect(projectRailForcedNarrow(asked, 1043)).toBe(true);
+    expect(projectRailForcedNarrow(asked, 1044)).toBe(false);
     // A rail the person collapsed themselves is not "forced" — the control
     // that expands it again still works.
     expect(
@@ -593,20 +663,24 @@ describe('the project rail (Phase 129)', () => {
 
   it('takes its width out of the SIDEBAR ceiling, not out of the terminal', () => {
     // 1440px window, dock at its ceiling, rail expanded. The floor term now
-    // answers, because 1440 - 48 - 200 - 320 - 240 = 632 is under half.
+    // answers, because 1440 - 48 - 200 - 320 - 16 - 240 = 616 is under half.
+    // (632 before Phase 284: the 16 is the work's two gutters.)
     const dock = DOCK_MAX;
     const rail = PROJECT_RAIL_W;
-    expect(sidebarMaxWidth(1440, dock, rail)).toBe(632);
+    expect(sidebarMaxWidth(1440, dock, rail)).toBe(616);
     expect(sidebarMaxWidth(1440, dock, rail)).toBe(
-      1440 - ACTIVITY_BAR_W - rail - dock - TERMINAL_FLOOR
+      1440 - ACTIVITY_BAR_W - rail - dock - FRAME_RESERVED_MAX - TERMINAL_FLOOR
     );
     // …and the same window with the tabs on top keeps the 720 it had, because
     // there the 50% term is still the smaller of the two.
     expect(sidebarMaxWidth(1440, dock, 0)).toBe(720);
     expect(sidebarMaxWidth(1440, dock, 0)).toBe(sidebarMaxWidth(1440, dock));
     // 200.0 px, from 0: that is the whole difference the rail makes here.
+    // It read 88 before Phase 284. The with-rail ceiling is the room term and
+    // gave up 16 to the frame; the without-rail ceiling is half the window and
+    // gave up nothing; so the difference between them grew by that 16.
     expect(sidebarMaxWidth(1440, dock, 0) - sidebarMaxWidth(1440, dock, rail)).toBe(
-      88
+      88 + FRAME_RESERVED_MAX
     );
   });
 
@@ -652,11 +726,17 @@ describe('the project rail (Phase 129)', () => {
     expect(
       projectsRenderedWidth(w, APP_MIN_WINDOW_W)
     ).toBe(PROJECT_RAIL_COLLAPSED_W);
-    // The sidebar's ceiling is 960 - 48 - 48 - 320 - 240 = 304, so a sidebar
-    // asking for half the window renders at 304 and the row is left exactly
-    // the floor. Nothing is under it, which is the property that matters.
+    // The sidebar's ceiling is 960 - 48 - 48 - 320 - 16 - 240 = 288, so a
+    // sidebar asking for half the window renders at 288 and the row is left
+    // exactly the floor. Nothing is under it, which is the property that
+    // matters. (304 before Phase 284. The 16 the frame's gutters need came out
+    // of the SIDEBAR here and not out of the terminal, which is the whole
+    // reason `sidebarMaxWidth` reserves them.)
     expect(clampSidebarWidth(4096, 960, DOCK_MAX, PROJECT_RAIL_COLLAPSED_W)).toBe(
-      304
+      288
+    );
+    expect(clampSidebarWidth(4096, 960, DOCK_MAX, PROJECT_RAIL_COLLAPSED_W)).toBe(
+      304 - FRAME_RESERVED_MAX
     );
     expect(workAreaWidth(w)).toBe(TERMINAL_FLOOR);
     expect(workAreaWidth(w)).toBeGreaterThanOrEqual(TERMINAL_FLOOR);
@@ -680,8 +760,9 @@ describe('the project rail (Phase 129)', () => {
         projectsCollapsed: false
       })
     );
+    // …less the frame's two gutters, which Phase 284 charges every row.
     expect(workAreaWidth(base)).toBe(
-      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_DEFAULT
+      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_DEFAULT - FRAME_RESERVED_MAX
     );
     expect(sidebarMaxWidth(1440, DOCK_DEFAULT)).toBe(
       sidebarMaxWidth(1440, DOCK_DEFAULT, 0)
@@ -753,7 +834,12 @@ describe('Phase 135: the 48px the row hands back', () => {
     // hands it the whole 48px whatever else the window is doing. The number a
     // pre-135 build drew is written out by hand rather than produced by
     // hiding the sidebar, because hiding the sidebar changes a second term.
-    for (const windowWidth of [1028, 1200, 1440, 1920, 2560]) {
+    //
+    // PHASE 284. The first window was 1028 and is 1044, because this loop
+    // writes the rail as the constant 200 and under the new threshold the rail
+    // is drawn at 48. Both sides of the comparison carry the frame's gutters,
+    // so the 48px this test is about is still exactly what separates them.
+    for (const windowWidth of [1044, 1200, 1440, 1920, 2560]) {
       const w = { ...base, windowWidth };
       const sidebar = clampSidebarWidth(
         SIDEBAR_DEFAULT,
@@ -763,11 +849,16 @@ describe('Phase 135: the 48px the row hands back', () => {
         0
       );
       const beforeThisPhase =
-        windowWidth - ACTIVITY_BAR_W - PROJECT_RAIL_W - sidebar - DOCK_DEFAULT;
+        windowWidth -
+        ACTIVITY_BAR_W -
+        PROJECT_RAIL_W -
+        sidebar -
+        DOCK_DEFAULT -
+        FRAME_RESERVED_MAX;
       expect(workAreaWidth(w)).toBe(beforeThisPhase + 48);
     }
     expect(workAreaWidth(base)).toBe(
-      1440 - 0 - PROJECT_RAIL_W - SIDEBAR_DEFAULT - DOCK_DEFAULT
+      1440 - 0 - PROJECT_RAIL_W - SIDEBAR_DEFAULT - DOCK_DEFAULT - FRAME_RESERVED_MAX
     );
   });
 
@@ -778,17 +869,21 @@ describe('Phase 135: the 48px the row hands back', () => {
     // 48px arrives only while the room term is the smaller of the two.
     //
     // With a 200px dock and a 200px rail the room term is
-    // `w - 48 - 200 - 200 - 240 = w - 688`, and half is `w / 2`. The room
-    // term binds while `w - 688 < w / 2`, which is `w < 1376`.
+    // `w - 48 - 200 - 200 - 16 - 240 = w - 704`, and half is `w / 2`. The
+    // room term binds while `w - 704 < w / 2`, which is `w < 1408`. (688 and
+    // 1376 before Phase 284: the 16 is the work's two gutters, and it is in
+    // both ceilings below, so the 48px between them is untouched.)
     const ceiling = (w: number, activityBar: number): number =>
       sidebarMaxWidth(w, DOCK_DEFAULT, PROJECT_RAIL_W, activityBar);
 
-    // 1280 is under 1376, so the room term binds and the whole 48px arrives.
-    expect(ceiling(1280, ACTIVITY_BAR_W)).toBe(1280 - 48 - 200 - 200 - 240);
-    expect(ceiling(1280, 0)).toBe(1280 - 0 - 200 - 200 - 240);
+    // 1280 is under 1408, so the room term binds and the whole 48px arrives.
+    expect(ceiling(1280, ACTIVITY_BAR_W)).toBe(
+      1280 - 48 - 200 - 200 - FRAME_RESERVED_MAX - 240
+    );
+    expect(ceiling(1280, 0)).toBe(1280 - 0 - 200 - 200 - FRAME_RESERVED_MAX - 240);
     expect(ceiling(1280, 0) - ceiling(1280, ACTIVITY_BAR_W)).toBe(48);
 
-    // 1440 is over 1376, so half the window binds and the ceiling does not
+    // 1440 is over 1408, so half the window binds and the ceiling does not
     // move at all. This is the honest half of the claim.
     expect(ceiling(1440, ACTIVITY_BAR_W)).toBe(720);
     expect(ceiling(1440, 0)).toBe(720);
@@ -807,7 +902,8 @@ describe('Phase 135: the 48px the row hands back', () => {
     // The row hands 48px to the work area AND to the sidebar's ceiling, so
     // the budget could double-count it. It does not, because the same term is
     // subtracted in both places. Drive it and prove the floor still holds.
-    for (const windowWidth of [960, 1028, 1200, 1440, 1920, 2560]) {
+    // Phase 284 added 1043 and 1044, either side of the rail's new threshold.
+    for (const windowWidth of [960, 1028, 1043, 1044, 1200, 1440, 1920, 2560]) {
       for (const projectsCollapsed of [true, false]) {
         for (const dockCollapsed of [true, false]) {
           for (const sidebarVisible of [true, false]) {
@@ -832,25 +928,35 @@ describe('Phase 135: the 48px the row hands back', () => {
 
   it('does not move the project rail when the sidebar is toggled', () => {
     // PROJECT_RAIL_MIN_WINDOW_W keeps the activity bar's 48px in it on
-    // purpose. Taking it out would let the rail expand at 980px while the
+    // purpose. Taking it out would let the rail expand at 996px while the
     // sidebar is showing and collapse again on Command B, and every width
     // change of the rail resizes live sessions.
+    //
+    // PHASE 284 holds the frame to the same rule. The threshold sums
+    // FRAME_RESERVED_MAX, both gutters, and never the live term, which is 8
+    // with the sidebar hidden: that would seat the rail at 1036 on one side of
+    // Command B and 1044 on the other. So 1028 became 1044 and 980 became 996.
     expect(PROJECT_RAIL_MIN_WINDOW_W).toBe(
-      ACTIVITY_BAR_W + PROJECT_RAIL_W + SIDEBAR_MIN + DOCK_MAX + TERMINAL_FLOOR
+      ACTIVITY_BAR_W +
+        PROJECT_RAIL_W +
+        SIDEBAR_MIN +
+        DOCK_MAX +
+        TERMINAL_FLOOR +
+        FRAME_RESERVED_MAX
     );
-    expect(PROJECT_RAIL_MIN_WINDOW_W).toBe(1028);
+    expect(PROJECT_RAIL_MIN_WINDOW_W).toBe(1044);
     // The rail's width is a function of the window alone. There is no
     // sidebar field in its input, so no press of Command B can reach it.
     expect(
       projectsRenderedWidth(
         { projectsPosition: 'left', projectsCollapsed: false },
-        1027
+        1043
       )
     ).toBe(PROJECT_RAIL_COLLAPSED_W);
     expect(
       projectsRenderedWidth(
         { projectsPosition: 'left', projectsCollapsed: false },
-        1028
+        1044
       )
     ).toBe(PROJECT_RAIL_W);
   });
@@ -880,11 +986,447 @@ describe('Phase 135: the 48px the row hands back', () => {
       dockCollapsed: false,
       dockWidth: DOCK_DEFAULT
     };
+    // (Phase 284 charges both rows the frame's gutters: 16 with the sidebar
+    // drawn and 8 without. Nothing Phase 135 added is in either number.)
     expect(workAreaWidth(top)).toBe(
-      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_DEFAULT
+      1440 - ACTIVITY_BAR_W - SIDEBAR_DEFAULT - DOCK_DEFAULT - FRAME_RESERVED_MAX
     );
     expect(workAreaWidth({ ...top, sidebarVisible: false })).toBe(
-      1440 - ACTIVITY_BAR_W - DOCK_DEFAULT
+      1440 - ACTIVITY_BAR_W - DOCK_DEFAULT - FRAME_GAP
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PHASE 284 — the work's frame enters the budget
+// ---------------------------------------------------------------------------
+
+/**
+ * The quiet surround puts the work inside one outline with an 8px gutter on
+ * each side of it. The gutter is a margin, a margin comes out of the box xterm
+ * is laid out in, and so it is the fourth thing that can take width from the
+ * terminal and the first that is not a region. Three things in the module
+ * learned it (`workAreaWidth`, `sidebarMaxWidth`, `PROJECT_RAIL_MIN_WINDOW_W`)
+ * and no signature moved. The pins above this block that moved say so where
+ * they moved. This block pins the term itself, holds the stylesheet to it, and
+ * then puts the whole change on one page as a table.
+ */
+describe("the work's frame (Phase 284)", () => {
+  it('is an 8px gutter, a 1px line and a 14px radius', () => {
+    expect(FRAME_GAP).toBe(8);
+    expect(FRAME_EDGE).toBe(1);
+    expect(FRAME_RADIUS).toBe(14);
+    // Both gutters. Derived, so a change to the gap cannot leave it behind.
+    expect(FRAME_RESERVED_MAX).toBe(2 * FRAME_GAP);
+    expect(FRAME_RESERVED_MAX).toBe(16);
+  });
+
+  it('takes two answers and only two, and reads the sidebar alone', () => {
+    expect(frameReservedWidth({ sidebarVisible: true })).toBe(16);
+    expect(frameReservedWidth({ sidebarVisible: false })).toBe(8);
+    expect(frameReservedWidth({ sidebarVisible: true })).toBe(FRAME_RESERVED_MAX);
+    expect(frameReservedWidth({ sidebarVisible: false })).toBe(FRAME_GAP);
+    // The line is NOT a width term. It is drawn in the gutter's first pixel,
+    // so neither answer carries a +1 or a +2 for it.
+    for (const sidebarVisible of [true, false]) {
+      expect(frameReservedWidth({ sidebarVisible }) % FRAME_GAP).toBe(0);
+    }
+  });
+
+  it('does not read the dock, so no dock gesture moves it', () => {
+    // The right gutter is 8px to the expanded dock, 8px to the 48px rail and
+    // 8px to the window's edge with the sessions across the top. So a dock
+    // drag, a dock collapse and an orientation change each move the work by
+    // the dock's own rendered width and by nothing else.
+    const base = {
+      windowWidth: 1440,
+      sidebarVisible: true,
+      sidebarWidth: SIDEBAR_DEFAULT,
+      dockWidth: DOCK_DEFAULT
+    };
+    const top = workAreaWidth({
+      ...base,
+      orientation: 'top',
+      dockCollapsed: false
+    });
+    const expanded = workAreaWidth({
+      ...base,
+      orientation: 'right',
+      dockCollapsed: false
+    });
+    const rail = workAreaWidth({
+      ...base,
+      orientation: 'right',
+      dockCollapsed: true
+    });
+    expect(top - expanded).toBe(DOCK_DEFAULT);
+    expect(top - rail).toBe(DOCK_RAIL_W);
+    expect(rail - expanded).toBe(DOCK_DEFAULT - DOCK_RAIL_W);
+  });
+
+  it('moves by exactly one gutter on Command B, beyond the sidebar itself', () => {
+    // Hiding the sidebar gives the work the sidebar's width AND the left
+    // gutter, which is only drawn beside a sidebar. 8px, never 16 and never 0.
+    for (const windowWidth of [960, 1280, 1440, 1920, 2560]) {
+      const shown = {
+        windowWidth,
+        sidebarVisible: true,
+        sidebarWidth: SIDEBAR_DEFAULT,
+        orientation: 'right' as const,
+        dockCollapsed: false,
+        dockWidth: DOCK_DEFAULT
+      };
+      const gained =
+        workAreaWidth({ ...shown, sidebarVisible: false }) - workAreaWidth(shown);
+      expect(gained).toBe(SIDEBAR_DEFAULT + FRAME_GAP);
+    }
+  });
+
+  /**
+   * THE STYLESHEET AND THE CONSTANTS ARE ONE NUMBER.
+   *
+   * CSS cannot import a TypeScript constant, so
+   * src/renderer/app/frame-geometry.css declares the three BY VALUE, and this
+   * is what holds the two files together, in the manner of the `minWidth: 960`
+   * assertion against src/main/index.ts above. A gutter that is 8 in the model
+   * and 10 in the stylesheet is a terminal 4px narrower than the sidebar's
+   * ceiling thinks, at exactly the windows where the floor binds.
+   */
+  describe('src/renderer/app/frame-geometry.css mirrors it by value', () => {
+    const renderer = resolve(__dirname, '..', '..');
+    const stripComments = (css: string): string =>
+      css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const css = stripComments(
+      readFileSync(resolve(renderer, 'app', 'frame-geometry.css'), 'utf8')
+    );
+    const declarations = (text: string): string[] =>
+      [...text.matchAll(/([a-zA-Z-]+)\s*:\s*([^;{}]+);/g)].map(
+        (m) => `${m[1]!}: ${m[2]!.trim()}`
+      );
+
+    it('declares the three, equal to the constants, and nothing else', () => {
+      expect(declarations(css)).toEqual([
+        `--r-frame: ${FRAME_RADIUS}px`,
+        `--frame-gap: ${FRAME_GAP}px`,
+        `--frame-edge: ${FRAME_EDGE}px`
+      ]);
+      // One block, keyed on `:root` with no scheme attribute, so the dark and
+      // the light base both inherit it.
+      expect(css.trim()).toMatch(/^:root\s*\{[^{}]*\}$/);
+    });
+
+    it('holds no colour, by token or by literal', () => {
+      // The frame's colours are --border-strong, --bg-canvas and --bg-sidebar
+      // and they live where they turn with the Appearance controls. This file
+      // is lengths. It reads no token at all, so it cannot read a colour one.
+      expect(css).not.toMatch(/var\(/);
+      expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+      expect(css).not.toMatch(/\b(?:rgba?|hsla?|oklch|oklab|color-mix)\(/);
+    });
+
+    it('is the ONLY stylesheet that declares them, and is loaded', () => {
+      // A second declaration anywhere in the renderer would win or lose on
+      // source order, and the by-value pin above would go on passing while
+      // the window drew something else.
+      const sheets = (
+        readdirSync(renderer, { recursive: true }) as string[]
+      ).filter((f) => f.endsWith('.css'));
+      expect(sheets.length).toBeGreaterThan(20);
+      const declaring = sheets.filter((f) =>
+        /--(?:r-frame|frame-gap|frame-edge)\s*:/.test(
+          stripComments(readFileSync(resolve(renderer, f), 'utf8'))
+        )
+      );
+      expect(declaring).toEqual([join('app', 'frame-geometry.css')]);
+      // work-area.test.ts holds the @import to the FIRST statement of
+      // work-area.css. This only asks that somebody pulls the file in at all,
+      // because a mirror nothing loads is two numbers that agree and a window
+      // with no gutter.
+      expect(
+        readFileSync(resolve(renderer, 'app', 'work-area.css'), 'utf8')
+      ).toContain("@import './frame-geometry.css';");
+    });
+  });
+
+  /**
+   * THE WHOLE CHANGE ON ONE PAGE.
+   *
+   * Thirteen rows over ten window sizes. Every `parent` number was MEASURED,
+   * on 2026-09-17, by importing the module as it stood at the parent commit
+   * 0f2f7f00 and printing what it returned; none of them was worked out from
+   * this phase's arithmetic, so the table cannot agree with itself by
+   * construction. Every `now` number is what this tree must return.
+   *
+   * What makes the frame term "what moved each number" is the two sums. The
+   * regions of the row and the row itself add up to the window, exactly, at
+   * the parent with no gutter and now with one:
+   *
+   *   parent:  bar + rail + sidebar + dock + work          = window
+   *   now:     bar + rail + sidebar + dock + work + frame  = window
+   *
+   * Subtract one from the other and the frame's 8 or 16px is precisely what
+   * left the rail, the sidebar and the work between them, and no pixel went
+   * anywhere else. In most rows it all left the work. In the two floor rows
+   * it all left the SIDEBAR and the terminal kept its 240. In the 1030 row the
+   * rail gave up 152 and the work gained 136.
+   */
+  describe('thirteen rows, measured at the parent and pinned here', () => {
+    interface Row {
+      name: string;
+      state: Parameters<typeof terminalLayoutWidth>[0];
+      /** Session focus is on. The MODEL has no such input, see the last test. */
+      focus?: true;
+      parent: { rail: number; sidebar: number; work: number; terminal: number };
+      now: {
+        frame: 8 | 16;
+        rail: number;
+        sidebar: number;
+        work: number;
+        terminal: number;
+      };
+    }
+    const shape = {
+      sidebarVisible: true,
+      sidebarWidth: SIDEBAR_DEFAULT,
+      orientation: 'right' as const,
+      dockCollapsed: false,
+      dockWidth: DOCK_DEFAULT,
+      editorOpen: false
+    };
+    const rows: Row[] = [
+      {
+        name: 'a 2560 window, sessions across the top, so no dock at all',
+        state: { ...shape, windowWidth: 2560, orientation: 'top' },
+        parent: { rail: 0, sidebar: 280, work: 2232, terminal: 2232 },
+        now: { frame: 16, rail: 0, sidebar: 280, work: 2216, terminal: 2216 }
+      },
+      {
+        name: 'the default 1440 window: sidebar 280, dock 200',
+        state: { ...shape, windowWidth: 1440 },
+        parent: { rail: 0, sidebar: 280, work: 912, terminal: 912 },
+        now: { frame: 16, rail: 0, sidebar: 280, work: 896, terminal: 896 }
+      },
+      {
+        name: 'a 1600 window with the sidebar hidden: the right gutter alone',
+        state: { ...shape, windowWidth: 1600, sidebarVisible: false },
+        parent: { rail: 0, sidebar: 0, work: 1352, terminal: 1352 },
+        now: { frame: 8, rail: 0, sidebar: 0, work: 1344, terminal: 1344 }
+      },
+      {
+        name: 'a 1366 window with BOTH put away: sidebar hidden, dock on its rail',
+        state: {
+          ...shape,
+          windowWidth: 1366,
+          sidebarVisible: false,
+          dockCollapsed: true
+        },
+        parent: { rail: 0, sidebar: 0, work: 1270, terminal: 1270 },
+        now: { frame: 8, rail: 0, sidebar: 0, work: 1262, terminal: 1262 }
+      },
+      {
+        name: 'a 1280 window, sidebar drawn, dock on its 48px rail',
+        state: { ...shape, windowWidth: 1280, dockCollapsed: true },
+        parent: { rail: 0, sidebar: 280, work: 904, terminal: 904 },
+        now: { frame: 16, rail: 0, sidebar: 280, work: 888, terminal: 888 }
+      },
+      {
+        name: 'THE FLOOR: the 960 minimum window, dock at 320, sidebar asking for everything',
+        state: { ...shape, windowWidth: 960, sidebarWidth: 4096, dockWidth: DOCK_MAX },
+        parent: { rail: 0, sidebar: 352, work: 240, terminal: 240 },
+        now: { frame: 16, rail: 0, sidebar: 336, work: 240, terminal: 240 }
+      },
+      {
+        name: 'THE FLOOR AGAIN: 1044, the narrowest window that seats the expanded rail',
+        state: {
+          ...shape,
+          windowWidth: 1044,
+          sidebarWidth: 4096,
+          dockWidth: DOCK_MAX,
+          projectsPosition: 'left',
+          projectsCollapsed: false
+        },
+        parent: { rail: 200, sidebar: 284, work: 240, terminal: 240 },
+        now: { frame: 16, rail: 200, sidebar: 268, work: 240, terminal: 240 }
+      },
+      {
+        name: 'a 1030 window that asked for the expanded rail and no longer gets it',
+        state: {
+          ...shape,
+          windowWidth: 1030,
+          sidebarWidth: SIDEBAR_MIN,
+          projectsPosition: 'left',
+          projectsCollapsed: false
+        },
+        parent: { rail: 200, sidebar: 220, work: 410, terminal: 410 },
+        now: { frame: 16, rail: 48, sidebar: 220, work: 546, terminal: 546 }
+      },
+      {
+        name: 'a 1920 window with the editor split at a dragged 700',
+        state: { ...shape, windowWidth: 1920, editorOpen: true, editorWidth: 700 },
+        parent: { rail: 0, sidebar: 280, work: 1392, terminal: 692 },
+        now: { frame: 16, rail: 0, sidebar: 280, work: 1376, terminal: 676 }
+      },
+      {
+        name: 'the same 1920 window with the editor at its default split',
+        state: { ...shape, windowWidth: 1920, editorOpen: true },
+        // The default is 45% of the row, so the 16 is SHARED: the editor goes
+        // 626 to 619 and the terminal 766 to 757. Seven and nine.
+        parent: { rail: 0, sidebar: 280, work: 1392, terminal: 766 },
+        now: { frame: 16, rail: 0, sidebar: 280, work: 1376, terminal: 757 }
+      },
+      {
+        name: 'a 1200 window with a file open: the editor overlays, the terminal keeps the row',
+        state: {
+          ...shape,
+          windowWidth: 1200,
+          orientation: 'top',
+          editorOpen: true,
+          editorWidth: 480
+        },
+        parent: { rail: 0, sidebar: 280, work: 872, terminal: 872 },
+        now: { frame: 16, rail: 0, sidebar: 280, work: 856, terminal: 856 }
+      },
+      {
+        name: 'editor fill at 1440: the store holds the sidebar hidden and the dock on its rail',
+        state: {
+          ...shape,
+          windowWidth: 1440,
+          sidebarVisible: false,
+          dockCollapsed: true,
+          editorOpen: true,
+          filling: true
+        },
+        // The terminal is display: none, the only safe vanish, at both commits.
+        parent: { rail: 0, sidebar: 0, work: 1344, terminal: 0 },
+        now: { frame: 8, rail: 0, sidebar: 0, work: 1336, terminal: 0 }
+      },
+      {
+        name: 'SESSION FOCUS at 1440, over the default layout',
+        state: { ...shape, windowWidth: 1440 },
+        focus: true,
+        parent: { rail: 0, sidebar: 280, work: 912, terminal: 912 },
+        now: { frame: 16, rail: 0, sidebar: 280, work: 896, terminal: 896 }
+      }
+    ];
+
+    /** The regions beside the work, as the module itself renders them. */
+    function regions(s: Row['state']): {
+      bar: number;
+      rail: number;
+      sidebar: number;
+      dock: number;
+    } {
+      const projects = {
+        projectsPosition: s.projectsPosition ?? ('top' as const),
+        projectsCollapsed: s.projectsCollapsed ?? false
+      };
+      const dock = dockRenderedWidth(s, s.windowWidth);
+      const rail = projectsRenderedWidth(projects, s.windowWidth);
+      const bar = activityBarRenderedWidth({
+        projectsPosition: projects.projectsPosition,
+        sidebarVisible: s.sidebarVisible
+      });
+      const sidebar = s.sidebarVisible
+        ? clampSidebarWidth(s.sidebarWidth, s.windowWidth, dock, rail, bar)
+        : 0;
+      return { bar, rail, sidebar, dock };
+    }
+
+    it('covers ten window sizes, both gutter answers, the floor and the fill', () => {
+      // A table that never reaches the case it was written for proves nothing.
+      expect(rows.length).toBeGreaterThanOrEqual(10);
+      expect(new Set(rows.map((r) => r.state.windowWidth)).size).toBe(10);
+      expect(new Set(rows.map((r) => r.now.frame))).toEqual(new Set([8, 16]));
+      expect(rows.filter((r) => r.now.terminal === TERMINAL_FLOOR).length).toBe(2);
+      expect(rows.some((r) => r.state.filling === true)).toBe(true);
+      expect(rows.some((r) => r.focus === true)).toBe(true);
+      expect(
+        rows.some((r) => !r.state.sidebarVisible && r.state.dockCollapsed)
+      ).toBe(true);
+    });
+
+    for (const row of rows) {
+      it(row.name, () => {
+        const s = row.state;
+        const { bar, rail, sidebar, dock } = regions(s);
+        const frame = frameReservedWidth({ sidebarVisible: s.sidebarVisible });
+
+        // What this tree returns.
+        expect(frame).toBe(row.now.frame);
+        expect(rail).toBe(row.now.rail);
+        expect(sidebar).toBe(row.now.sidebar);
+        expect(workAreaWidth(s)).toBe(row.now.work);
+        expect(terminalLayoutWidth(s)).toBe(row.now.terminal);
+
+        // No pixel lost, at either commit. The second line is arithmetic over
+        // the MEASURED parent numbers, so it also checks they were copied
+        // down correctly. The bar and the dock did not move between the two.
+        expect(bar + rail + sidebar + dock + row.now.work + frame).toBe(
+          s.windowWidth
+        );
+        expect(
+          bar + row.parent.rail + row.parent.sidebar + dock + row.parent.work
+        ).toBe(s.windowWidth);
+
+        // THE NEW TERM IS WHAT MOVED EACH NUMBER. Whatever left the rail, the
+        // sidebar and the work between the two commits is the frame, exactly.
+        expect(
+          row.parent.rail -
+            row.now.rail +
+            (row.parent.sidebar - row.now.sidebar) +
+            (row.parent.work - row.now.work)
+        ).toBe(frame);
+
+        // And the property the file exists for, at both commits.
+        for (const terminal of [row.parent.terminal, row.now.terminal]) {
+          expect(terminal === 0 || terminal >= TERMINAL_FLOOR).toBe(true);
+        }
+        // The terminal never GAINED from the frame except through the rail.
+        if (row.parent.rail === row.now.rail) {
+          expect(row.now.terminal).toBeLessThanOrEqual(row.parent.terminal);
+          expect(row.parent.terminal - row.now.terminal).toBeLessThanOrEqual(frame);
+        }
+      });
+    }
+
+    it('takes the 16px out of the SIDEBAR, not the terminal, where the floor binds', () => {
+      const floor = rows.filter((r) => r.now.terminal === TERMINAL_FLOOR);
+      for (const row of floor) {
+        expect(row.parent.terminal).toBe(TERMINAL_FLOOR);
+        expect(row.parent.sidebar - row.now.sidebar).toBe(FRAME_RESERVED_MAX);
+        expect(row.parent.work - row.now.work).toBe(0);
+        // Without the reservation in `sidebarMaxWidth` the sidebar would have
+        // kept its parent width and the row would have paid instead: 224px,
+        // inside the reflow band.
+        expect(row.parent.work - FRAME_RESERVED_MAX).toBe(224);
+        expect(row.parent.work - FRAME_RESERVED_MAX).toBeLessThan(TERMINAL_FLOOR);
+      }
+    });
+
+    it('has no focus input, so session focus cannot move a width the person chose', () => {
+      // Session focus turns the frame OFF in the stylesheet: no margin, no
+      // radius, no line, and the surface is drawn at the whole window. The
+      // model deliberately does not follow it there (chromeGeometryOf's Phase
+      // 80.1 note): its one consumer is the sidebar's clamp, the sidebar is
+      // not drawn in focus mode, and what it returns is the ordinary layout
+      // the window goes BACK to. So a store that carries `sessionFocus: true`
+      // reads the same numbers as one that does not, frame term included.
+      const focused = rows.find((r) => r.focus === true)!;
+      const ordinary = rows.find(
+        (r) => r.focus !== true && r.state.windowWidth === 1440 && !r.state.editorOpen
+      )!;
+      expect(focused.now).toEqual(ordinary.now);
+      const withFocus = { ...focused.state, sessionFocus: true };
+      expect(workAreaWidth(withFocus)).toBe(workAreaWidth(focused.state));
+      expect(terminalLayoutWidth(withFocus)).toBe(focused.now.terminal);
+      // What is DRAWN in focus mode is not this module's to say, and a reader
+      // comparing the model with a rendered width has to know that: the
+      // surface is `windowWidth` wide there, which is the model's row plus
+      // every region beside it plus the gutters the mode switched off.
+      const { bar, rail, sidebar, dock } = regions(focused.state);
+      expect(
+        focused.now.work + bar + rail + sidebar + dock + focused.now.frame
+      ).toBe(focused.state.windowWidth);
+    });
   });
 });

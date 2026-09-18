@@ -19,8 +19,13 @@
 /**
  * The row itself. It is a child of `.sidebar`, which is a flex column, so it
  * takes 36px of height and the full width the sidebar has. It drops the
- * column's right border and grows a bottom one, so its hairline continues the
- * project rail's own band hairline straight across the window.
+ * column's right border and keeps a bottom one.
+ *
+ * PHASE 284. That bottom border used to be a --border hairline continuing the
+ * project rail's band hairline straight across the window. Both are
+ * transparent now: the quiet surround has no header rule anywhere outside the
+ * work's outline. The colour goes and the pixel stays, so the row is still
+ * 36px with a 35px content box and no icon moves.
  *
  * `width: auto` is stated because the column rule sets `width: 48px` and a
  * flex item in a column container reads that width as its cross size.
@@ -31,33 +36,31 @@
   height: 36px;
   flex: 0 0 36px;
   border-right: none;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
 }
 
 /**
  * A square item on the band's own height. 36px rather than 48px, because the
  * band is 36px tall and an item taller than its band would either clip or
  * push the band open.
+ *
+ * PHASE 284. The chip follows the cell down. styles/app.css makes the item a
+ * chip by clipping its own background to its content box; here 4px of padding
+ * in the 36px cell leaves a 28px chip, and 6 + 4 = 10px on the box is --r-md
+ * on the chip, by the same `max(0, radius - padding)` the column relies on.
+ * Only the inset and the radius are restated. No colour is, so hover and
+ * active still come from the one pair of rules in app.css.
+ *
+ * The rule that used to follow this one is DELETED with the marker it moved:
+ * it turned the active view's 2px accent bar from the item's left edge onto
+ * its bottom edge, where it read as a thickened underline on the row's
+ * hairline. There is no bar and no hairline for it to sit on any more.
  */
 .activitybar-row .ab-item {
   width: 36px;
   height: 36px;
-}
-
-/**
- * The active view's 2px accent marker moves from the item's left edge to its
- * bottom edge. On a row the left edge is the seam with the item beside it,
- * and a marker there reads as a divider rather than as a mark on the icon.
- * The bottom edge is where the row's own hairline runs, so the marker reads
- * as a thickened underline under one icon.
- */
-.activitybar-row .ab-item.active::before {
-  left: 0;
-  right: 0;
-  top: auto;
-  bottom: 0;
-  width: auto;
-  height: 2px;
+  padding: var(--space-2);
+  border-radius: calc(var(--r-md) + var(--space-2));
 }
 
 /**

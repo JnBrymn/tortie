@@ -87,6 +87,18 @@ const LAYOUT_PROPS = [
   'padding-top',
   'padding-bottom',
   'margin',
+  // PHASE 284. The work's frame is drawn with margins (the gutters) and a
+  // radius (the curve), and section 7 takes both away in the mode. A frame
+  // that turned off under one class and not the other would send the
+  // photograph to a rect one gutter out, so the longhands join the list: a
+  // later rule that zeroes only `margin-left` must name both classes too.
+  // `border-radius` moves no box, and it is here because the flight reads the
+  // frame's corners at the measured end (./focus-copy.ts, `copyCornerRadii`).
+  'margin-top',
+  'margin-right',
+  'margin-bottom',
+  'margin-left',
+  'border-radius',
   'inset',
   'position',
   'gap'
@@ -177,6 +189,80 @@ describe('.session-focus and .gmux-focus-measure', () => {
           );
         }
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The work's frame is off in the mode (Phase 284)
+// ---------------------------------------------------------------------------
+
+describe('the work’s frame', () => {
+  const BOTH = (tail: string): string[] => [
+    `.shell.session-focus ${tail}`,
+    `.shell.gmux-focus-measure ${tail}`
+  ];
+
+  it('loses its gutters and its curve under BOTH classes, in one rule', () => {
+    const off = rules.filter((r) =>
+      r.selectors.includes('.shell.session-focus .work-area')
+    );
+    expect(off, 'one rule turns the frame off').toHaveLength(1);
+    // Exactly the two, so nothing else is squared off by accident and the
+    // Catch Me Up page, which does not draw the work area, is not named.
+    expect(off[0]?.selectors).toEqual(BOTH('.work-area'));
+    const decls = new Map(declarations(off[0]?.body ?? ''));
+    expect(decls.get('margin')).toBe('0');
+    expect(decls.get('border-radius')).toBe('0');
+    // The fix round added the third: the property work-area.css hands the
+    // focused-split box for the corner it shares with the frame, zeroed here
+    // in the same rule so the box follows the frame off under both classes.
+    expect(decls.get('--frame-corner')).toBe('0');
+    expect([...decls.keys()]).toEqual(['margin', 'border-radius', '--frame-corner']);
+  });
+
+  it('loses its line under BOTH classes, in one rule', () => {
+    const line = rules.filter((r) =>
+      r.selectors.includes('.shell.session-focus .work-area::after')
+    );
+    expect(line, 'one rule takes the line away').toHaveLength(1);
+    expect(line[0]?.selectors).toEqual(BOTH('.work-area::after'));
+    expect(declarations(line[0]?.body ?? '')).toEqual([['display', 'none']]);
+  });
+
+  it('comes AFTER section 1, whose rule the tests above find by its shape', () => {
+    // The line's rule is `display: none` under `.session-focus`, which is the
+    // exact shape `rules.find` looks for above. First in the file, it would be
+    // the match, and every region assertion would read the wrong list.
+    const shaped = rules.filter(
+      (r) =>
+        r.body.replace(/\s/g, '') === 'display:none;' &&
+        r.selectors.some((s) => s.includes('.session-focus'))
+    );
+    expect(shaped).toHaveLength(2);
+    expect(shaped[0]?.selectors).toContain(
+      ".shell.session-focus [data-slot='sidebar']"
+    );
+    expect(shaped[1]?.selectors).toContain(
+      '.shell.session-focus .work-area::after'
+    );
+  });
+
+  it('outranks the sidebar adjacency rule that opens the left gutter', () => {
+    // work-area.css: `[data-slot='sidebar'] + .work-area` is two class or
+    // attribute terms. The rule here must carry three, or the left gutter
+    // survives into the mode whatever order the bundler emits the sheets in.
+    const workArea = readFileSync(join(APP_DIR, 'work-area.css'), 'utf8');
+    const adjacency = parseRules(workArea).find((r) =>
+      r.selectors.includes("[data-slot='sidebar'] + .work-area")
+    );
+    expect(adjacency, 'the adjacency rule exists').toBeDefined();
+    const terms = (sel: string): number =>
+      (sel.match(/\.[a-z-]+|\[[^\]]+\]/gi) ?? []).length;
+    for (const sel of BOTH('.work-area')) {
+      expect(terms(sel)).toBeGreaterThan(
+        terms("[data-slot='sidebar'] + .work-area")
+      );
     }
   });
 });

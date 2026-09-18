@@ -19,7 +19,13 @@
  *    sequence that reads a buffer the browser has not yet thrown away;
  *  - the emptiness measure answers 0 for a canvas holding only the background
  *    and answers above 0.01 for one with something drawn on it. That is the
- *    number research 53 section 11 says was never taken.
+ *    number research 53 section 11 says was never taken;
+ *  - the copy wears the work's curve (Phase 284) on exactly the corners that
+ *    sit on the frame at the one framed end of the flight, at a radius that
+ *    reads true through the flight's own scale, and on no other corner. A
+ *    square copy over a rounded surface pushes its corners through the curve
+ *    for 200 ms, and a rounded copy beside a split editor rounds a corner that
+ *    is in the middle of the work.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -269,6 +275,7 @@ function makeSurface(opts: {
 const {
   backingStore,
   buildStillCopy,
+  copyCornerRadii,
   copyGeometry,
   inkFraction,
   observeFocusCopy,
@@ -314,6 +321,164 @@ describe('pure geometry', () => {
       width: 1,
       height: 1
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The work's curve (Phase 284)
+//
+// The window these cases share: 1440 by 900 under a 38px title band, a 48px
+// activity column, a 280px sidebar, an 8px gutter on the work's left, right
+// and bottom, a 320px dock, and a 36px band at the top of the work. The
+// radius is handed in as 13, which is what ./focus-flight.ts reads from the
+// tokens in the running app; nothing here reads a stylesheet.
+// ---------------------------------------------------------------------------
+
+describe('copyCornerRadii', () => {
+  /** `.work-area`, framed: 48 + 280 + 8 in, 8 + 320 short, 8 off the floor. */
+  const FRAME: Rect = { left: 336, top: 38, width: 776, height: 854 };
+  /** The terminal body under the band, reaching the frame's three far edges. */
+  const SURFACE: Rect = { left: 336, top: 74, width: 776, height: 818 };
+  /** The same body with the mode on: the whole window under the title band. */
+  const FOCUSED: Rect = { left: 0, top: 38, width: 1440, height: 862 };
+  const SQUARE = [0, 0];
+
+  it('rounds both bottom corners on a leave, exactly, and neither top one', () => {
+    // A leave is framed at `last`, where the scale is 1.
+    const corners = copyCornerRadii(
+      FOCUSED,
+      SURFACE,
+      { frame: FRAME, end: 'last' },
+      13
+    );
+    expect(corners.bottomLeft).toEqual([13, 13]);
+    expect(corners.bottomRight).toEqual([13, 13]);
+    // The band is between the surface and the frame's top edge.
+    expect(corners.topLeft).toEqual(SQUARE);
+    expect(corners.topRight).toEqual(SQUARE);
+  });
+
+  it('divides by the flight’s scale on an enter, so the FIRST frame shows 13', () => {
+    // An enter is framed at `first`. The node is laid out at `last` and drawn
+    // at `first` through scale(sx, sy), which scales its radius with it.
+    const corners = copyCornerRadii(
+      SURFACE,
+      FOCUSED,
+      { frame: FRAME, end: 'first' },
+      13
+    );
+    const sx = SURFACE.width / FOCUSED.width;
+    const sy = SURFACE.height / FOCUSED.height;
+    expect(corners.bottomLeft).toEqual([13 / sx, 13 / sy]);
+    expect(corners.bottomRight).toEqual([13 / sx, 13 / sy]);
+    // What a person sees on the first painted frame is the pair times the
+    // scale, which is the live curve the copy is covering.
+    expect(corners.bottomLeft[0] * sx).toBeCloseTo(13, 10);
+    expect(corners.bottomLeft[1] * sy).toBeCloseTo(13, 10);
+    // And it is elliptical, because the two axes scale differently.
+    expect(corners.bottomLeft[0]).not.toBeCloseTo(corners.bottomLeft[1], 3);
+    expect(corners.topLeft).toEqual(SQUARE);
+    expect(corners.topRight).toEqual(SQUARE);
+  });
+
+  it('leaves the bottom-right square beside a split editor', () => {
+    // A 400px editor takes the right of the work row, so the surface's right
+    // edge is in the middle of the work and must not be rounded.
+    const beside: Rect = { ...SURFACE, width: SURFACE.width - 400 };
+    const corners = copyCornerRadii(
+      FOCUSED,
+      beside,
+      { frame: FRAME, end: 'last' },
+      13
+    );
+    expect(corners.bottomLeft).toEqual([13, 13]);
+    expect(corners.bottomRight).toEqual(SQUARE);
+  });
+
+  it('leaves both bottom corners square above a banner', () => {
+    // The 36px banner is docked under the body, inside the frame.
+    const above: Rect = { ...SURFACE, height: SURFACE.height - 36 };
+    const corners = copyCornerRadii(
+      FOCUSED,
+      above,
+      { frame: FRAME, end: 'last' },
+      13
+    );
+    expect(Object.values(corners)).toEqual([SQUARE, SQUARE, SQUARE, SQUARE]);
+  });
+
+  it('rounds all four when the surface IS the frame', () => {
+    const corners = copyCornerRadii(
+      FOCUSED,
+      FRAME,
+      { frame: FRAME, end: 'last' },
+      13
+    );
+    expect(Object.values(corners)).toEqual([
+      [13, 13],
+      [13, 13],
+      [13, 13],
+      [13, 13]
+    ]);
+  });
+
+  it('forgives half a pixel of layout and no more', () => {
+    const near: Rect = { ...SURFACE, left: SURFACE.left + 0.5, width: 775.5 };
+    expect(
+      copyCornerRadii(FOCUSED, near, { frame: FRAME, end: 'last' }, 13)
+        .bottomLeft
+    ).toEqual([13, 13]);
+    const far: Rect = { ...SURFACE, left: SURFACE.left + 0.75, width: 775.25 };
+    expect(
+      copyCornerRadii(FOCUSED, far, { frame: FRAME, end: 'last' }, 13)
+        .bottomLeft
+    ).toEqual(SQUARE);
+  });
+
+  it('reads the FRAMED end, never the other one', () => {
+    // On a leave `first` is the whole window. Its bottom-left corner is not
+    // the frame's, and a helper that compared `first` would round nothing.
+    // On an enter `last` is the whole window, and the same holds the other
+    // way round. Swapping the two ends must therefore change the answer.
+    const leave = copyCornerRadii(
+      FOCUSED,
+      SURFACE,
+      { frame: FRAME, end: 'last' },
+      13
+    );
+    const wrongEnd = copyCornerRadii(
+      FOCUSED,
+      SURFACE,
+      { frame: FRAME, end: 'first' },
+      13
+    );
+    expect(leave.bottomLeft).toEqual([13, 13]);
+    expect(Object.values(wrongEnd)).toEqual([SQUARE, SQUARE, SQUARE, SQUARE]);
+  });
+
+  it('builds a square copy from a radius that is zero or unreadable', () => {
+    for (const radius of [0, -1, Number.NaN]) {
+      expect(
+        Object.values(
+          copyCornerRadii(FOCUSED, SURFACE, { frame: FRAME, end: 'last' }, radius)
+        )
+      ).toEqual([SQUARE, SQUARE, SQUARE, SQUARE]);
+    }
+  });
+
+  it('builds a square copy for a destination or a source with no size', () => {
+    const none: Rect = { left: 336, top: 892, width: 0, height: 0 };
+    expect(
+      Object.values(
+        copyCornerRadii(FOCUSED, none, { frame: FRAME, end: 'last' }, 13)
+      )
+    ).toEqual([SQUARE, SQUARE, SQUARE, SQUARE]);
+    // An enter from nothing would divide by a scale of zero.
+    expect(
+      Object.values(
+        copyCornerRadii(none, FOCUSED, { frame: FRAME, end: 'first' }, 13)
+      )
+    ).toEqual([SQUARE, SQUARE, SQUARE, SQUARE]);
   });
 });
 
@@ -566,5 +731,129 @@ describe('buildStillCopy', () => {
     // The fake readback hands back zeroes, which are 23 steps from the
     // background on the blue channel, so every sampled pixel counts as ink.
     expect(reports).toEqual([{ leafId: 'leaf-0', ink: 1 }]);
+  });
+
+  // PHASE 284. The radius is four inline styles on the node and nothing else.
+  const RADIUS_KEYS = [
+    'borderTopLeftRadius',
+    'borderTopRightRadius',
+    'borderBottomRightRadius',
+    'borderBottomLeftRadius'
+  ];
+
+  it('builds a square copy when it is handed no frame', async () => {
+    // Every flight before Phase 284, and every flight whose surface has no
+    // `.work-area` above it, which is what these test doubles are: a
+    // FakeElement has no `closest`, so ./focus-flight.ts finds no frame and
+    // passes nothing here.
+    installDom(1);
+    const { surface, first, last } = makeSurface({
+      count: 2,
+      headers: true,
+      withTerminals: false
+    });
+    expect('closest' in surface).toBe(false);
+    const copy = await buildStillCopy(
+      surface as unknown as Element,
+      first,
+      last,
+      BACKGROUND
+    );
+    const node = copy?.node as unknown as FakeElement | undefined;
+    for (const key of RADIUS_KEYS) {
+      expect(node?.style[key], key).toBeUndefined();
+    }
+  });
+
+  it('wears the frame’s curve on a leave, as one length per bottom corner', async () => {
+    installDom(1);
+    // `makeSurface` flies 800x600 up to 1600x1200. A leave is that flight
+    // backwards, framed at its `last`.
+    const made = makeSurface({ count: 2, headers: true, withTerminals: false });
+    const first = made.last;
+    const last = made.first;
+    // The frame starts 36px above the surface (the band) and shares its left,
+    // right and bottom edges.
+    const frame: Rect = {
+      left: last.left,
+      top: last.top - 36,
+      width: last.width,
+      height: last.height + 36
+    };
+    const copy = await buildStillCopy(
+      made.surface as unknown as Element,
+      first,
+      last,
+      BACKGROUND,
+      { frame, end: 'last', radius: 13 }
+    );
+    const node = copy?.node as unknown as FakeElement | undefined;
+    expect(node?.style['borderBottomLeftRadius']).toBe('13px');
+    expect(node?.style['borderBottomRightRadius']).toBe('13px');
+    expect(node?.style['borderTopLeftRadius']).toBeUndefined();
+    expect(node?.style['borderTopRightRadius']).toBeUndefined();
+    // NO CHILD WAS ADDED for the clip: `.gmux-focus-copy` already declares
+    // `overflow: hidden`, so the document order holds exactly as it did.
+    expect((node?.children ?? []).map((c) => c.tagName)).toEqual([
+      'CANVAS',
+      'HEADER',
+      'CANVAS',
+      'HEADER'
+    ]);
+  });
+
+  it('wears an elliptical pair on an enter, which the scale turns back into 13', async () => {
+    installDom(1);
+    const { surface, first, last } = makeSurface({
+      count: 1,
+      headers: false,
+      withTerminals: false
+    });
+    const frame: Rect = {
+      left: first.left,
+      top: first.top - 36,
+      width: first.width,
+      height: first.height + 36
+    };
+    const copy = await buildStillCopy(
+      surface as unknown as Element,
+      first,
+      last,
+      BACKGROUND,
+      { frame, end: 'first', radius: 13 }
+    );
+    const node = copy?.node as unknown as FakeElement | undefined;
+    // 800 to 1600 and 600 to 1200 is a scale of one half on both axes, so
+    // the pair is 26 and 26 and collapses to one length.
+    expect(node?.style['borderBottomLeftRadius']).toBe('26px');
+
+    // A window that grows more one way than the other gives a real ellipse.
+    const tall: Rect = { ...last, height: 900 };
+    const again = await buildStillCopy(
+      surface as unknown as Element,
+      first,
+      tall,
+      BACKGROUND,
+      { frame, end: 'first', radius: 13 }
+    );
+    const node2 = again?.node as unknown as FakeElement | undefined;
+    // sx = 800 / 1600, sy = 600 / 900.
+    expect(node2?.style['borderBottomLeftRadius']).toBe('26px 19.5px');
+  });
+
+  it('stays square when the frame it is handed carries no radius', async () => {
+    installDom(1);
+    const made = makeSurface({ count: 1, headers: false, withTerminals: false });
+    const copy = await buildStillCopy(
+      made.surface as unknown as Element,
+      made.last,
+      made.first,
+      BACKGROUND,
+      { frame: made.first, end: 'last', radius: 0 }
+    );
+    const node = copy?.node as unknown as FakeElement | undefined;
+    for (const key of RADIUS_KEYS) {
+      expect(node?.style[key], key).toBeUndefined();
+    }
   });
 });

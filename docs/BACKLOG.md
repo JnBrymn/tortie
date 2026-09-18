@@ -29750,6 +29750,78 @@ counts; the 240px floor at 960px both ways.
   round: if the reverify says `needs_work` again, it stops and the spec is rewritten.
 - Not Phase 286 (entering session focus takes the keyboard out of the session), which lands as an entry
   with Phase 284 and runs on its own.
+## Phase 286 — entering session focus takes the keyboard out of the session (found by Phase 284's verifiers, 2026-09-17)
+
+**Subject.** `fix(focus): the keyboard stays in the session across the flight`
+
+**First body line.** `Phase 286: the flight gives the keyboard back`
+
+**Semver.** Patch. A person who presses ⇧⌘↩ can press it again to leave, without clicking first, and
+what they type after entering goes to the session and not to nothing.
+
+**Tier 2, and the parent measurement is mandatory.** It is one rendered mode with no new state and a
+proof that fits in one app run, but it changes what the mode DOES with the keyboard, and Phase 284's
+probe measured the defect at the parent and at HEAD, so the parent number exists and must move.
+
+**Charter.** Phase 284's two verifiers, independently, on 2026-09-17, in the fix round of the quiet
+surround (`build/p284/SPEC.md` §14.1). Sixteen of that run's 33 findings were one thing: the probe pressed
+the leave chord and nothing left, so three states were photographed inside the mode. Both verifiers
+named the app as the cause and both asked for it to be queued OUTSIDE Phase 284, whose charter says "no
+change to what anything DOES". This is that entry.
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **The keyboard leaves the session on the way in.** Measured in a scratch Electron on 2026-09-17:
+  before the chord `document.activeElement` is `textarea.xterm-helper-textarea`; 100 ms after it, it is
+  `body`; 1.5 s after it, still `body`, with `.shell.session-focus` on. The parent commit `0f2f7f00`
+  reads the same (`out/p284/readings-parent.json`, `arms.R14`: "the second chord did not leave focus
+  mode"), so this predates Phase 284 and has been true since Phase 80.1 introduced the flight.
+- **Why.** `src/renderer/app/focus-flight.ts:494` sets `surface.style.visibility = 'hidden'` so the
+  photograph can fly over a surface that sends no resize; Chromium blurs a focused element that becomes
+  `visibility: hidden`; `:534` restores the visibility in the `finally` and nothing restores the focus.
+- **Why the second chord is silent.** `src/renderer/app/fill-chord.ts:97` `activeFillRegion()` reads
+  `document.activeElement` and the chord does nothing in no region, by design (the header of that file).
+  Escape still leaves, because `src/renderer/app/keyboard.ts:179` takes it when the keyboard is NOT in a
+  terminal, which after the flight it never is. A person today leaves by clicking into the terminal and
+  pressing the chord again, or by pressing Escape, and the one-time tip names the chord.
+- **Why no probe caught it.** `build/probe-session-focus.mjs:502-503`'s only leave check is "the renderer
+  recorded no leave gesture", and `src/renderer/app/focus-shot-drive.ts:190-191` presses the chord twice
+  with no click between, so the gesture is recorded and the mode is never observed to end. `probe:p284`'s
+  H arm now clicks first and NOTES the loss (`build/p284/probe-p284.mjs`, "entering focus mode took the
+  keyboard out of the session").
+
+### The mechanism
+
+1. **`fly()` in `src/renderer/app/focus-flight.ts` remembers where the keyboard was and gives it back.**
+   Before `surface.style.visibility = 'hidden'`, read `document.activeElement` and keep it ONLY if it is
+   inside `surface` (`surface.contains(el)`); after the swap and the two frames, if the element is still
+   connected, `el.focus({ preventScroll: true })`, else focus the surface's `.xterm-helper-textarea` if
+   one is drawn. `preventScroll` because the row is `overflow: clip` since Phase 284 and a scroll
+   container is exactly what it refuses to be. Nothing is focused on the way OUT that was not focused on
+   the way in: a person who left with the keyboard in the dock keeps it there.
+2. **The refusal stands.** Nothing here makes the chord act in no region; `fill-chord.ts` is untouched.
+3. **`build/probe-session-focus.mjs` asserts the leave LEFT.** After the leave gesture it reads the
+   shell's class list and fails when `session-focus` is still there, and it reads `activeElement` after
+   the enter and fails when it is not inside the surface. At the parent both are red; that is the
+   parent measurement.
+4. **`probe:p284`'s H arm turns its NOTE into a finding** once this lands: `on.keyboard.inSession` must
+   be true after the enter. The click before the leave stays, because a person may still click.
+
+### The proof, run rather than read
+
+- A vitest case in `src/renderer/app/__tests__/focus-flight.test.ts`, red at the parent: a `fly()` over
+  the test doubles with a focused element inside the surface ends with that element focused, and one
+  with the keyboard outside the surface ends with it untouched.
+- `npm run probe:sessionfocus` at the parent (red on the new assertion, by the measured `body`) and at
+  HEAD (green), one Electron each, never at once.
+- `npm run probe:p284` at HEAD, with the NOTE gone.
+- Gates: typecheck, build, test, smoke:t1.
+
+### What is NOT in this phase
+
+- No change to what the chord does in no region, and no change to Escape's rule inside a terminal.
+- No change to the flight's geometry, timing or the one-toggle measurement; S12.7 stands.
+- No focus moved on the way out beyond what was held on the way in.
 - No release.
 
 
@@ -30504,3 +30576,6 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 282.1 QUEUED, the reverify the save surface is owed, Tier 3 for two items and Tier 2 for one.** He asked for both reverify subphases. This one re-runs, independently and live, the fix rounds that landed today without a reverify and share the save surface: Phase 282's last fix round `117e7a85` (the hold released on a dirty tab, one `refreshRepo` walk per project, the follower matched by baseline offset), Phase 277's fix round `29f47742` (the three regressions its first build introduced, and the `conformance:save` rules the main session rewrote itself), and Phase 278's settings-window bounds re-read. Attack and re-derive per item, one fix if needed, the same verifiers on the failed items, then stop. Runs after 284 and 281.1.
 
 - 2026-09-17, **PHASE 284 STOPPED AT ITS REVERIFY, and PHASE 284.1 QUEUED AND STARTED to answer it, Tier 2.** Phase 284's verify found two probe errors and two minor look defects; its one fix round answered all four; the reverify then reproduced ONE defect the fix round introduced (the editor-foot lift moves the Architecture map up 8px too far, over the tab strip's feet) plus a flaky hover read in the probe, and everything else held (every corner and gutter the surround on dark, light and hue outside focus mode; one outline in every state; the split ring on the curve; geometry to the pixel; the 240px floor). By the method a second needs_work stops the workflow and goes to him; he chose one more targeted fix round with a fresh reverify, so it runs as its own phase. 284 and 284.1 land together.
+- 2026-09-17, **PHASE 286 QUEUED, entering session focus takes the keyboard out of the session (found by Phase 284's verifiers), Tier 2.** In Phase 284's first probe run sixteen of 33 findings were one thing: the leave chord did nothing because entering the mode had left `document.activeElement` on `body` (the flight hides the surface and Chromium blurs a hidden element; `focus-flight.ts:494`), so three states were photographed inside the mode with the frame off by design. The parent reads the same, so it is Phase 80.1's and not Phase 284's; the fix round taught `probe:p284` to click first and note it, and this entry gives the keyboard back after the flight and makes `probe:sessionfocus` assert the leave actually left.
+
+- 2026-09-17, **PHASES 284 AND 284.1 LANDED, the quiet surround and the fix round its reverify asked for, one commit, version 0.107.0 unmoved, no tag, pushed.** The work area alone carries one 1px outline with a 14px corner, 8px gutters separate it from both sidebars with an 8px inset at the bottom and right, nine hairlines facing the work go quiet, and the selected session row and active activity item trade their marker bar for a soft fill with a restrained outline: option B of the study, chosen in his words, over his earlier one-hairline ruling, which DESIGN.md, DESIGN-SPEC and research 75 now record as reversed. No colour literal and no new token; the dark tokens.css block is byte identical to its pin and conformance:hue passed on the final code. **Verified in the lane docs/method sets out and it stopped once**: the verify found two probe errors and two minor look defects, one fix round answered them, the reverify found one defect that fix round had introduced (the editor-foot lift moved the Architecture map 8px too far), the phase stopped, he chose Phase 284.1, whose single-margin repair was measured against the alternative in the app and passed both reverifiers. Three things a person will notice: every visible session resized once at first paint (8 or 16px narrower, 8px shorter); a 1028-1043px window with the rail expanded now draws it collapsed; with sessions on the right the editor overlays 16px sooner. Screenshots at HEAD and at the parent were read by eye on dark, light and hue 150 (`out/p284/` in the worktree). Phase 286 queued from what the verifiers found.

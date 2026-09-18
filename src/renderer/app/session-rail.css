@@ -4,7 +4,9 @@
    Colocated with SessionRail.tsx. The rail is EXACTLY the activity bar's
    width, so a collapsed dock reads as the window's right bookend rather than
    as a panel that failed to open, and it is the same material as the expanded
-   dock (--bg-sidebar, one 1px --border edge) so nothing new is introduced.
+   dock so nothing new is introduced: --bg-sidebar, and since Phase 284 a
+   TRANSPARENT 1px edge facing the work, with the 8px gutter and the work's
+   own outline doing the separating (styles/app.css, `.session-dock`).
 
    No width transition, here or on the dock: every animated frame of a resize
    is a ResizeObserver fit and therefore a tmux resize of live sessions
@@ -93,17 +95,14 @@
   color: var(--text-primary);
 }
 
-/* The same 2px accent marker the expanded row carries. */
-.rail-item.selected::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  border-radius: var(--r-bar);
-  background: var(--accent);
-}
+/* PHASE 284. The 2px accent marker that stood here is DELETED. It was "the
+   same marker the expanded row carries", and the expanded row lost its bar by
+   the operator's ask of 2026-09-17, so leaving this one would have brought
+   the bar back the moment the list was collapsed. The fill above is the whole
+   treatment. The expanded row's 1px outline is NOT copied here: that row is a
+   chip with --r-md and room around it, and this one is FULL BLEED across the
+   48px rail, where an outline would be two rules from edge to edge. Fill
+   alone is what the project tab and the project rail's row already do. */
 
 .rail-glyph {
   position: relative;

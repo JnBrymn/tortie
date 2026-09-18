@@ -398,10 +398,12 @@ export function Sidebar(): React.JSX.Element {
       style={{ width: renderedWidth, flexBasis: renderedWidth }}
     >
       {/* PHASE 135. The activity bar as a 36px row, FIRST, above every view's
-          own header band. Its bottom hairline continues the project rail's
-          band hairline straight across the window, and the sidebar's own view
-          header sits under it. App.tsx draws the 48px column instead whenever
-          this row is not drawn. */}
+          own header band, with the sidebar's own view header under it. It used
+          to carry a bottom hairline that continued the project rail's band
+          hairline across the window; Phase 284 drew both transparent with
+          every other rule in the surround (activity-bar.css), so the row is
+          still 36px and nothing under it moved. App.tsx draws the 48px column
+          instead whenever this row is not drawn. */}
       {activityRow ? <ActivityBar variant="row" /> : null}
       {view === 'scm' ? (
         <div className="sidebar-view" data-view="scm" tabIndex={-1}>

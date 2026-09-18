@@ -1,3 +1,8 @@
+/* The frame's three numbers (Phase 284). First statement on purpose: an
+   @import after any rule is dropped by the parser, and work-area.test.ts
+   holds it here. The file's own header says why they are not in tokens.css. */
+@import './frame-geometry.css';
+
 /* ---------------------------------------------------------------------------
    The work area (Phase 18 item 3)
 
@@ -23,14 +28,115 @@
    frame of a resize is a ResizeObserver fit, and every fit pushes new
    cols/rows to real sessions (DESIGN.md §5 — the terminal region never
    animates).
+
+   PHASE 284, THE QUIET SURROUND. `.work-area` is the FRAME: the one region in
+   the window that wears a complete outline, with a gutter between it and the
+   surround. The operator chose it from a study on 2026-09-17 (design/
+   directions.md, option B). Everything the frame adds is DECLARED geometry.
+   The gutter is a margin and the curve is a radius, both constant, so each
+   visible session is resized once, at the first paint after the upgrade, and
+   never again for the frame's sake. The margins below are the same numbers
+   `frameReservedWidth()` takes out of the row in ../state/chrome-geometry.ts
+   (`FRAME_GAP`, by value), so the width model and the rendered width agree.
 --------------------------------------------------------------------------- */
 
 .work-area {
+  /* The `::after` below needs a containing block. `relative` with no z-index
+     makes NO stacking context, so `.ed-panel.ed-overlay` still competes in
+     the root context exactly as it did, and diagnostics.css's note that the
+     walk from a cell to a stacking context passes through here stays true. */
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;
+  /* THE GUTTERS. Right and bottom always: with the dock drawn the right one
+     is the gap to the dock, without it it is the inset from the window edge.
+     Top never: the line lands on the title band's last pixel row, where the
+     hairline this phase removed used to be, and the band below still starts
+     where it always did. Left only beside a drawn sidebar, in the next rule.
+     A margin and never a `gap` on `.shell-body`, which would also open the
+     project rail, the activity bar and the sidebar from one another. */
+  margin: 0 var(--frame-gap) var(--frame-gap) 0;
+  /* The INNER radius, and the canvas under it. Neither clips anything. They
+     exist so the anti-aliased seam between the line's inner arc and the
+     children's clip arc composites over canvas and never over the surround,
+     and so the children below have a computed radius to inherit. */
+  border-radius: calc(var(--r-frame) - var(--frame-edge));
+  /* The same inner radius AS A PROPERTY, for the one descendant `inherit`
+     cannot reach: Phase 40's focused-split box, six levels down, at the end
+     of this file. Session focus zeroes it beside the radius (focus-mode.css
+     section 7), so the box follows the frame off. */
+  --frame-corner: calc(var(--r-frame) - var(--frame-edge));
+  background: var(--bg-canvas);
+}
+
+/* App.tsx renders <Sidebar /> immediately before `.work-area` and Sidebar.tsx
+   stamps the slot, so adjacency IS "the sidebar is drawn": ⌘B unmounts it and
+   the work's left line lands on the activity column's last pixel column,
+   which holds nothing. Two attribute-or-class terms against the base rule's
+   one, so source order does not matter. */
+[data-slot='sidebar'] + .work-area {
+  margin-left: var(--frame-gap);
+}
+
+/* THE ONE OUTLINE. An overlay, never a border, a padding or an inset shadow
+   on a box xterm is laid out in: xterm's canvas and the header backgrounds
+   paint over an inset shadow (Phase 40's note in styles/app.css), and a real
+   border or padding would take two more pixels out of every terminal in both
+   axes. It is drawn OUTSIDE the work's box, in the first pixel of the gutter,
+   so nothing the work draws is ever under it: the active tab's two pixel
+   accent inset and Phase 40's focused-split box both sit on the work's own
+   outermost pixel ring and an overlay at `inset: 0` would have covered them.
+   The line therefore costs the terminal nothing beyond the gap it sits in.
+
+   `--border-strong`, the strongest rung of the border ramp, and nothing else
+   at region size takes it. Computed 2026-09-17: 1.658 on the surround and
+   1.594 on the canvas on the dark base, 1.866 and 2.002 on the light one,
+   against 1.297 for the hairlines it replaces.
+
+   One above the editor overlay in the ROOT stacking context: over everything
+   inside the work (focused-split box, resizers, scroll lane, the overlay
+   editor and its scrim) and under the flying copy, the Catch Me Up layer and
+   every modal, toast and tooltip. */
+.work-area::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--frame-edge));
+  border: var(--frame-edge) solid var(--border-strong);
+  border-radius: var(--r-frame);
+  pointer-events: none;
+  z-index: calc(var(--z-editor-overlay) + 1);
+}
+
+/* THE CLIP IS ON THE CHILDREN. If `.work-area` clipped, it would clip its own
+   `::after`, which lives outside its box. The line's box is one edge larger
+   with the outer radius, so its inner arc and the children's arc share a
+   centre: the same pixels a real border with a clip would give.
+
+   `clip`, never `hidden`. A `hidden` box is a scroll container, and a browser
+   scrolls a scroll container to reveal a focused element; xterm's helper
+   textarea follows the cursor. A `clip` box has no scroll offset to move. It
+   does not contain fixed descendants either, which is why Monaco's hover and
+   suggest widgets (`fixedOverflowWidgets`) still leave the editor. */
+.work-area > * {
+  overflow: clip;
+}
+
+/* `inherit` on a corner longhand takes the parent's computed inner radius. In
+   the "right" orientation, and with no project open, the strip is not
+   rendered, so `.work-row` is BOTH the first and the last child and takes all
+   four corners. Session focus zeroes the parent's radius (focus-mode.css
+   section 7) and these follow it with no rule of their own. */
+.work-area > :first-child {
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+}
+
+.work-area > :last-child {
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
 }
 
 .work-row {
@@ -43,4 +149,38 @@
      the sub-1400px editor overlay, which must start BELOW the hoisted band
      rather than covering it. */
   position: relative;
+}
+
+/* PHASE 40'S FOCUSED-SPLIT BOX AT THE FRAME'S CORNER (Phase 284 fix round).
+   The ring (styles/app.css, S4A) sits at the pane's outermost pixel, so the
+   line above never covers it. But where the focused pane's corner IS the
+   frame's corner, the row's clip cut the ring square: in the probe's own C
+   photograph the ring's left edge stopped 12px above the bottom at
+   x=work.left and the frame's grey arc closed the corner instead. The two
+   rules below give the ring the inner radius on that corner alone, so it
+   follows the arc the way the first session tab does, and an inset border
+   follows its own box's radius, so no clip is involved.
+
+   The corner leaf is found by STRUCTURE, not by a stamp on the DOM.
+   SplitSurface.tsx renders a binary tree: `.split-node.row` holds a left
+   cell, a divider and a right cell; `.split-node.column` a top cell, a
+   divider and a bottom cell. A pane is at the tree's bottom-left exactly when
+   NO ancestor cell is the right half of a row or the top half of a column,
+   and `:not()` with a complex selector says "no such ancestor" at any depth,
+   so MAX_LEAVES (state/split-tree.ts) never enters the selector. Bottom-right
+   is "no ancestor cell is a first half", and only while the terminal stack is
+   the row's last child: EditorPanel renders null when closed, and a split
+   editor beside the stack owns that corner with a straight seam between.
+
+   Only the bottom corners. A 36px band or the identity strip is always above
+   the tree, and RegionBars draws every banner above it too, so the top
+   corners of a pane are never the frame's. The drop zone a drag arms
+   (`.split-drop-zone`, positioned by rect) shows the same cut for the length
+   of a drag; it is transient and it is left alone. */
+.split-pane.focused:not(:is(.split-node.row > .split-cell:last-child, .split-node.column > .split-cell:first-child) .split-pane)::after {
+  border-bottom-left-radius: var(--frame-corner);
+}
+
+.work-row > .center:last-child .split-pane.focused:not(.split-cell:first-child .split-pane)::after {
+  border-bottom-right-radius: var(--frame-corner);
 }

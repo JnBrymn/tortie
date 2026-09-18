@@ -219,12 +219,21 @@ const HELPER = 'electron-run.mjs';
  * landed within an hour of each other and each had raised it to 140 on its own
  * branch: main carries both probes and the floor must count both.
  *
+ * PHASE 284 RAISED IT FROM 141 TO 142, for build/p284/probe-p284.mjs
+ * (`probe:p284`), the app run for the quiet surround: one Electron at a time
+ * through eleven states, reading the work's one outline, its 8px gutters, the
+ * nine hairlines that lost their colour and kept their pixel, and both
+ * resizers under a real pointer and a real Tab, with a second Electron from
+ * P284_PARENT_CHECKOUT afterwards and never beside it. Measured at 142 names
+ * on 2026-09-17 with `node build/assert-electron-teardown.mjs --list`, which
+ * derives the population and never reads this constant.
+ *
  * RAISE IT WHEN YOU ADD ONE, in the same commit, and that is not optional
  * bookkeeping. Adding a probe cannot turn this gate red, so a floor left where
  * it was is a floor that would let the probe you just added be deleted again in
  * silence, which is the drift this constant replaced a hand list to stop.
  */
-const HELPER_USER_FLOOR = 141;
+const HELPER_USER_FLOOR = 142;
 
 /**
  * This file is not a helper user, and it reads as one to its own scanner.

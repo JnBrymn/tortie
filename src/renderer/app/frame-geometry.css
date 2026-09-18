@@ -1,0 +1,55 @@
+/* ---------------------------------------------------------------------------
+   The frame's three numbers (Phase 284, the quiet surround)
+
+   The work area is the one thing in the window with a complete outline: a
+   1px line on a 14px radius, with an 8px gutter of the surround's ground
+   between it and whatever is beside it. These are those three numbers and
+   nothing else. work-area.css pulls this file in as its first statement, the
+   way globals.css pulls in tokens.css, and every rule that draws the frame,
+   clips to it, seats a resizer in the gutter or rounds a corner to meet it
+   reads them from here.
+
+   THEY MIRROR src/renderer/state/chrome-geometry.ts BY VALUE:
+     --r-frame     FRAME_RADIUS
+     --frame-gap   FRAME_GAP
+     --frame-edge  FRAME_EDGE
+   CSS cannot import a TypeScript constant, and the gutter is a term of the
+   row's width budget (`frameReservedWidth`), so the number has to exist on
+   both sides. chrome-geometry.test.ts reads this file and holds the two to
+   one number, and holds this block to exactly these three declarations.
+   Change one side alone and that test is red. It is the same arrangement as
+   the Architecture map's stage box, which mirrors MAP_BOX_R because CSS
+   cannot read an SVG rx either.
+
+   WHY THEY ARE NOT IN tokens.css, where every other token lives. Two
+   reasons, both measured on 2026-09-17. conformance:hue rule 25 digests the
+   first `:root {` block of that file byte for byte, so a declaration added
+   INSIDE it turns the rule red, and so does a new block placed BEFORE it. A
+   second block placed after the light base leaves both digests unmoved, and
+   is still refused: tokens.css is itself on that gate's path list, so
+   touching it at all owes the 13 minute run. A geometry token is no reason
+   to spend it. That site is the fallback if a later round wants these beside
+   --r-lg.
+
+   Keyed on `:root` with no scheme attribute, so both bases inherit it. There
+   is no colour in this file and there must never be one: the frame's colours
+   are --border-strong, --bg-canvas and --bg-sidebar, which already turn with
+   the Appearance controls.
+
+   --r-frame HAS EXACTLY ONE USER, the work's frame, and the arcs that have
+   to meet it (the children's clip at `--r-frame - --frame-edge`, 13px, which
+   is concentric with the line's inner edge). It is not the next step of the
+   radius family. --r-lg at 10px stays reserved for modals and overlays
+   (DESIGN.md §1.9), and a row or a chip inside the surround keeps --r-md.
+
+   --frame-edge is NOT a width. The line is drawn in the first pixel of the
+   gutter and never inside the work, so it costs the terminal nothing beyond
+   the gap it sits in. A border or a pixel of padding would have moved the
+   box xterm measures by 2px in both axes.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --r-frame: 14px;
+  --frame-gap: 8px;
+  --frame-edge: 1px;
+}

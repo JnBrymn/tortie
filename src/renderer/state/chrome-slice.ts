@@ -242,6 +242,13 @@ const LS_PROJECTS_COLLAPSED = 'gmux.projectsCollapsed';
  * anywhere. Teaching them about `sessionFocus` would give focus a way to
  * change a number the person chose, which is the one thing the mode must
  * never do.
+ *
+ * Phase 284 note, for the same reader. The work's frame is OFF in focus mode
+ * (focus-mode.css section 7: no margin, no radius, no line) and `workArea`
+ * below still subtracts its gutters, 8 or 16px of them. That is this same
+ * ruling and not a miss: the number is the ordinary layout's, which is the
+ * one the sidebar's clamp is about. This function's body did not change for
+ * that phase; the term arrives through `workAreaWidth` and `sidebarMaxWidth`.
  */
 export function chromeGeometryOf(
   s: Pick<

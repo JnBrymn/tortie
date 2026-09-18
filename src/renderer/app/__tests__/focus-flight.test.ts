@@ -23,7 +23,11 @@
  *    opacity 1 and the next enter would not fade;
  *  - a split group whose leaves are ALL waiting to be restored is refused.
  *    The DOM gate cannot see that, because TerminalRegion writes
- *    `data-surface-leaves` for every group whatever its leaves are doing.
+ *    `data-surface-leaves` for every group whatever its leaves are doing;
+ *  - the work's frame (Phase 284) is read at the ONE end of the flight that
+ *    has one, inside the toggle the destination already pays for. A second
+ *    toggle is a second forced layout inside the gesture, and the frame read
+ *    at the wrong end is the whole window, which rounds nothing.
  *
  * The vitest environment is node and jsdom is not a dependency of this
  * repository, so the DOM is a hand built stub and the copy builder is mocked.
@@ -96,40 +100,63 @@ function makeCopyNode(): {
   };
 }
 
-/** A `classList` that answers add, remove and contains, and nothing else. */
+/**
+ * A `classList` that answers add, remove and contains, and nothing else. It
+ * keeps a log of every write, because "one toggle" is a claim about how many
+ * times the class attribute was written and not about where it ended up.
+ */
 function classList(initial: string[] = []): {
   add(name: string): void;
   remove(name: string): void;
   contains(name: string): boolean;
   names(): string[];
+  writes(): string[];
 } {
   const held = new Set(initial);
+  const log: string[] = [];
   return {
     add: (name) => {
+      log.push(`+${name}`);
       held.add(name);
     },
     remove: (name) => {
+      log.push(`-${name}`);
       held.delete(name);
     },
     contains: (name) => held.has(name),
-    names: () => [...held]
+    names: () => [...held],
+    writes: () => [...log]
   };
 }
 
 const FIRST = { left: 220, top: 74, width: 800, height: 600 };
 const LAST = { left: 0, top: 38, width: 1440, height: 862 };
+/**
+ * `.work-area` while the chrome is drawn (Phase 284): it starts one 36px band
+ * above the surface and shares its left, right and bottom edges. With either
+ * focus class on the shell its gutters are gone and it is the whole window
+ * under the title band, which is `LAST`.
+ */
+const FRAME = { left: 220, top: 38, width: 800, height: 636 };
 
 /** Install a document whose surface answers `first` before the class flips. */
 function installDom(opts: {
   surface: boolean;
   shellClasses?: string[];
   reducedMotion?: boolean;
+  /**
+   * Phase 284. Give the surface a `.work-area` above it and let the two frame
+   * tokens be read. Off by default, which is every case written before the
+   * frame existed: a surface with no `closest` and a radius of zero.
+   */
+  framed?: boolean;
 }): {
   shell: {
     classList: ReturnType<typeof classList>;
     attrs: Record<string, string>;
   };
   surface: { style: Record<string, string> };
+  frame: { reads: () => number };
   appended: unknown[];
 } {
   // `attrs` is separate from `classList` on purpose, and the separation is
@@ -150,14 +177,28 @@ function installDom(opts: {
   // The surface is small while the chrome is drawn and fills the window once
   // either focus class is on the shell, which is what the real stylesheet
   // does and what makes the destination measurement meaningful here.
-  const surface = {
-    style: {} as Record<string, string>,
-    getBoundingClientRect: (): typeof FIRST =>
-      shell.classList.contains('gmux-focus-measure') ||
-      shell.classList.contains('session-focus')
-        ? LAST
-        : FIRST
+  const focusedNow = (): boolean =>
+    shell.classList.contains('gmux-focus-measure') ||
+    shell.classList.contains('session-focus');
+  let frameReads = 0;
+  const frame = {
+    reads: (): number => frameReads,
+    getBoundingClientRect: (): typeof FIRST => {
+      frameReads += 1;
+      return focusedNow() ? LAST : FRAME;
+    }
   };
+  const surface: {
+    style: Record<string, string>;
+    getBoundingClientRect: () => typeof FIRST;
+    closest?: (sel: string) => unknown;
+  } = {
+    style: {} as Record<string, string>,
+    getBoundingClientRect: (): typeof FIRST => (focusedNow() ? LAST : FIRST)
+  };
+  if (opts.framed === true) {
+    surface.closest = (sel: string) => (sel === '.work-area' ? frame : null);
+  }
   const appended: unknown[] = [];
   vi.stubGlobal('document', {
     documentElement: {},
@@ -176,8 +217,12 @@ function installDom(opts: {
     matchMedia: () => ({ matches: opts.reducedMotion === true })
   });
   vi.stubGlobal('getComputedStyle', () => ({
-    getPropertyValue: (name: string) =>
-      name === '--dur-panel' ? '200ms' : 'cubic-bezier(0.2, 0, 0, 1)'
+    getPropertyValue: (name: string) => {
+      if (name === '--dur-panel') return '200ms';
+      if (opts.framed === true && name === '--r-frame') return ' 14px';
+      if (opts.framed === true && name === '--frame-edge') return ' 1px';
+      return 'cubic-bezier(0.2, 0, 0, 1)';
+    }
   }));
   vi.stubGlobal('requestAnimationFrame', (cb: (t: number) => void) => {
     setTimeout(() => {
@@ -185,14 +230,17 @@ function installDom(opts: {
     }, 0);
     return 0;
   });
-  return { shell, surface, appended };
+  return { shell, surface, frame, appended };
 }
 
 const {
   everyLeafNeedsRestore,
   focusRefusal,
+  frameInnerRadius,
+  framedEnd,
   invertTransform,
   measureFocusRect,
+  measureFocusRects,
   toggleSessionFocus,
   ARRIVE_ATTR,
   NOTHING_TO_FOCUS,
@@ -250,6 +298,130 @@ describe('measureFocusRect', () => {
       'ordinary'
     );
     expect(shell.classList.names()).toEqual([]);
+  });
+});
+
+// PHASE 284. A leave needs the surface's destination AND the frame's, and both
+// must come out of ONE toggle: every toggle is a forced layout inside the
+// gesture, and the whole design is that the gesture forces exactly one.
+describe('measureFocusRects', () => {
+  it('reads two elements inside ONE toggle on the way in', () => {
+    const { shell, surface, frame } = installDom({ surface: true, framed: true });
+    const rects = measureFocusRects(
+      shell as unknown as HTMLElement,
+      [surface, frame] as unknown as Element[],
+      'focused'
+    );
+    // Both were read with the measure class ON: the frame's gutters are gone.
+    expect(rects).toEqual([LAST, LAST]);
+    expect(shell.classList.writes()).toEqual([
+      '+gmux-focus-measure',
+      '-gmux-focus-measure'
+    ]);
+    expect(shell.classList.names()).toEqual([]);
+  });
+
+  it('reads two elements inside ONE toggle on the way out, and restores the class', () => {
+    const { shell, surface, frame } = installDom({
+      surface: true,
+      framed: true,
+      shellClasses: ['session-focus']
+    });
+    const rects = measureFocusRects(
+      shell as unknown as HTMLElement,
+      [surface, frame] as unknown as Element[],
+      'ordinary'
+    );
+    // Chrome back: the surface is small again and the frame has its gutters.
+    expect(rects).toEqual([FIRST, FRAME]);
+    expect(shell.classList.writes()).toEqual([
+      '-session-focus',
+      '+session-focus'
+    ]);
+    expect(shell.classList.names()).toEqual(['session-focus']);
+  });
+
+  it('answers in the order it was asked, and with nothing for nothing', () => {
+    const { shell, surface, frame } = installDom({ surface: true, framed: true });
+    expect(
+      measureFocusRects(
+        shell as unknown as HTMLElement,
+        [frame, surface] as unknown as Element[],
+        'ordinary'
+      )
+    ).toEqual([FRAME, FIRST]);
+    expect(
+      measureFocusRects(shell as unknown as HTMLElement, [], 'focused')
+    ).toEqual([]);
+    expect(shell.classList.names()).toEqual([]);
+  });
+
+  it('is what measureFocusRect is made of, so the two cannot disagree', () => {
+    const { shell, surface } = installDom({ surface: true });
+    const one = measureFocusRect(
+      shell as unknown as HTMLElement,
+      surface as unknown as Element,
+      'focused'
+    );
+    const [many] = measureFocusRects(
+      shell as unknown as HTMLElement,
+      [surface] as unknown as Element[],
+      'focused'
+    );
+    expect(one).toEqual(many);
+  });
+});
+
+describe('the work’s frame', () => {
+  it('reads the inner radius from the two tokens the frame is drawn with', () => {
+    installDom({ surface: true, framed: true });
+    expect(frameInnerRadius()).toBe(13);
+  });
+
+  it('answers zero where the tokens cannot be read, which is a square copy', () => {
+    // The default stub answers every unknown name with the easing curve.
+    installDom({ surface: true });
+    expect(frameInnerRadius()).toBe(0);
+    vi.stubGlobal('getComputedStyle', () => {
+      throw new Error('no computed style');
+    });
+    expect(frameInnerRadius()).toBe(0);
+  });
+
+  it('never invents a radius from the edge alone, or a negative one', () => {
+    const answer = (frame: string, edge: string): number => {
+      vi.stubGlobal('getComputedStyle', () => ({
+        getPropertyValue: (name: string) =>
+          name === '--r-frame' ? frame : name === '--frame-edge' ? edge : ''
+      }));
+      return frameInnerRadius();
+    };
+    installDom({ surface: true });
+    expect(answer('', '1px')).toBe(0);
+    expect(answer('1px', '4px')).toBe(0);
+    // An unreadable edge leaves the outer radius, which is the curve of the
+    // line itself and is the closest honest answer.
+    expect(answer('14px', '')).toBe(14);
+  });
+
+  it('frames an enter at `first` and a leave at `last`', () => {
+    expect(framedEnd('focused', FRAME, LAST, 13)).toEqual({
+      frame: FRAME,
+      end: 'first',
+      radius: 13
+    });
+    expect(framedEnd('ordinary', LAST, FRAME, 13)).toEqual({
+      frame: FRAME,
+      end: 'last',
+      radius: 13
+    });
+  });
+
+  it('hands the copy nothing when there is no frame or no radius', () => {
+    expect(framedEnd('focused', null, LAST, 13)).toBeUndefined();
+    expect(framedEnd('ordinary', LAST, null, 13)).toBeUndefined();
+    expect(framedEnd('focused', FRAME, LAST, 0)).toBeUndefined();
+    expect(framedEnd('focused', FRAME, LAST, Number.NaN)).toBeUndefined();
   });
 });
 
@@ -479,6 +651,71 @@ describe('a whole gesture', () => {
     // finished `both` fill would hold the chrome at opacity 1 and stop it
     // fading out.
     expect(shell.attrs[ARRIVE_ATTR]).toBeUndefined();
+  });
+
+  // PHASE 284. The copy is handed the frame at the framed end of the flight.
+  /** The fifth argument of the one `buildStillCopy` call this gesture made. */
+  function framedArgument(): unknown {
+    expect(buildStillCopy).toHaveBeenCalledTimes(1);
+    const args = buildStillCopy.mock.calls[0] as unknown as unknown[];
+    // The fourth is left undefined on purpose, so the copy resolves the
+    // terminal's own background exactly as it did before there was a fifth.
+    expect(args[3]).toBeUndefined();
+    return args[4];
+  }
+
+  it('hands the copy the frame as it is NOW on an enter, in one toggle', async () => {
+    const { shell, frame } = installDom({ surface: true, framed: true });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+
+    // Read before anything toggled, so it still has its gutters and its band.
+    expect(framedArgument()).toEqual({ frame: FRAME, end: 'first', radius: 13 });
+    const measures = shell.classList
+      .writes()
+      .filter((w) => w.endsWith('gmux-focus-measure'));
+    expect(measures).toEqual(['+gmux-focus-measure', '-gmux-focus-measure']);
+    // Read ONCE, and outside the toggle: `first` had already forced that
+    // layout, so the frame cost the enter no layout of its own.
+    expect(frame.reads()).toBe(1);
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it('hands the copy the frame as it WILL BE on a leave, in one toggle', async () => {
+    const { shell, frame } = installDom({
+      surface: true,
+      framed: true,
+      shellClasses: ['session-focus']
+    });
+    store.sessionFocus = true;
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+
+    // Read ONCE, inside the toggle the destination already pays for.
+    expect(frame.reads()).toBe(1);
+    // The mode is on, so the frame NOW is the whole window with no gutters.
+    // What the copy needs is the frame at the destination.
+    expect(framedArgument()).toEqual({ frame: FRAME, end: 'last', radius: 13 });
+    const focusWrites = shell.classList
+      .writes()
+      .filter((w) => w.endsWith('session-focus'));
+    expect(focusWrites).toEqual(['-session-focus', '+session-focus']);
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it('hands the copy nothing when the surface has no frame above it', async () => {
+    // Every double written before Phase 284: a plain object with no `closest`.
+    const { surface, frame } = installDom({ surface: true });
+    expect('closest' in surface).toBe(false);
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+
+    expect(framedArgument()).toBeUndefined();
+    expect(frame.reads()).toBe(0);
+    await new Promise((r) => setTimeout(r, 20));
   });
 
   it('goes straight to the swap when the photograph cannot be taken', async () => {

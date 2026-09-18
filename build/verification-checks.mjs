@@ -1180,6 +1180,27 @@ export const CHECKS = [
   // control that the same delay unchanged does write. It spawns no agent and
   // spends no token.
   electron('probe:p277'),
+  // PHASE 284's app run: the work gets the one outline, and the surround goes
+  // quiet. ONE Electron at a time on a scratch profile with a scratch HOME under
+  // its own GMUX_HARNESS_DIR and the socket gmux-p284-<pid>, over one git project
+  // it builds itself and plain shell sessions. Eleven states in one session —
+  // sessions right and top, a two-way split with a tab dragged over it, the
+  // editor split, overlay and fill, both sidebars away, focus mode in and out,
+  // the projects on the left, the light base and one turned hue — and fourteen
+  // readings taken off rectangles, computed styles and hit tests, never pixels:
+  // the 8px gutters, the line drawn 1px OUTSIDE the work's box, the children's
+  // clip, exactly ONE region-sized outline (and Phase 40's focused-split box
+  // beside it, named), the nine hairlines at alpha 0 and STILL 1px (the spec's
+  // eight and Source Control's own header, read in the Explorer too), the line's
+  // contrast against both grounds computed from the computed colours, the four
+  // corners hit tested, both resizers under a real pointer and a real Tab, the
+  // band in accent while a terminal has the keyboard, the selection fills, the
+  // regions summing to the window, the 38px titlebar and the flying copy's
+  // corners. P284_PARENT_CHECKOUT names a BUILT parent worktree for a second
+  // Electron, one after the other and never at once; the run passes when HEAD
+  // has 0 findings and the parent fails R1, R2, R4, R5 and R11. It writes
+  // photographs under out/p284. It spawns no agent and spends no token.
+  electron('probe:p284'),
   // PHASE 281's app run, and the ONE probe in this table whose app reads the
   // person's real login keychain: the Claude meter's shipping reader, at the
   // parent and at HEAD, never at once, with P281_EXPECT naming the answer. A

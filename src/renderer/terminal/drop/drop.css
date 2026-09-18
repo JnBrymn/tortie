@@ -13,6 +13,13 @@
 
 .attach-drop-zone {
   position: fixed;
+  /* The work's inner radius, on all four corners (Phase 284). This wash is a
+     `position: fixed` PORTAL on document.body, sized to the leaf's rect, so
+     the frame's clip (app/work-area.css) never reaches it, and whichever pane
+     it lights it must not push a square corner through the curve. It lives
+     for the length of a drag; a uniform radius is the honest price of not
+     teaching a portal where the frame is. */
+  border-radius: calc(var(--r-frame) - var(--frame-edge));
   background: var(--drop-wash);
   border: 1px solid var(--accent);
   box-shadow: inset 0 0 24px var(--accent-wash);

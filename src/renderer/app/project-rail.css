@@ -17,9 +17,16 @@
    states 200px or 48px.
 
    Every colour is a token. The rail is the same material as the activity bar
-   and the session dock: --bg-sidebar with one 1px --border edge.
+   and the session dock: --bg-sidebar. Since Phase 284 it is the ONE region of
+   the surround that still draws a 1px --border edge, and the rule below says
+   why.
 --------------------------------------------------------------------------- */
 
+/* PHASE 284. THIS EDGE STAYS, and it is the only one in the surround that
+   does. The quiet surround took the hairline off every region that FACES the
+   work. The rail never does: the activity column or the sidebar is always
+   between them. What this line separates is two lists of NAMES, the projects
+   and the tree, and with no seam between them they read as one list. */
 .project-rail {
   position: relative;
   display: flex;
@@ -33,8 +40,10 @@
 }
 
 /* ---------------------------------------------------------------------------
-   The band — 36px, the same height every other region's band carries, with
-   the same single hairline under it (DESIGN §2.2).
+   The band — 36px, the same height every other region's band carries. Since
+   Phase 284 it carries no rule under it, like every other band in the
+   surround: a lone 200px hairline beside three bare headers is noise. The
+   colour goes and the pixel stays, so the content box is still 35px.
 --------------------------------------------------------------------------- */
 
 .prail-band {
@@ -44,7 +53,7 @@
   height: 36px;
   flex: 0 0 36px;
   padding: 0 var(--space-3);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
   color: var(--text-muted);
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
@@ -147,17 +156,15 @@
   color: var(--text-primary);
 }
 
-/* The same 2px accent marker the session rail's selected row carries. */
-.prail-row.selected::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  border-radius: var(--r-bar);
-  background: var(--accent);
-}
+/* PHASE 284. The 2px accent marker that stood here is DELETED. It was "the
+   same marker the session list's selected row carries", so keeping it would
+   have brought the bar back in the one place the operator asked it out of.
+   The fill above is the whole treatment, and NO outline is added: this is a
+   FULL-BLEED row, and a 1px outline on a full-bleed row is two rules across
+   the rail. Fill alone is the project TAB's own selected look, at the same
+   1.314 against the surround on dark and 1.193 on light. Turning the row into
+   an inset chip was refused: it would change the hit area and the width a
+   project's name truncates at, which is a thing a person can do. */
 
 .prail-open {
   display: flex;
