@@ -30271,6 +30271,98 @@ leave, the page opened from the session list).
 - No release.
 
 
+## Phase 290 — a rewind's caution belongs to the file, not to the view that is open (Phase 282.2's attack verifier, operator's ruling, 2026-09-18)
+
+**Subject.** `fix(editor): a rewind's hold survives a tab switch and the File view`
+
+**First body line.** `Phase 290: the tab owes the read, not the mount`
+
+**Semver.** Patch. After a rewind lands on a file you were typing in, Tortie refuses ⌥↩ until you save
+or undo. That caution now survives switching tabs, looking at the File view, and an undo made there.
+Before, any of those forgot it: the change you had rewound was accepted with nothing said, and a later
+⌥⌫ in that spot could write the agent's words back over your rewind.
+
+**Tier 3.** It can lose the person's work: the measured chain ends `[wrote REWOUND, wrote AGENT]`, the
+rewind gone from disk. It also puts a read behind a transition of the tab's own state, the shape that
+rolled a rewind back in 37 of 500 interleavings in Phase 282. Two independent methods, one an attack,
+the parent measurement mandatory, fix once, reverify, stop.
+
+**Charter.** Phase 282.2's attack verifier and its re-derive verifier, independently, 2026-09-18
+(`wf_ba13c84f-4ef`: attack P1 "undo elsewhere or a remount loses the way out", re-derive P1 "a tab
+switch drops the hold"), both graded major, both measured identical at main before 282.2 and after it.
+The fix agent was told a design ruling is not its to make and wrote three options; the operator read
+them at 16:40 and took the recommendation: land 282.2, queue the first option as its own phase, and do
+not hold 0.108.0 for it.
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **The hold is the mount's.** `src/renderer/editor/RedlineDocument.tsx:372-377` empties
+  `rewindHolds.current` whenever `tab.id` changes, and the array is a ref of the mounted component, so
+  the mode chip to File and back (an unmount) loses it as well. Phase 282 chose "one array per mount"
+  deliberately; nobody then drove a switch while a hold was landed on a dirty tab.
+- **The chain, in the unit rig through real events** (the attack verifier's `zz-p2822-attack` rig, a
+  real cancelable `beforeinput` and real ⌘Z keydowns, neither `redline-edits` nor `live-text` mocked;
+  adopted in part as `src/renderer/editor/__tests__/p2822-second-undo.test.ts`, whose block "STATED
+  LIMITS, MEASURED AS THEY STAND" at `:829` pins today's behaviour and is THE SEED this phase flips):
+  after switch-and-back, or `setMode('file')` then `setMode('redline')`, then ⌘Z, the tab reads
+  `{dirty: false, saved: AGENT, disk: REWOUND, reads: 1, walks: 0}`; ⌥↩ accepts "brown"→"red" with no
+  toast; the next watcher tick draws `"red"→"brown"` backwards; the next ⌥⌫ on it writes the agent's
+  text back. What the person meets in between: a clean tab with no banner that still draws the change
+  they rewound, ⌥⌫ answering "That change is already back to what it was.", ⌘S raising the stale
+  dialog, and ⌥↩ accepting silently.
+- **The same in the app, real Monaco** (scratch probe arm M, logs `app-M2-head.log` and
+  `app-M3-2821.log`, identical): mode chip to File, a click in Monaco, ⌘Z once, chip back to Redline:
+  no read in 2.5 s, `savedContents` the agent's text while the disk holds the rewind, three changes
+  drawn including the rewound one, ⌥↩ on it takes 3 → 2 with no toast. **The dirty variant needs no
+  undo at all**: File and back on the dirty tab, and ⌥↩ on the rewound change is accepted, 4 → 3.
+- **It needs a keystroke inside a rewind's write to begin**, which is a window of a few milliseconds
+  on a local disk. That is why it has not been reported and why the release was not held for it.
+
+### The mechanism
+
+1. **The tab owes the read, not the mount.** A per-tab mark in `src/renderer/editor/tab-io.ts`, set at
+   the two places `adoptWritten` (`:2048`) refuses, being a dirty tab and a baseline that is no longer
+   the `was` the write expected, and cleared by the first read that reloads the tab clean
+   (`refreshRepo`'s walk) or by a save's completion. It lives with the tab in the store, so it outlives
+   the view and dies with the tab.
+2. **Two doors pull the read.** `markDirty`'s dirty-to-clean edge (`src/renderer/editor/store.ts:1457`)
+   when the mark stands, which answers an undo made in the File view; and a Redline mount over a clean
+   tab whose mark stands, which answers the switch and the mode chip. Phase 282.2's effect keyed on
+   `[tab.dirty]` becomes a reader of the mark instead of the mount's array. `conformance:save` rule 14
+   pins the ORDER inside `markDirty` (the timer is armed after the tab is patched dirty); the pull goes
+   after that order and the rule is extended to say so, never relaxed.
+3. **⌥↩ asks the mark as well as the holds.** While the mark stands an accept answers the sentence it
+   answers today for a landed hold, `acceptDirty` on a dirty tab and the held sentence on a clean one,
+   so the dirty variant with no undo is refused too. No new sentence.
+4. **This lifts one of Phase 282.2's refusals on purpose**, "no read when no landed hold exists",
+   because the mark IS the landed hold seen from the tab. The other two stand: no read on the way into
+   dirty, and no adoption of remembered bytes.
+
+### The proof, run rather than read
+
+- The "STATED LIMITS" block in `p2822-second-undo.test.ts` flipped: after the switch, the mode chip and
+  the File-view undo, a read is pulled, the rewound change leaves the picture, and ⌥↩ before the read
+  answers the sentence; the write log never reads `wrote AGENT`. Red at the parent by construction,
+  since those tests assert the opposite today.
+- `probe:redlinemoveon` gains the attack's arm M (File view, ⌘Z, back; and the dirty variant), red at
+  the parent with the readings above and green at HEAD.
+- The attack this time: the mark against a tab evicted at `MAX_TABS`, a tab closed and reopened, a
+  project switch, a save in flight, the mark set twice by two rewinds, and the read racing the
+  watcher's own tick.
+- Gates: typecheck, build, test, smoke:t1, conformance:save (rule 14 extended), ablation:p268,
+  conformance:redline (rule 40's clause 7 re-pointed at the mark, its ablations kept red),
+  conformance:redline-write, probe:p277, probe:p268.
+
+### What is NOT in this phase
+
+- One ⌘Z more than it takes to reach clean still un-applies a pulled read, and redo is still lost once
+  it lands (282.2's P3 and P4). Making a reload non-undoable reverses Phase 237 and is a separate
+  ruling he has not made.
+- No change to any sentence, to the stale dialog, or to what a rewind writes.
+- No adoption of bytes a hold or a mark remembers.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -31051,4 +31143,6 @@ cycle rather than only the evening it was written.
 - 2026-09-18, **PHASE 286 LANDED, the keyboard stays in the session across the flight, `fb0f37ed`, version 0.107.0 unmoved, no tag, pushed.** Press ⇧⌘↩, type, and it lands in the session; press it again and the mode leaves. At the parent a string typed after the chord arrived in no tmux pane and the second chord was silent; at HEAD it arrives in the pane that held the keyboard, the SECOND pane in a split when that one held it. The flight blurred the terminal by hiding its surface and nothing gave the focus back; it now reads the keyboard before the hide and returns it in the same task as the restore. **The attack verifier returned needs_work on what surrounds the flight and the fix round took three things**: entered from the session list by the View menu the keyboard landed on nothing (the list is not drawn in the mode, so the entry's "keeps it there" described a state that cannot exist) and now goes to the outlined pane, also under reduced motion; **the chord was reaching xterm as a carriage return, so ⇧⌘↩ inside a terminal also sent Enter to the session** (prompt count 1 to 2 on the way in at the parent, `command not found` on the way out once the keyboard stayed), and the terminal's key handler now refuses it; and the fallback picks the outlined pane or nothing, never the first in document order. The reverifier passed each item live. `probe:sessionfocus` gains two readings and is red at the parent on `body`; `probe:p284`'s H arm is a finding. Stated limits: keys pressed during the 200 ms flight are dropped, and Escape inside the mode now goes to the agent, so the chord is the way out. Every key was injected over devtools; no physical key was pressed. Two seams it made visible are written into Phase 289. Gates: typecheck, build, npm test at 934 files and 14,910 tests, smoke:t1, probe:p284 with no finding.
 
 - 2026-09-18, **PHASES 282.1 AND 282.2 LANDED TOGETHER, the save surface's fix rounds re-verified and the way out the sentence promises, `14658526` + `280def9f`, version 0.107.0 unmoved, no tag, pushed.** In the Redline view, after a rewind lands on a file you were typing in, ⌥↩ says "Save or undo your edits first, then accept", and the undo half now works: against the 282.1 bytes the app still answers "still being rewound" 1,515 ms after ⌘Z, and at HEAD the change is accepted 12 to 16 ms after it. **282.1 is the reverify three phases had landed without**: it withdrew a release clause Phase 282's own fix round had added, which let an accept draw a rewound change backwards; it made conformance:save's rules 11 and 18 to 20 read the refusal rather than the order two names are mentioned in; and it stopped the Settings window's close from writing a cut list over a confirmed shell variable name when the file cannot be read. Both of its reverifiers then found the undo road did not complete, a second needs_work went to him, and he chose the read over a reworded sentence. **282.2's attack verifier found a real bug in that read**: a second ⌘Z landing inside it let the hold go on a dirty buffer's empty picture, and one ⌘⇧Z later ⌥↩ accepted the rewound change with nothing said; a hold whose adoption refused is now let go by bytes and never by a picture alone, the attack's own rig is adopted with five of seven cases red at the 282.1 bytes, and probe arm Z is red before the fix and green after. The gate's new clause could not see which way the flag was tested and now can. **STILL NOT TRUE, HIS RULING, AND QUEUED NEXT AS PHASE 290**: the hold belongs to the mounted view, so a tab switch, the mode chip to File and back, or an undo made in the File view forgets it, and then the rewound change is accepted silently and a later ⌥⌫ writes the agent's words back over the rewind (`[wrote REWOUND, wrote AGENT]`); identical on main before these commits, and it needs a keystroke inside a rewind's write to begin. He read it at 16:40, said land it, and the release is not held for it. One ⌘Z too many un-applies the pulled read and redo is lost once it lands; both stated. Gates: the whole battery green, ablation:p268 32 of 32, conformance:redline with 15 of 15 ablations, probe:p277, probe:p268 and probe:redlinemoveon.
+
+- 2026-09-18, **PHASE 290 QUEUED, a rewind's caution belongs to the file and not to the view that is open, Tier 3.** Phase 282.2's two verifiers independently measured that the hold lives in the mounted Redline view: a tab switch, the mode chip to File and back, or an undo made in the File view forgets it, after which the rewound change is accepted with nothing said and a later ⌥⌫ writes the agent's words back over the rewind. Identical on main before and after 282.2, and it needs a keystroke inside a rewind's write to begin. He read the three options at 16:40 and took the first: a per-tab mark set where the adoption refuses, cleared by a read or a save, with the clean transition and a Redline mount both pulling the read and ⌥↩ asking the mark. The release is not held for it; it runs after 0.108.0.
 
