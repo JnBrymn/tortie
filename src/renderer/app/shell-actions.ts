@@ -18,6 +18,9 @@ import type { SidebarViewId } from '../state/store';
 import { archSurfacesOn } from '../settings/settings-store';
 // PHASE 165. The leaf, not the barrel, which is the Search subject's door.
 import { focusSearchInput, selectionSeed } from '../search/focus';
+// Phase 289. The one way the keyboard goes back to a terminal. It imports
+// neither controller, so this file is still a leaf beneath both of them.
+import { focusTerminal } from './session-focus';
 
 /**
  * The session surface the keyboard is "on" right now: any focused element
@@ -48,9 +51,10 @@ export function showViewAction(view: SidebarViewId): void {
   const focusInside =
     viewEl !== null && viewEl.contains(document.activeElement);
   if (s.sidebarVisible && s.activeSidebarView() === view && focusInside) {
-    document
-      .querySelector<HTMLTextAreaElement>('.gmux-terminal-mount textarea')
-      ?.focus();
+    // Phase 289. The way back asks the one helper rather than the first
+    // terminal textarea in the document, so in a split the keyboard returns
+    // to the outlined pane.
+    focusTerminal();
     return;
   }
   s.showSidebarView(view);

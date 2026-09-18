@@ -18,13 +18,10 @@ import type { LaunchableAgentKind } from '@shared/types';
 import { keyDisplay } from '@shared/keymap';
 import { errorPayload, errorText, nextOrdinal, useApp } from '../state/store';
 import { defaultLaunchArgsFor } from './presets';
-
-/** Hand the keyboard to the visible terminal (same gesture as the shell). */
-function focusTerminal(): void {
-  document
-    .querySelector<HTMLTextAreaElement>('.gmux-terminal-mount textarea')
-    ?.focus();
-}
+// Phase 289. This file kept a copy of the shell's gesture that asked for the
+// first terminal textarea in the document. It asks the one helper now, so a
+// hotkey pressed over a split leaves the keyboard in the outlined pane.
+import { focusTerminal } from '../app/session-focus';
 
 /**
  * One per-agent hotkey press (Phase 94, item 2: exported so it can be driven).

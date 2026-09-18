@@ -85,6 +85,7 @@ import {
 import { stagedMapWidth } from './map-stage';
 import { remoteFileChip } from '../machines/editor';
 import { machineWriteRootFor } from '../state/machines-slice';
+import { focusTerminal as focusSessionTerminal } from '../app/session-focus';
 import './editor.css';
 
 /**
@@ -157,15 +158,29 @@ function modesAreCompact(panelWidth: number, optionCount: number): boolean {
   return panelWidth < 300 + 65 * optionCount;
 }
 
-/** Hand the keyboard back to the visible terminal (Esc / close flows). */
+/**
+ * Hand the keyboard back to the visible terminal (Esc / close flows).
+ *
+ * Phase 289. It asks the one helper rather than the first terminal textarea
+ * in the document, so closing the editor beside a split returns the keyboard
+ * to the outlined pane. The helper says nothing about what it found, so
+ * whether a terminal took the keyboard is read off the document afterwards.
+ *
+ * THE FALLBACK BELOW MOVES NOTHING TODAY, and is kept as it was found. The
+ * terminal stack is `<main class="center">` with no `tabindex`, so its
+ * `focus()` is refused; read in the running app on 2026-09-18 as
+ * `tookTheKeyboard=false`. It was as inert under the rule this replaced.
+ *
+ * STATED AND NOT FIXED HERE: ⌘E out of editor fill. The terminal is not
+ * drawn while the editor fills the row, so the call below is refused in the
+ * same task as `hidePanel()` and the keyboard rests on `body`, identically at
+ * this phase's parent. It is Phase 289's defect in a third surface that hides
+ * the work, and Phase 289's entry in docs/BACKLOG.md carries the reading.
+ */
 function focusTerminal(): void {
-  const xterm = document.querySelector<HTMLTextAreaElement>(
-    '.gmux-terminal-mount textarea'
-  );
-  if (xterm !== null) {
-    xterm.focus();
-    return;
-  }
+  focusSessionTerminal();
+  const el = document.activeElement;
+  if (el !== null && el.closest('.gmux-terminal-mount') !== null) return;
   document
     .querySelector<HTMLElement>('[data-slot="terminal-stack"]')
     ?.focus();

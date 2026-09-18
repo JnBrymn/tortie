@@ -127,8 +127,11 @@ const HELPER_TEXTAREA_SELECTOR = '.xterm-helper-textarea';
  * surface of one as `.surface-single`, whose only pane is that leaf. These
  * are the panes `TerminalPane` is handed `focused` for, so the keyboard and
  * the outline end up on the same pane.
+ *
+ * Exported since Phase 289, for `focusTerminal()` in ./session-focus.ts, so
+ * Enter on a session row and the menu path into the mode ask one question.
  */
-const FOCUSED_LEAF_TEXTAREA_SELECTOR =
+export const FOCUSED_LEAF_TEXTAREA_SELECTOR =
   `.split-pane.focused ${HELPER_TEXTAREA_SELECTOR}, ` +
   `.surface-single ${HELPER_TEXTAREA_SELECTOR}`;
 
@@ -495,8 +498,9 @@ function keyboardBefore(
  *
  * FROM THE LIST the focused pane's textarea again, and only when no pane is
  * marked, or the marked one draws no terminal, the first one the surface
- * draws, which is the pane `focusTerminal()` in ./session-focus.ts has always
- * picked for Enter on a row.
+ * draws. That was all `focusTerminal()` in ./session-focus.ts asked for Enter
+ * on a row until Phase 289, and it is that function's fallback still, so the
+ * two doors give one answer in both cases.
  *
  * `preventScroll` because the row is `overflow: clip` since Phase 284 and a
  * scroll container is exactly what it refuses to be.

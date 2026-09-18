@@ -16,6 +16,11 @@
  *
  * On a LEAVE the close swaps first and beginArrival fades the chrome back
  * in, exactly as a focus leave does. A leave never refuses and never waits.
+ *
+ * THE KEYBOARD SINCE PHASE 289. The leave does not wait, but the keyboard has
+ * to: the terminal cannot take it until React has taken `.overview-open` off
+ * the shell. `afterOverviewLeavesTheDom` is how a caller hears that, and
+ * ./open-overview.ts decides what to do with it.
  */
 
 import {
@@ -29,6 +34,11 @@ import {
 } from '../app/focus-flight';
 
 const SHELL_SELECTOR = '.shell';
+/**
+ * The class `../app/App.tsx` renders on the shell root while the page is
+ * open. `./overview.css` hangs `display: none` for the work area on it.
+ */
+const OPEN_CLASS = 'overview-open';
 
 /** One flight at a time. A second chord inside the 200 ms is dropped. */
 let flying = false;
@@ -107,4 +117,51 @@ export function leaveOverviewFlight(close: () => void): void {
   close();
   if (shell === null || prefersReducedMotion()) return;
   beginArrival(shell, flightTiming().ms);
+}
+
+/**
+ * Run `then` once a close has reached the DOM, and hand back the cancel
+ * (Phase 289).
+ *
+ * WHY ANYBODY HAS TO WAIT. The close is a store write, and React takes
+ * OPEN_CLASS off the shell on its own clock, after the task that made the
+ * write. Until it does the work area is `display: none`, and nothing inside a
+ * box that is not drawn can take the keyboard. Measured on 2026-09-18, at
+ * HEAD and at the parent: a leave that asked the terminal to take the
+ * keyboard in the same task left `document.activeElement` on `body`, and what
+ * the person typed arrived in no session.
+ *
+ * WHY THE CLASS ATTRIBUTE AND NOT A CLOCK. The class going is the fact the
+ * caller is waiting for, so that is what is watched. A timer with a number in
+ * it guesses at React's clock, and a frame never comes at all for an occluded
+ * window, which is what FRAME_BOUND_MS above exists for. The observer hears
+ * every write to the attribute, the flight's own class by hand among them, so
+ * it answers only the write that leaves OPEN_CLASS off, once, and
+ * disconnects itself.
+ *
+ * Null means there is nothing to wait for. The shell does not carry the
+ * class, so whatever the caller did in its own task already had the DOM it
+ * needed. The cancel is for the page opened again before the class goes.
+ * Under reduced motion that open commits in the same task as the close, React
+ * renders the class string it already drew, no write is ever delivered, and a
+ * wait nobody cancelled would stay armed until some later close answered it.
+ */
+export function afterOverviewLeavesTheDom(
+  then: () => void
+): (() => void) | null {
+  const shell = document.querySelector<HTMLElement>(SHELL_SELECTOR);
+  if (shell === null || !shell.classList.contains(OPEN_CLASS)) return null;
+  if (typeof MutationObserver !== 'function') return null;
+  let live = true;
+  const observer = new MutationObserver(() => {
+    if (!live || shell.classList.contains(OPEN_CLASS)) return;
+    live = false;
+    observer.disconnect();
+    then();
+  });
+  observer.observe(shell, { attributes: true, attributeFilter: ['class'] });
+  return () => {
+    live = false;
+    observer.disconnect();
+  };
 }

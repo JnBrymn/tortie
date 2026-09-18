@@ -30198,12 +30198,15 @@ of their own that mock neither `redline-edits.ts` nor `live-text.ts`, and both w
 
 ## Phase 289 — leaving Catch Me Up leaves the keyboard on nothing (found by Phase 286's attack verifier, 2026-09-18)
 
-**Subject.** `fix(overview): the keyboard goes back to the session when the page closes`
+**Subject.** `fix(overview): the keyboard goes back where it was when the page closes`
 
 **First body line.** `Phase 289: the page gives the keyboard back`
 
 **Semver.** Patch. A person who opens Catch Me Up (⇧⌘U) and presses Escape can type into their session at
-once. Today what they type goes nowhere until they click into the terminal.
+once. Today what they type goes nowhere until they click into the terminal. Amended by the fix round,
+2026-09-18: the keyboard goes back to WHATEVER held it when the page was asked for, being the session
+nearly always, and an open file or the sidebar when that is where it was. In a split every door that
+hands the keyboard to the terminal hands it to the outlined pane.
 
 **Tier 2, and the parent measurement is mandatory.** One rendered mode, no new state, a proof that fits in
 one app run, and a measured parent reading that must move. It is Phase 286's defect in the other surface
@@ -30220,8 +30223,13 @@ leave, the page opened from the session list).
 - **The reading, identical at HEAD and at the parent `ecaa1353`.** After ⇧⌘U `document.activeElement` is
   `div.overview-layer`; after Escape it is `body`, the overview is closed, and a distinctive string typed
   through real key events arrived in NO tmux pane on the harness socket. Timeline from the Escape:
-  `focusout(overview-layer)` at 918.7 ms, the shell's class back to `shell` at 921.1 ms, and no `focusin`
-  at all.
+  `focusout(overview-layer)` 4.3 ms after it, the shell's class back to `shell` 6.7 ms after it, and no
+  `focusin` at all. **Corrected by the fix round, 2026-09-18.** This line read 918.7 ms and 921.1 ms, and
+  those are offsets from the mark that probe took BEFORE ⇧⌘U opened the page, 914.4 ms ahead of its
+  Escape mark, being a 900 ms wait and the devtools round trips. They were never React's commit latency.
+  The re-derive verifier re-read all three of that probe's files (Escape plus 4.3, 3.4 and 2.9 ms for the
+  `focusout`, plus 6.7, 8.1 and 7.8 ms for the class) and measured 3.4 to 6.7 ms for the class over eight
+  leaves of its own on both builds, from the key event's own `timeStamp`.
 - **Why.** `src/renderer/overview/open-overview.ts:158-163` `leaveAndReturnKeyboard()` calls
   `leaveOverviewFlight(() => closeOverview())` and then `focusTerminal()` in the same task.
   `closeOverview()` is a store write; React has not yet removed `.overview-open` from the shell, and
@@ -30239,7 +30247,11 @@ leave, the page opened from the session list).
    honest shape: keep the call where it is for the case the work area is already visible, and when the
    shell still carries `overview-open` at that moment, give the keyboard back from the place that knows
    the class is gone — the overview layer's unmount, or one frame after the close — never on a timer
-   with a number in it. `focusTerminal()` itself is untouched; its other callers are right.
+   with a number in it. What shipped is neither of the two places named here: it is a one shot
+   `MutationObserver` on the shell's class list, `afterOverviewLeavesTheDom` in
+   `src/renderer/overview/overview-flight.ts`, because a frame never comes for an occluded window.
+   This item said "`focusTerminal()` itself is untouched; its other callers are right", and items 4
+   and 5 amend both halves of that sentence.
 2. **`build/probe-p137-overview.mjs` gains a keyboard reading**: after the leave, `activeElement` is
    inside `.gmux-terminal-mount`, and a string typed after it arrives in the pane. Red at the parent by
    the measured `body`.
@@ -30252,9 +30264,45 @@ leave, the page opened from the session list).
    first pane while the outline sits on another. Phase 286 made the menu path into session focus land in
    the outlined pane, so two doors from the same seat now disagree. It asks the selector Phase 286
    ships, `.split-pane.focused .xterm-helper-textarea, .surface-single .xterm-helper-textarea`, first,
-   and falls back to document order only when nothing is marked. Its callers are unchanged. Stated and
-   not fixed (N2): when the held pane's session EXITS during a focus flight the leaf draws its ended
-   state, no textarea exists to take the keyboard, and it rests on nothing until a click.
+   and falls back to document order only when nothing is marked. The callers it already had are
+   unchanged, and item 5 gives it five more. **N2, restated by the fix round from what was measured.**
+   This item said the keyboard "rests on nothing until a click" when the outlined pane's session has
+   ended. That is Phase 286's flight and not these doors. With `exit` typed into the outlined pane the
+   leaf and the outline stay on it, it draws no textarea, three textareas remain, and BOTH the sidebar
+   chord's way back and the overview leave give the keyboard to the first LIVE pane in document order,
+   which is not the outlined one. For the leave that is a change from the parent, where the keys went
+   nowhere. The comment over `focusTerminal()` says the same. Whether an ended outlined pane should
+   take nothing instead is the operator's to rule, and nothing is built for it here.
+5. **Five doors that asked document order for themselves ask the helper** (the swap builder,
+   2026-09-18). `src/renderer/app/SessionStrip.tsx` (Enter and Space on a session row and on a group
+   row), `src/renderer/app/shell-actions.ts` (`showViewAction`'s way back),
+   `src/renderer/settings/launch-agent.ts` and `src/renderer/editor/EditorPanel.tsx` each queried
+   `.gmux-terminal-mount textarea` inline, so item 4 reached none of them. The attack verifier drove
+   them in a four pane split with the last pane outlined: the group row by Enter and by Space, the dock
+   list's Enter, a dock row click, ⌘⇧E pressed twice, the editor's Escape and its ⌘E all typed into the
+   OUTLINED pane at HEAD and into the first pane at the parent. One inline query is left on purpose,
+   `src/renderer/zoom/shot-probe.ts`, a harness probe that needs the element back. The pin in
+   `src/renderer/app/__tests__/p289-focus-terminal.test.ts` was widened by the fix round from one
+   spelling of the call to the FILE: no file under `src/renderer` but the helper's, `focus-flight.ts`
+   and three named harness files may spell the terminal's textarea at all, and nobody but the helper
+   may import the outlined pane selector. The re-derive verifier's nine hostile shapes are its fixture.
+6. **The keyboard goes back where it was** (the fix round, from the attack verifier's A1, graded
+   major). The first build sent every leave to the terminal. With the keyboard in an open file the
+   verifier pressed ⇧⌘U and Escape and carried on typing, and `p289headmono` and its Enter went to the
+   outlined session, whose shell RAN it (`zsh: command not found: p289headmono`); the parent had sent
+   the same keys nowhere. A session is somewhere a person's words are acted on, and several agents are
+   launchable with their safeguards off. So the opening gesture in
+   `src/renderer/overview/open-overview.ts` records `document.activeElement` before the flight, and
+   the leave gives the keyboard back to THAT element, and to `focusTerminal()` only when nothing was
+   recorded, the element has left the document, or it refuses because it is not drawn. It is the rule
+   Phase 286 keeps in `src/renderer/app/focus-flight.ts` for the other surface that hides the work: a
+   keyboard inside the surface is given back as it was, and one elsewhere is left alone.
+   `src/renderer/app/focus-mode.css` un-draws the sidebar, the session list and the editor under the
+   same `overview-open` class as the work area, so one wait serves every place. A leave that still owes
+   the keyboard keeps the place it is owed to when the page is reopened, and the record is spent once
+   it is paid. Measured after the fix with the verifier's own scratch arms: the file's buffer reads
+   `first lineabcp289headmono` and the string arrived in no session; from the sidebar the keyboard is
+   back in `div.sidebar-view` and the string arrived in no session.
 
 ### The proof, run rather than read
 
@@ -30262,13 +30310,48 @@ leave, the page opened from the session list).
   still on the shell ends with the terminal's textarea focused once the class is gone.
 - `npm run probe:p137` at the parent (red on the new reading) and at HEAD (green), one Electron each,
   never at once.
+- **The fix round's readings in the same launch.** Reading three drives a third leave with the keyboard
+  put into an open file by a real mouse press: HEAD, back in `div.native-edit-context` 4.2 and 5.7 ms
+  after the key over two runs, the buffer reads `first linep289headfile`, and the string arrived in no
+  session; the parent, `body`, never, and three findings where it had two. And the clock is graded now. The first build printed "+0 ms" at HEAD and at the parent
+  alike, because its zero was its own keydown listener, which runs after the app's handler, React's
+  commit and the phase's observer. Zero is the key event's own `timeStamp`, `focusin`, `focusout` and a
+  shell class observer are armed before the key, and the return is held to 100 ms, which is half the
+  chrome's fade. HEAD reads 4.2 to 6.4 ms over six leaves in two runs, with the class leaving the shell
+  0.2 to 0.5 ms before it. The parent's class leaves at 5.9 to 7.8 ms and no `focusin` follows.
 - Gates: typecheck, build, test, smoke:t1, conformance:overview.
 
 ### What is NOT in this phase
 
-- No change to `focusTerminal()`'s callers, to the jump, to the overview's chord or to its flight's timing.
+- No change to the jump's code, to the overview's chord or to its flight's timing. This line also said
+  no change to `focusTerminal()`'s callers, which item 5 amended. Two things a person will notice that
+  no line of code was changed to cause: the jump out through ⏎ on a turn now lands in the session
+  jumped to (at the parent its frame-later `focusTerminal()` typed into the first pane, which was a
+  different session), and a second ⇧⌘U after a leave reopens the SAME level, where the parent opened
+  the project page because its keyboard was on `body` and `body` is in no region.
 - No change to what the page draws.
 - No release.
+
+### Stated and not fixed, each with its reading (the fix round, 2026-09-18)
+
+- **⌘E out of editor fill leaves the keyboard on `body`** (the attack verifier's A2, graded major,
+  identical at the parent). While the editor fills the row the terminal is not drawn, so
+  `EditorPanel.tsx`'s `focusTerminal()` is refused in the same task as `hidePanel()`: `terminalDrawn=false`
+  while filled, and after ⌘E `active=body` with four textareas present and the typed string in no
+  session, at both builds. It is this phase's defect in a THIRD surface that hides the work, and it is a
+  phase of its own, the way Phase 286 queued this one. `afterOverviewLeavesTheDom` is the shape, asked
+  of whatever un-hides the work row. Its fallback to `[data-slot="terminal-stack"]` moves nothing at
+  either build, because that element is `<main class="center">` with no `tabindex`.
+- **The ⌘/ sheet over the page** (A4, minor, identical at the parent). ⇧⌘U with the sheet open closes
+  the page BEHIND it, this phase's guard rightly leaves the keyboard in the sheet's input, and Escape on
+  the sheet then drops it to `body`. Either ⇧⌘U is swallowed while a modal layer is open, as ⇧⌘↩ is by
+  `focusChordSwallowed()`, or the sheet's close hands the keyboard on. Neither is this phase's.
+- **N2's ruling**, in item 4 above.
+- **Not driven in a running app by anybody**: the per agent hotkey (`launch-agent.ts`, reached only
+  through a native menu accelerator that devtools key events cannot press; a new session is a surface
+  of one, so the first pane and the outlined pane cannot differ there), the session menu's "Catch me
+  up…" row (`openOverviewForSession`, a native popup; held by unit doubles alone), and Enter on a
+  single session strip tab.
 
 
 ## Phase 290 — a rewind's caution belongs to the file, not to the view that is open (Phase 282.2's attack verifier, operator's ruling, 2026-09-18)

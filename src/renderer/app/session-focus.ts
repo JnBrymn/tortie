@@ -43,6 +43,7 @@ import { useApp } from '../state/store';
 import { machineLabelFor } from '../state/machines-slice';
 import { displayPath } from '../format';
 import { addRemoteRefusal } from '../machines/project-tab';
+import { FOCUSED_LEAF_TEXTAREA_SELECTOR } from './focus-flight';
 import {
   NO_SUCH_SESSION,
   cannotOpenOnMachine,
@@ -52,11 +53,37 @@ import {
   tabOpenedForSession
 } from './reach-copy';
 
-/** Hand the keyboard to the visible terminal. */
+/**
+ * Hand the keyboard to the visible terminal.
+ *
+ * PHASE 289 MADE IT THE OUTLINED ONE. It asked for the first
+ * `.gmux-terminal-mount textarea` in document order, which in a split is the
+ * first pane whichever pane is selected. So Enter on a session row put the
+ * keyboard in one pane while the outline sat on another, and the menu path
+ * into session focus, which Phase 286 taught to land in the outlined pane,
+ * disagreed with it from the same seat (that phase's reverify, finding N1).
+ * It asks Phase 286's selector first, imported rather than spelled again, so
+ * the two doors cannot drift apart.
+ *
+ * Document order is still the answer when nothing is marked, and when the
+ * marked pane draws no terminal because its session ended: the compound
+ * selector matches nothing there, and the keyboard goes where it always went
+ * rather than nowhere. Measured in the running app on 2026-09-18 with the
+ * outlined session ended: the outline stays on the ended pane, and every door
+ * gives the keyboard to the first LIVE pane in document order, which is not
+ * the outlined one. Whether an ended pane should take nothing instead is the
+ * operator's to rule, and is not ruled here.
+ *
+ * The signature is as it was, and so is every caller it had. Five doors that
+ * asked document order for themselves call it since this phase, and
+ * __tests__/p289-focus-terminal.test.ts names them and keeps a sixth from
+ * being written.
+ */
 export function focusTerminal(): void {
-  document
-    .querySelector<HTMLTextAreaElement>('.gmux-terminal-mount textarea')
-    ?.focus();
+  const target =
+    document.querySelector<HTMLElement>(FOCUSED_LEAF_TEXTAREA_SELECTOR) ??
+    document.querySelector<HTMLElement>('.gmux-terminal-mount textarea');
+  target?.focus();
 }
 
 /**

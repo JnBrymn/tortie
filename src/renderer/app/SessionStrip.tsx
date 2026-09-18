@@ -47,6 +47,7 @@ import {
   useSessionHandback
 } from './session-actions';
 import { MachineBadge } from './MachineBadge';
+import { focusTerminal } from './session-focus';
 import {
   AgentIcon,
   agentGlyph,
@@ -178,11 +179,10 @@ function SessionTab({
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           setActiveSession(session.id);
-          document
-            .querySelector<HTMLTextAreaElement>(
-              '.gmux-terminal-mount textarea'
-            )
-            ?.focus();
+          // Phase 289. The row asks the one helper rather than the first
+          // terminal textarea in the document, so in a split the keyboard
+          // goes to the outlined pane.
+          focusTerminal();
         }
       }}
     >
@@ -285,11 +285,10 @@ function GroupTab({
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           selectLeaf(projectPath, focusedLeafId);
-          document
-            .querySelector<HTMLTextAreaElement>(
-              '.gmux-terminal-mount textarea'
-            )
-            ?.focus();
+          // Phase 289. The group row asks the one helper too. A group is a
+          // split by definition, so this is the door where the first pane
+          // and the outlined pane differ most often.
+          focusTerminal();
         }
       }}
     >
