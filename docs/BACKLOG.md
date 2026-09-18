@@ -30145,6 +30145,71 @@ under its own label and this phase second.
 - No release.
 
 
+## Phase 289 — leaving Catch Me Up leaves the keyboard on nothing (found by Phase 286's attack verifier, 2026-09-18)
+
+**Subject.** `fix(overview): the keyboard goes back to the session when the page closes`
+
+**First body line.** `Phase 289: the page gives the keyboard back`
+
+**Semver.** Patch. A person who opens Catch Me Up (⇧⌘U) and presses Escape can type into their session at
+once. Today what they type goes nowhere until they click into the terminal.
+
+**Tier 2, and the parent measurement is mandatory.** One rendered mode, no new state, a proof that fits in
+one app run, and a measured parent reading that must move. It is Phase 286's defect in the other surface
+hider, so its independent methods are the same two: the parent measurement and an attack on the paths
+the builder did not drive (the jump out through ⏎ on a turn, the chord pressed twice, a reduced-motion
+leave, the page opened from the session list).
+
+**Charter.** Phase 286's attack verifier, 2026-09-18, arm D of its scratch probe
+(`scratchpad/p286-attack/attack.mjs`, `head.json` and `parent.json`), graded major and OUT OF SCOPE for
+286, whose charter is the flight alone. The main session queued it rather than widen that phase.
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **The reading, identical at HEAD and at the parent `ecaa1353`.** After ⇧⌘U `document.activeElement` is
+  `div.overview-layer`; after Escape it is `body`, the overview is closed, and a distinctive string typed
+  through real key events arrived in NO tmux pane on the harness socket. Timeline from the Escape:
+  `focusout(overview-layer)` at 918.7 ms, the shell's class back to `shell` at 921.1 ms, and no `focusin`
+  at all.
+- **Why.** `src/renderer/overview/open-overview.ts:158-163` `leaveAndReturnKeyboard()` calls
+  `leaveOverviewFlight(() => closeOverview())` and then `focusTerminal()` in the same task.
+  `closeOverview()` is a store write; React has not yet removed `.overview-open` from the shell, and
+  `src/renderer/overview/overview.css:19` holds `.shell.overview-open .work-area` hidden, so the
+  `.gmux-terminal-mount textarea` that `src/renderer/app/session-focus.ts:56-60` `focusTerminal()` finds
+  is inside a hidden box and refuses the focus. It is the rule Phase 286 wrote down for the flight: a
+  hidden element cannot take the keyboard.
+- **The jump out is not this.** `leaveOverviewAndJump` awaits `jumpToSession`, which selects the session
+  and lets the pane's own `focused` effect take the keyboard after it mounts; the verifier did not drive
+  it, so the phase measures it rather than assuming.
+
+### The mechanism
+
+1. **`leaveAndReturnKeyboard` focuses the terminal after the close has reached the DOM.** The smallest
+   honest shape: keep the call where it is for the case the work area is already visible, and when the
+   shell still carries `overview-open` at that moment, give the keyboard back from the place that knows
+   the class is gone — the overview layer's unmount, or one frame after the close — never on a timer
+   with a number in it. `focusTerminal()` itself is untouched; its other callers are right.
+2. **`build/probe-p137-overview.mjs` gains a keyboard reading**: after the leave, `activeElement` is
+   inside `.gmux-terminal-mount`, and a string typed after it arrives in the pane. Red at the parent by
+   the measured `body`.
+3. **Nothing is focused that was not the terminal's to take**: a leave whose project has no session
+   focuses nothing and says nothing.
+
+### The proof, run rather than read
+
+- A vitest case beside the overview's existing tests, red at the parent: the leave with `.overview-open`
+  still on the shell ends with the terminal's textarea focused once the class is gone.
+- `npm run probe:p137` at the parent (red on the new reading) and at HEAD (green), one Electron each,
+  never at once.
+- Gates: typecheck, build, test, smoke:t1, conformance:overview.
+
+### What is NOT in this phase
+
+- No change to `focusTerminal()`, to the jump, to the overview's chord or to its flight's timing.
+- No change to what the page draws.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -30911,3 +30976,9 @@ cycle rather than only the evening it was written.
 - 2026-09-18, **PHASE 282.2 QUEUED, the way out the sentence promises (Phase 282.1's reverify, his call), Tier 3.** Phase 282.1's workflow ended `needs_work` at its reverify at 00:50: both reverifiers, independently, found that "Save or undo your edits first, then accept" names a road that does not complete — `refreshRepo` has one caller, the watcher's tick, `markDirty` pulls no read, and the rewind's own tick was consumed while the tab was dirty, so after ⌘Z the hold lingers until the agent next writes to that repository. Per the method the workflow stopped and nothing was committed; the fix round sits in `/private/tmp/wt-p2821`. He read the finding at 10:40 and chose the read over the reword. This phase adds one read on the dirty-to-clean transition when a landed hold exists, adopts the reverifier's after-undo test, takes the hand-made read out of the fix round's test, gives rule 40 the clause, adds the arm to `probe:redlinemoveon`, carries the two nits (rule 11's through-the-door shape, `runGate`'s silent failure), and lands 282.1's fix round with it. It starts after Phase 288's verification, so at most two workflows run at once.
 
 - 2026-09-18, **PHASE 286 STARTED, entering session focus takes the keyboard out of the session, Tier 2.** He asked for it drained before the next release, because it is the one queued defect a person hits daily. Worktree at `ba9e1567`; the entry's parent numbers (`out/p284/readings-parent.json`, `activeElement` = `body` 100 ms after the chord) are the measurement the phase must move.
+
+- 2026-09-18, **PHASE 288 VERIFIED AND HELD ONE ROUND, the meters float in the middle of an empty session list.** Both verifiers passed the CSS fix first time, each with its own Electron run: the parent reads the meter 373.5 px above the footer, 50% of the 747 px free height, with the footer's own margin reading the other 373.5; HEAD reads 0 in both densities, at one provider, at the 1044 px window floor and at the list's 160 px floor, on the light base as on the dark, with the top strip's meter untouched and the populated rectangles identical edge for edge. A round on the minor findings (the test's blind spots, a probe that measured a stale build in silence) came back `needs_work` from its reverify on the TEST alone: a wrapper inside `UsageMeter.tsx` breaks the fix with the test green. Second `needs_work`, so it went to him; he chose one more targeted test fix and a fresh reverify at 13:50.
+
+- 2026-09-18, **PHASE 286 AT ITS FIX ROUND, and PHASE 289 QUEUED from it.** The flight's fix holds in the app: at HEAD a string typed after ⇧⌘↩ arrives in the pane, in a split it arrives in the SECOND pane when that one held the keyboard, and the focus lands in the same task as the restore with no sample outside the surface; at the parent the same string arrives nowhere. The attack verifier returned `needs_work` on what surrounds it: entered from the session list by the View menu the keyboard lands on nothing, the chord pressed inside a terminal also reaches xterm and sends a carriage return to the session (so leaving the mode could submit a drafted prompt), keys pressed during the 200 ms flight are lost, and the disconnected fallback picks the first pane in document order. The fix round takes the first two and the fallback and states the third; its first attempt died on an account limit and was resumed. **Leaving Catch Me Up has the same defect in another file and is queued as Phase 289** rather than widening 286.
+
+- 2026-09-18, **PHASE 282.2 STARTED, the way out the sentence promises, Tier 3.** Worktree at `4d89dde0` with Phase 282.1's fix round applied, 15 files sha256-identical to its worktree. Three builders on disjoint files (the read and its tests, the gates, the probe's arm) and an integrator.
