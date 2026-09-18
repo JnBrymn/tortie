@@ -442,11 +442,11 @@ byte-identical to today.
 - **Anchors that must NOT move:** `stores.ts` `  if (dir === null || dir === '') return null;` (`:1537`),
   the two settle lines (`:1750`, `:1755`), `safeText`'s body (`:2273`), and `keychainWrite`'s two lines
   (`:1765-1767`).
-- **Check** `:1234` `live.keychain.accountPreserved` and probe `:2183` `wrote?.account === 'gdc'` pin the
+- **Check** `:1234` `live.keychain.accountPreserved` and probe `:2183` `wrote?.account === 'p281-literal'` pin the
   old copying. Rewrite: the write's account equals `claudeKeychainAccount` of the arm's env and user name.
 - **The fake `security`** (probe `:176-232`) keys items by service alone, ignores `-a`, and answers exit 1
   for a miss. It must key by (service, account), honour `-a` on find and delete, answer 44 for a miss,
-  and every arm that seeds `account: 'gdc'` (probe `:1069-2251`, 23 sites) must seed under the vendor
+  and every arm that seeds `account: 'p281-literal'` (probe `:1069-2251`, 23 sites) must seed under the vendor
   account the arm's `StoreDeps` produce (`env: {}` and `userName: 'gate'` give `gate`). Add a stray under
   `unknown` beside the vendor item in the keychain arm; `itemsNamed.length === 2` (`:1237`) then moves.
 - **New rules**: every `find-`, `add-` and `delete-generic-password` argv aimed at a vendor service carries
@@ -519,16 +519,20 @@ byte-identical to today.
   file names neither promotes on every change (the residue `keep.ts:641-662` states).
 - **The plaintext file path** does not follow `CLAUDE_SECURESTORAGE_CONFIG_DIR` (the vendor's `lb`). Not
   built.
-- **Presence keeps collapsing failure into absent** (`login-accounts.ts:425`). A locked keychain draws the
-  list's not-signed-in row. D5 is the usage seam only.
+- **Presence keeps collapsing failure into absent** (`login-accounts.ts:425`). D5 is the usage seam only.
+  A LOCKED keychain is not that failure (corrected in Phase 281.1, measured): its attributes still read,
+  exit 0 with the `acct` line, so presence answers present for it; only a `security` that fails outright
+  collapses to absent here.
 - **`defaultStoreDeps` calls `userInfo()` eagerly** (`index.ts:148`). A machine with no passwd entry throws
   there, where the vendor falls back to `claude-code-user`. Pre-existing and not changed.
 - **A chosen login under `CLAUDE_SECURESTORAGE_CONFIG_DIR`** gets its own scoped name here while Claude
-  Code would give every login the one name that variable names. Stated in `claudeKeychainService`'s
-  comment. The attack verifier drove every layout and this class was the only one that differed from the
-  vendor rule; the parent differs the same way. The smallest follow-up it named is for `loginPaneEnv` to
-  set `CLAUDE_SECURESTORAGE_CONFIG_DIR=<dir>` beside `CLAUDE_CONFIG_DIR=<dir>` on a chosen claude login's
-  pane, which also moves the storage lock (`locks.ts:59-62`). Not built here.
+  Code, for every login, reads the plain item when the variable is empty and the variable's own scoped
+  item when it is set (corrected in Phase 281.1; the earlier wording, "the one name that variable
+  names", was wrong for the empty case). Stated in `claudeKeychainService`'s comment and PINNED since
+  Phase 281.1 (§8.2, first bullet). The attack verifier drove every layout and this class was the only one
+  that differed from the vendor rule; the parent differs the same way. The smallest follow-up it named is
+  for `loginPaneEnv` to set `CLAUDE_SECURESTORAGE_CONFIG_DIR=<dir>` beside `CLAUDE_CONFIG_DIR=<dir>` on a
+  chosen claude login's pane, which also moves the storage lock (`locks.ts:59-62`). Not built here.
 
 ### 8.1 Limits added after verification
 
@@ -538,11 +542,28 @@ byte-identical to today.
   the back, and both pin it (`p281-stores-address.test.ts`, the probe's `keychain.updateMovesBehind`).
   No HEAD verdict moved, because every HEAD call names the account. It explains the operator's machine:
   every Claude Code refresh is an `add -U`, which put its item back behind the stray each time.
-- **A locked keychain in a GUI session does not answer 36.** Measured: the `-w` read printed nothing and did
-  not exit until killed, most likely held on the unlock prompt. The reader throws at its five second
-  deadline, so the meter keeps its last numbers as D5 intends, but through the deadline and not through
-  exit 36. Each poll against a locked login keychain can raise that prompt and hold for five seconds. The
-  parent sent the same `-w` read, so this is not new.
+- **A locked keychain has answered three ways on this machine, and every one but 44 throws** (rewritten in
+  Phase 281.1). 36, per the vendor's own lock test. A hold with nothing printed until the child was
+  killed, measured by the Phase 281 keychain verifier on a locked scratch keychain in an Aqua session,
+  which the reader's five second deadline ends. And 152, errAuthorizationInternal ("Unable to obtain
+  authorization for this operation"), at once and with no prompt, in 22 to 145 ms, measured twice in
+  Phase 281.1 on a locked scratch keychain in an Aqua session, sandboxed and unsandboxed, with
+  `show-keychain-info` on it answering 152 rather than the 36 the vendor's lock test expects. The login
+  keychain in the search list was not measured locked. So the deadline is ONE route a locked keychain
+  takes and not the route; the outcome the fix round claimed holds on every route (the reader threw, the
+  meter kept 12 percent under `stale` and recovered to `ok` after the unlock). The `hang` and the `152`
+  rows are both in `p281-usage-read.test.ts` part (c). The parent sent the same `-w` read, so none of this
+  is new.
+- **`security` prints a payload as hex when any BYTE is outside 0x20–0x7E** (measured in Phase 281.1, twice,
+  on a scratch keychain), which is `isprint` in the C locale: a tab, DEL, a control character, and EVERY
+  non-ASCII character (an accented letter, an emoji) print as lowercase hex; a trailing space and a tilde
+  print raw. The Phase 281 decoder took the decoding only for a control character or DEL, so a credential
+  JSON holding a tab (tab indentation) or any non-ASCII character (an MCP server name, which
+  `JSON.stringify` keeps raw) came back from `keychainRead` and `keychainReader` as the hex string: the
+  meter read `missing` and `readStore` captured nothing, and both fake `security` programs printed by
+  the same wrong table so no test could see it. `securityPrintsRaw` in `security-print.ts` is now the one
+  predicate, both fakes print by it, and the measured table is pinned as literal rows in
+  `p281-stores-address.test.ts` and driven through the shipping reader in `p281-usage-read.test.ts` (d).
 - **Keychain items the PARENT wrote under a copied account are unreachable now.** At the parent,
   `storeTarget` wrote a login's scoped item under whatever account a service-only lookup matched first,
   and `defaultStoreTarget` updated the stray itself with the chosen account's credential. HEAD addresses
@@ -571,24 +592,62 @@ The vendor re-derive verifier's findings did not reach the fix round, because th
 the verdicts at 30,000 characters inside that verifier's report. They are recorded here instead. None
 changes a reading on the operator's machine, where no `CLAUDE_*` variable is set.
 
-- **`CLAUDE_SECURESTORAGE_CONFIG_DIR` with a chosen login** (630 of its 1,680 rows): the vendor's `mI`
-  names `scoped(SECURESTORAGE)`, or the plain name when it is empty, for every login, while Tortie names
-  `scoped(loginDir)`. The verifier graded it major only because its brief counted every disagreeing row;
-  it is the limit section 8 and the backlog entry already state, and the follow-up section 8 records
-  (`loginPaneEnv` setting the variable beside `CLAUDE_CONFIG_DIR`) is the fix, not a refusal here.
+- **`CLAUDE_SECURESTORAGE_CONFIG_DIR` with a chosen login** (630 of its 1,680 rows; 98 of 98 in the
+  Phase 281.1 re-derive's own matrix): the vendor's `mI` names `scoped(SECURESTORAGE)`, or the plain name
+  when it is empty, for every login, while Tortie names `scoped(loginDir)`. The verifier graded it major
+  for two reasons, and the first version of this bullet carried only one. First, its brief counted every
+  disagreeing row. Second, and substantive: the spec understated the consequence. With the variable
+  defined and EMPTY, a chosen-login Claude Code session reads and writes the PLAIN item, the default
+  account's credential, so the "second login" session runs on the default account while Tortie's meter,
+  presence and switch target `scoped(loginDir)`, a name no session reads — the one-account's-numbers-
+  under-another's-name shape Phase 281 was written to end. Its minimum ask was to pin the class as a
+  NAMED exception in `p281-vendor-address.test.ts` and the gates, so the disagreement is executable and
+  cannot widen silently. **Decision (Phase 281.1): pinned.** `p281-vendor-address.test.ts` holds the
+  exception as one test (empty and set disagree, equal-to-the-login-directory and unset agree), and
+  `conformance:logins` rule 18 drives the same four rows through the shipping `claudeKeychainService`
+  with the vendor's answers derived by the gate, with an ablation that makes a chosen login follow the
+  variable and turns rule 18 red. The fix stays the follow-up section 8 records (`loginPaneEnv` setting
+  the variable beside `CLAUDE_CONFIG_DIR`), not built here.
 - **`CLAUDE_CODE_CUSTOM_OAUTH_URL`**: the vendor's `Xt().OAUTH_FILE_SUFFIX` is `-custom-oauth` when that
   variable names one of three approved endpoints, and `mI` throws for any other value, so Claude Code's
   item becomes `Claude Code-custom-oauth-credentials[-hash]`. Tortie ignores the variable, asks the
   production name, and `isClaudeVendorService` does not recognise the custom name. A person on a custom
   OAuth endpoint reads as signed out, or reads a production item of theirs if one also exists.
 - **The plaintext file directory** follows `CLAUDE_SECURESTORAGE_CONFIG_DIR` and NFC in the vendor (`lb`,
-  `we`) and not in Tortie; APFS opens both NFC spellings as one file, so only the variable matters.
+  `we`) and not in Tortie; APFS opens both NFC spellings as one file, so the variable matters, and so does
+  the empty `CLAUDE_CONFIG_DIR` case in §8.1, which sends the vendor's plaintext file to a cwd-relative
+  `.credentials.json` (found by the fix round, recorded there and not here).
 - **The vendor is more lenient on a failed read than Tortie, on purpose.** Its async read answers absent on
-  44 and 36 and on a runner that throws; its synchronous read answers absent on any non-zero exit and
-  serves its stale cache. Tortie answers absent on 44 alone (decision D5).
+  44, on 36 when `inaccessibleAs` is not `"failure"` (§1's table has both), on a runner that throws, and
+  on exit 0 with empty output; its synchronous read, on any non-zero exit, the 2 s timeout, or an empty
+  answer, serves its stale cache when it has one and answers absent otherwise. Tortie answers absent on
+  44 alone (decision D5).
 - **`add-generic-password` over `-i` above 4,032 characters**: the vendor switches to argv there and logs
-  that the line exceeds the stdin limit. Tortie's `keychainWrite` always uses `-i`. Unmeasured, because a
-  truncated `-i` line could drop the keychain path argument; queued as its own entry, not built here.
+  that the line exceeds the stdin limit. Tortie's `keychainWrite` always uses `-i`. MEASURED in Phase
+  281.1, twice, under a scratch `HOME` where no default keychain resolves: a line of 3,923 and of 3,995
+  characters (the keychain suffix included) writes and reads back exactly; a line of 4,123 and of 4,195
+  characters writes NOTHING to the named keychain and `security -i` hangs with stdin closed until killed
+  (65 s, 10 s). So past about 4,096 characters the trailing keychain path is lost, and for
+  `defaultSecurityRunner(keychainFile)` a payload of about 1,985 bytes or more would have lost its
+  scratch file off the end of the line (where such a write lands under a real `HOME` was deliberately
+  not measured). Phase 281.1 refuses such a line before the spawn (`SECURITY_LINE_MAX`,
+  4,000, in `security.ts`: `keychainWrite` answers false and the runner answers exit 1). The long-line
+  form is **Phase 287** in docs/BACKLOG.md ("the `-i` line above the `security` buffer"), queued by Phase
+  281.1: this bullet and the `79c6c8fe` commit body said "queued as its own entry" when no entry existed.
+
+**Corrections after Phase 281.1.** The `79c6c8fe` commit body cannot change; where it and the first
+version of this section disagree with what was later measured or found, this section is the record.
+(1) Its "queued on its own" for the `-i` write named no entry; Phase 287 is that entry now. (2) The
+first bullet above omitted the vendor verifier's second reason and its minimum ask, and softened the
+grade; both are carried now and the pin was built. (3) The locked-keychain claim in §8.1 and the
+`keychainReader` comment said the deadline was THE route; it is one of three measured. (4) §8's presence
+sentence said a locked keychain draws the not-signed-in row; its attributes still read. (5) The decoder's
+"printable" table was narrower than the real program's, §8.1 has the measured one. (6) `probe:p281`'s
+header claimed nothing but the meter could reach the keychain in its launch; the login list's presence
+seam could, through `logins:list` from the meter's hover card, Settings and the add-login modal, and
+Chromium's `safeStorage` can with no `security` process; the seam now refuses under `isHarnessLaunch`
+(`harnessLoginAccountDeps`) and the header says the rest. (7) §6.2 quoted the operator's user name as an
+account literal twice; `p281-literal` now.
 
 ## 9. What is NOT in this phase
 

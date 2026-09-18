@@ -331,6 +331,35 @@ describe('Phase 281: the copies agree with the transcribed vendor', () => {
     }
   });
 
+  it('THE NAMED EXCEPTION (Phase 281.1): a chosen login under CLAUDE_SECURESTORAGE_CONFIG_DIR is the one class where the two disagree, pinned so it cannot widen in silence', () => {
+    // A session Tortie launches for a chosen login carries CLAUDE_CONFIG_DIR=dir
+    // and inherits the rest of Tortie's environment. If that environment
+    // defines CLAUDE_SECURESTORAGE_CONFIG_DIR, Claude Code's mI ignores the
+    // login directory: EMPTY, it reads and writes the PLAIN item, the default
+    // account's credential, so the "second login" session runs on the default
+    // account while Tortie's meter, presence and switch target the login's
+    // scoped item, a name no session reads; SET, it reads the variable's own
+    // scoped item for every login. The Phase 281 vendor verifier graded this
+    // major and asked for this pin; the fix is loginPaneEnv setting the
+    // variable beside CLAUDE_CONFIG_DIR (SPEC §8, not built in Phase 281).
+    const dir = '/p281/logins/claude/aabbccddeeff0011';
+    const secure = '/p281/secure';
+    // Empty: the vendor names the plain item, Tortie the login's scoped item.
+    expect(vendorMI({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '', CLAUDE_CONFIG_DIR: dir })).toBe('Claude Code-credentials');
+    expect(claudeKeychainService({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' }, dir)).toBe(scoped(dir));
+    // Set: the vendor names the variable's scoped item, Tortie the login's.
+    expect(vendorMI({ CLAUDE_SECURESTORAGE_CONFIG_DIR: secure, CLAUDE_CONFIG_DIR: dir })).toBe(scoped(secure));
+    expect(claudeKeychainService({ CLAUDE_SECURESTORAGE_CONFIG_DIR: secure }, dir)).toBe(scoped(dir));
+    // Equal to the login directory, which is what the follow-up would set on
+    // the pane: the two agree, so the exception is exactly the two rows above.
+    expect(vendorMI({ CLAUDE_SECURESTORAGE_CONFIG_DIR: dir, CLAUDE_CONFIG_DIR: dir })).toBe(
+      claudeKeychainService({ CLAUDE_SECURESTORAGE_CONFIG_DIR: dir }, dir)
+    );
+    // And with the variable unset the two agree for a login directory, so the
+    // exception is the variable's alone.
+    expect(vendorMI({ CLAUDE_CONFIG_DIR: dir })).toBe(claudeKeychainService({}, dir));
+  });
+
   it('gives the account Cv gives, over every USER and user name shape', () => {
     const users = [undefined, '', 'p281-vendor', 'p281 stray', 'p281.v_1-x', 'jos\u00e9'];
     const names: ((() => string) | undefined)[] = [

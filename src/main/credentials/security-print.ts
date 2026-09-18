@@ -18,23 +18,55 @@
  */
 
 /**
+ * Would `security` print this payload verbatim? (Phase 281.1)
+ *
+ * MEASURED on a scratch keychain, 2026-09-17, twice (the Phase 281.1 measure
+ * verifier and its fix round): `find-generic-password -w` prints the payload
+ * raw when EVERY BYTE is in 0x20–0x7E, which is `isprint` in the C locale,
+ * and prints it as lowercase hex when any byte is outside that range. A
+ * trailing space (0x20) and a tilde (0x7E) print raw; a tab (0x09), DEL
+ * (0x7F), a control character, and EVERY non-ASCII character (an accented
+ * letter, an emoji, whose UTF-8 bytes are all 0x80 or above) print as hex.
+ *
+ * Until Phase 281.1 the decoder's table admitted only the control characters
+ * and DEL, so a credential JSON holding a tab or any non-ASCII character
+ * (`JSON.stringify` keeps those raw, and an MCP server name can hold either)
+ * came back from the shipping readers as the hex string itself: the meter's
+ * parser read `missing`, the sign-in line Phase 281 exists to remove, and
+ * `readStore` captured nothing. Both fake `security` programs printed by the
+ * same wrong table, so no unit test or gate could see it.
+ *
+ * ONE PREDICATE, asked by the decoder here and by both fakes when they print
+ * (`__tests__/first-match-security.ts`, `build/credentials-conformance-
+ * probe.mts`), so the model and the reading of it cannot drift apart again.
+ * A character outside 0x20–0x7E in a JS string is exactly a byte outside
+ * that range in its UTF-8 form: a lone surrogate encodes to bytes above 0x7F
+ * as well.
+ */
+export function securityPrintsRaw(payload: string): boolean {
+  return !/[^\x20-\x7e]/.test(payload);
+}
+
+/**
  * What `find-generic-password -w` printed, as the bytes the item holds.
  *
- * MEASURED: `security` prints the payload verbatim when it is printable and
- * prints it as HEX when it is not, and in both cases it adds exactly one
- * trailing newline. A trim would corrupt a payload with trailing spaces, so
- * exactly one newline is removed and nothing else.
+ * MEASURED: `security` prints the payload verbatim when {@link securityPrintsRaw}
+ * holds of it and prints it as HEX when it does not, and in both cases it adds
+ * exactly one trailing newline. A trim would corrupt a payload with trailing
+ * spaces, so exactly one newline is removed and nothing else.
  *
  * THE DISAMBIGUATION, and it follows from the same measurement. `security`
- * prints hex ONLY when the payload is not printable. So a run of hex digits
- * whose decoding is itself printable cannot be a hex PRINTING, because the
- * payload it would have come from would have been printed raw: the text is the
- * payload. The decoding is taken only when it holds a character `security`
- * would have refused to print, which is what forced the hex form.
+ * prints hex ONLY when the payload holds a byte outside 0x20–0x7E. So a run of
+ * hex digits whose decoding is itself made of such bytes cannot be a hex
+ * PRINTING, because the payload it would have come from would have been
+ * printed raw: the text is the payload. The decoding is taken only when it
+ * holds a character `security` would have refused to print, which is what
+ * forced the hex form.
  *
  * A residual ambiguity is left on purpose and it is harmless: a payload whose
- * own text is the hex of a control character is read as that control
- * character. Every write in this domain is verified by reading it back and
+ * own text is the hex of bytes `security` will not print (a control
+ * character, or a non-ASCII character since Phase 281.1) is read as those
+ * bytes. Every write in this domain is verified by reading it back and
  * comparing bytes, so a payload that cannot survive this round trip refuses
  * the write rather than corrupting a store. Neither vendor writes one: both
  * write JSON, which is never a run of hex digits.
@@ -47,6 +79,5 @@ export function decodeKeychainPayload(raw: string): string {
   const decoded = bytes.toString('utf8');
   // Not valid UTF-8, so it was never a payload this product wrote.
   if (!Buffer.from(decoded, 'utf8').equals(bytes)) return text;
-  // eslint-disable-next-line no-control-regex
-  return /[\u0000-\u0008\u000a-\u001f\u007f]/.test(decoded) ? decoded : text;
+  return securityPrintsRaw(decoded) ? text : decoded;
 }

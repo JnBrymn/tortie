@@ -29522,15 +29522,20 @@ Two things the main session did AFTER the fix round, which nobody independent ha
    findings never reached the fixer: `CLAUDE_SECURESTORAGE_CONFIG_DIR` with a chosen login disagreeing
    with the vendor on 630 of its 1,680 rows (graded major by that verifier, recorded as the stated
    limit), `CLAUDE_CODE_CUSTOM_OAUTH_URL` changing the vendor's item name, the plaintext file directory
-   under an empty `CLAUDE_CONFIG_DIR`, the vendor's more lenient exit handling, and the `-i` write above
-   4,032 characters. The stale comment at `src/main/credentials/locks.ts:59-64` was rewritten at the same
-   time.
+   under `CLAUDE_SECURESTORAGE_CONFIG_DIR` (the empty `CLAUDE_CONFIG_DIR` case is §8.1's, found by the fix
+   round; this line attributed it to §8.2 until the re-derive verifier corrected it), the vendor's more
+   lenient exit handling, and the `-i` write above 4,032 characters. The stale comment at
+   `src/main/credentials/locks.ts:59-64` was rewritten at the same time.
 5. **`build/p281/probe-p281-meter.mjs`**, the app run that reads his real keychain through the shipping
    meter, declared as `probe:p281`, classified in `build/verification-checks.mjs`, with
    `HELPER_USER_FLOOR` 139 → 140. Its safety rests on three claims no verifier has checked: that a
    harness launch with no knob gives the credentials domain `harnessFileKeepDeps`
-   (`src/main/credentials/index.ts`), whose `security` seam refuses every call, so nothing but the meter
-   can reach his keychain; that `HOME` must be his own because the keychain search list resolves through
+   (`src/main/credentials/index.ts`), whose `security` seam refuses every call, so nothing in that domain
+   can reach his keychain (the measure verifier found the sentence "nothing but the meter" wider than the
+   launch: the login list's presence seam could spawn an attributes-only `security` on a hover, and
+   Chromium's `safeStorage` reads its own item with no process; the fix round made the presence seam
+   refuse under `isHarnessLaunch` and corrected the header); that `HOME` must be his own because the
+   keychain search list resolves through
    it (measured: a scratch `HOME` exits 44); and that the script prints no token, account attribute or
    login. One fixture literal of his user name in `build/conformance-logins.mjs` was replaced by
    `p281-literal`.
@@ -29824,6 +29829,89 @@ change to what anything DOES". This is that entry.
 - No focus moved on the way out beyond what was held on the way in.
 - No release.
 
+
+## Phase 287 — the `-i` line above the `security` buffer (found by Phase 281's vendor verifier, queued by Phase 281.1, 2026-09-17)
+
+**Subject.** `fix(credentials): a credential too long for one security line`
+
+**First body line.** `Phase 287: a credential too long for one security line`
+
+**Semver.** Patch. A person whose Claude credential has grown past what one `security -i` line
+carries (many MCP OAuth servers can do it) gets a switch that says why it was refused, or a switch that
+works, and never a hang.
+
+**Tier 3.** It writes the person's credential store, and it is the one place a `security` line has
+been measured to hang and to lose its keychain argument.
+
+**Charter.** The Phase 281 vendor re-derive verifier's finding 6 (`build/p281/SPEC.md` §8.2, last
+bullet), which asked for this to be queued as its own entry and was recorded as queued when no entry
+existed; the Phase 281.1 re-derive verifier found the gap, and the Phase 281.1 measure verifier
+measured the limit. This is the entry.
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **The buffer is about 4,096 characters, and past it the line is cut and `security -i` hangs.** Measured
+  twice on 2026-09-17 under a scratch `HOME` where `security default-keychain` answers "could not be
+  found", on a scratch keychain named by a trailing path inside the line: a line of 3,923 and of 3,995
+  characters writes and reads back byte for byte; a line of 4,123 and of 4,195 characters writes
+  NOTHING to the named keychain, `find-generic-password` on it answers 44, and `security -i` stays in
+  state S with stdin closed until it is killed (after 65 s and after 10 s). The cut end is where the
+  keychain path goes, so under a real `HOME` a cut line could aim at the default keychain; that arm was
+  deliberately not run. **The Phase 281.1 reverify then found the edge**: a 4,097 byte line, newline
+  included, writes and reads back and a 4,098 byte line hangs; the buffer counts BYTES, not characters (a
+  4,030 character line of 4,090 bytes wrote, a 4,050 character line of 4,110 bytes hung). Phase 281.1's
+  `SECURITY_LINE_MAX` of 4,000 compares `.length`, which is UTF-16 units, so the one component of Tortie's
+  line that can carry non-ASCII, the harness keychain path, could pass the cap and still overrun; this
+  phase compares `Buffer.byteLength` and says "bytes" beside the constant.
+- **Claude Code's own writer switches to the argv form at 4,032** (bundle 2.1.274, its `Z`, offset
+  170,935,555) and logs that the line exceeds the stdin limit, which is the same buffer read from the
+  other side.
+- **Phase 281.1 put an interim refusal in front of the spawn.** `SECURITY_LINE_MAX` (4,000, trailing
+  newline and keychain suffix included) in `src/main/credentials/security.ts`: `keychainWrite` answers
+  false for a longer command and `defaultSecurityRunner` answers exit 1 for one its suffix takes over,
+  neither spawning anything, driven by `src/main/credentials/__tests__/p2811-line-limit.test.ts`. So
+  today such a credential is refused, not hung, and the refusal reaches the switch as an ordinary
+  failed stage. A credential of the shape either vendor writes today is under a quarter of the cap; the
+  one that is not is a Claude credential carrying many `mcpOAuth` entries.
+
+### The mechanism, to be decided by measurement and the operator's ruling before building
+
+1. **Find the exact buffer**, on a scratch keychain under a scratch `HOME` only, binary search between
+   3,995 and 4,123 with the keychain path as the LAST token so a cut loses nothing but the path, and
+   record it in `security.ts` beside `SECURITY_LINE_MAX`. Read `security`'s own source if it is
+   available (`SecurityTool`, the `-i` reader's buffer) and cite the line.
+2. **Decide the long-line form, and the charter constrains it.** The vendor's argv form puts the hex
+   payload ON THE COMMAND LINE, which `conformance:credentials` refuses by rule ("no payload on a
+   command line", the ablation "the payload put on a command line the way orca does it"), because a
+   command line is readable by every process on the machine through `ps`. That refusal is not lifted
+   here without the operator's ruling in his own words. The candidates: (a) keep the refusal and SAY it,
+   a fixed sentence on the switch and the observe ("this credential is too large for Tortie to store in
+   the keychain"), so a person is told rather than left with a silent failed stage; (b) the argv form for
+   this one case, only if he rules that a token visible in `ps` for the milliseconds of one `security`
+   call is acceptable, with the gate's rule narrowed to name the case; (c) the vendor's plaintext file
+   store for the too-long case alone, which Claude Code reads (research 126 §2.3), under the same
+   0600/0700 rule the file vault uses. (a) is the default if he does not rule.
+3. **Whatever is chosen, `SECURITY_LINE_MAX` stays the spawn-side floor**: nothing over the measured
+   buffer reaches `security -i` on any path.
+
+### The proof, run rather than read
+
+- The measured buffer, with the scratch `HOME` condition and the search list read before and after,
+  verbatim in the phase report.
+- `p2811-line-limit.test.ts` extended to the chosen form: a payload over the cap takes the chosen path
+  and never reaches `-i`; the argv, if any, is asserted byte for byte.
+- `conformance:credentials` green, and if (b) is chosen, its rule narrowed and an ablation that widens
+  the case going red.
+- One app run over the keychain harness (`GMUX_HARNESS_KEYCHAIN`, a scratch keychain) switching to a
+  login whose credential is over the cap, reading the sentence or the stored item back.
+
+### What is NOT in this phase
+
+- No `security` call against any keychain but a scratch one, and no `-w` or `-g` anywhere real.
+- No payload on a command line unless he rules it, in his own words, for this one case.
+- No change to how a credential UNDER the cap is written: `-i`, hex, `-U`, `-a` first, as Phase 281 left it.
+- No change to the meter's reader; it reads whatever Claude Code wrote, however long.
+- No release.
 
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
@@ -30581,3 +30669,5 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASES 284 AND 284.1 LANDED, the quiet surround and the fix round its reverify asked for, one commit, version 0.107.0 unmoved, no tag, pushed.** The work area alone carries one 1px outline with a 14px corner, 8px gutters separate it from both sidebars with an 8px inset at the bottom and right, nine hairlines facing the work go quiet, and the selected session row and active activity item trade their marker bar for a soft fill with a restrained outline: option B of the study, chosen in his words, over his earlier one-hairline ruling, which DESIGN.md, DESIGN-SPEC and research 75 now record as reversed. No colour literal and no new token; the dark tokens.css block is byte identical to its pin and conformance:hue passed on the final code. **Verified in the lane docs/method sets out and it stopped once**: the verify found two probe errors and two minor look defects, one fix round answered them, the reverify found one defect that fix round had introduced (the editor-foot lift moved the Architecture map 8px too far), the phase stopped, he chose Phase 284.1, whose single-margin repair was measured against the alternative in the app and passed both reverifiers. Three things a person will notice: every visible session resized once at first paint (8 or 16px narrower, 8px shorter); a 1028-1043px window with the rail expanded now draws it collapsed; with sessions on the right the editor overlays 16px sooner. Screenshots at HEAD and at the parent were read by eye on dark, light and hue 150 (`out/p284/` in the worktree). Phase 286 queued from what the verifiers found.
 
 - 2026-09-17, **the quiet surround's commit is `8f36e18a`**, carrying Phases 284 and 284.1 and the Phase 286 entry; the line above was written before the hash existed.
+
+- 2026-09-17, **PHASE 287 QUEUED, the `-i` line above the `security` buffer, Tier 3.** Phase 281's vendor verifier asked for this as its own entry and Phase 281 recorded it as queued when no entry existed (SPEC §8.2 said "queued as its own entry" and the commit body "queued on its own", and `grep "^## Phase"` found nothing); the Phase 281.1 re-derive verifier found the gap and its measure verifier measured the limit, 3,995 characters writing and 4,195 cutting the line and hanging `security -i` under a scratch `HOME`. Phase 281.1 refuses such a line before the spawn (`SECURITY_LINE_MAX`, 4,000); this entry decides the long-line form, with the argv form refused by charter unless he rules otherwise.

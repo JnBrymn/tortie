@@ -47,6 +47,7 @@ import {
   keychainWrite,
   type SecurityRunner
 } from '../security';
+import { decodeKeychainPayload, securityPrintsRaw } from '../security-print';
 import {
   defaultStoreTarget,
   forgetStore,
@@ -334,6 +335,67 @@ describe('Phase 281: the writes land on the vendor item, never the stray', () =>
     expect(strays(rows)).toStrictEqual(before);
     // The person's own vendor item is not a name forget can compose.
     expect(rows.some((r) => r.service === PLAIN && r.account === VENDOR)).toBe(true);
+  });
+});
+
+describe('Phase 281.1: what security prints as hex, measured, and the model prints the same', () => {
+  /**
+   * MEASURED on a scratch keychain (2026-09-17, twice): `find-generic-password
+   * -w` prints raw when every byte is 0x20-0x7E and lowercase hex otherwise.
+   * These rows are literals, so the predicate is checked against the
+   * measurement and not against itself; the Phase 281 table admitted only the
+   * control characters and DEL, and both fakes printed by that same table.
+   */
+  const TABLE: { what: string; payload: string; raw: boolean }[] = [
+    { what: 'plain JSON', payload: credential('plain'), raw: true },
+    { what: 'a trailing space (0x20)', payload: `${credential('space')} `, raw: true },
+    { what: 'a tilde (0x7E)', payload: '{"p281":"~"}', raw: true },
+    { what: 'a tab (0x09)', payload: '{\t"p281":"tab"}', raw: false },
+    { what: 'a newline', payload: '{\n"p281":"nl"}', raw: false },
+    { what: 'U+0001', payload: '{"p281":"\u0001"}', raw: false },
+    { what: 'DEL (0x7F)', payload: '{"p281":"\u007f"}', raw: false },
+    { what: 'an accented letter', payload: '{"p281":"caf\u00e9"}', raw: false },
+    { what: 'an emoji in an mcpOAuth key', payload: '{"mcpOAuth":{"p281-\u{1F422}":"x"}}', raw: false }
+  ];
+
+  for (const row of TABLE) {
+    it(`${row.what} prints ${row.raw ? 'raw' : 'as hex'}, the model prints the same, and the decoder reads the payload back`, async () => {
+      expect(securityPrintsRaw(row.payload)).toBe(row.raw);
+      const hex = Buffer.from(row.payload, 'utf8').toString('hex');
+      // The model, asked directly for the payload.
+      const model = firstMatchSecurity([{ service: 'p281-print', account: VENDOR, payload: row.payload }]);
+      const printed = model.answer(['find-generic-password', '-a', VENDOR, '-s', 'p281-print', '-w']);
+      expect(printed).toEqual({ code: 0, stdout: `${row.raw ? row.payload : hex}\n` });
+      // The decoder, over the printing computed here from the payload.
+      expect(decodeKeychainPayload(`${row.raw ? row.payload : hex}\n`)).toBe(row.payload);
+      // The shipping read over the model, which is the two together.
+      await expect(keychainRead(model, 'p281-print', VENDOR)).resolves.toBe(row.payload);
+    });
+  }
+
+  it('readStore captures a vendor credential holding a tab, an accented letter and an emoji, and a switch round trips each', async () => {
+    const payloads = [
+      JSON.stringify({ claudeAiOauth: { accessToken: 'p281-fixture-tab' } }, null, '\t').replace(/\n/g, ''),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'p281-fixture-accent' }, mcpOAuth: { 'caf\u00e9': 'x' } }),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'p281-fixture-emoji' }, mcpOAuth: { 'p281-\u{1F422}': 'x' } })
+    ];
+    for (const payload of payloads) {
+      expect(securityPrintsRaw(payload)).toBe(false);
+      const rows = seed();
+      const runner = firstMatchSecurity(rows);
+      const d = storesOver(runner);
+      const target = await defaultStoreTarget(d, 'claude');
+      expect(target).not.toBeNull();
+      if (target === null) return;
+      // The switch writes the payload and verifies it by reading it back
+      // through the hex printing, so a decoder that hands the hex back
+      // refuses the switch.
+      expect((await safeSwap(target, payload)).ok).toBe(true);
+      const read = await readStore(d, 'claude', null);
+      expect(read.payload).toBe(payload);
+      expect(read.account).toBe(VENDOR);
+      expect(rows.find((r) => r.service === PLAIN && r.account === VENDOR)?.payload).toBe(payload);
+    }
   });
 });
 

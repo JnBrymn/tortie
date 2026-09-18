@@ -174,6 +174,19 @@ function defaultStoreDeps(
  * directory it made is read through the real reader. `../harness/
  * usage-fixture.ts` installs this same shape with the person's home, which is
  * what its own probes were measured over.
+ *
+ * THIS SHAPE COVERS THE CREDENTIALS DOMAIN ALONE. Two other readers of the
+ * person's keychain exist in the same launch and are stated here so a later
+ * probe header does not claim more than it has (Phase 281.1): the usage
+ * meter's own `-w` read (`../usage/credentials.ts`, `keychainReader`, which
+ * a harness launch replaces only under `GMUX_USAGE_FIXTURE` or
+ * `GMUX_HARNESS_KEYCHAIN`), and the login list's presence check
+ * (`../usage/login-accounts.ts`), which since Phase 281.1 refuses the
+ * keychain under the same `isHarnessLaunch` predicate this file uses
+ * (`harnessLoginAccountDeps`). Chromium's `safeStorage` reaches the Safe
+ * Storage item with no `security` process when a danger value is sealed or a
+ * non-empty seal opened, and `use-mock-keychain` is appended only under
+ * `isIsolatedLaunch`, which does not count `GMUX_PROBES`.
  */
 export function harnessFileKeepDeps(root: string, home: string): KeepDeps {
   return {

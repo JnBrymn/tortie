@@ -2249,6 +2249,7 @@ const ABLATIONS = [
         file: 'security.ts',
         from:
           '  const command = `add-generic-password -U -a "${account}" -s "${service}" -X "${hex}"\\n`;\n' +
+          '  if (command.length > SECURITY_LINE_MAX) return false;\n' +
           "  const { code } = await runner.run(['-i'], command);",
         to:
           "  const { code } = await runner.run([\n" +

@@ -74,6 +74,7 @@ import { access, readFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { LoginProviderId } from '@shared/logins';
+import { isHarnessLaunch } from '../harness/launch-gate';
 import { claudeKeychainAccount, claudeKeychainService } from './credentials';
 
 /**
@@ -425,8 +426,11 @@ export function defaultLoginAccountDeps(): LoginAccountDeps {
         // so the answer is about the item that vendor reads and never a stray
         // under the same service name. A failure still reads as not present
         // here, a limit Phase 281 states rather than fixes: the miss and
-        // failure split is the meter's alone (research 126 §7.2), so a locked
-        // keychain can still draw this list's not signed in row.
+        // failure split is the meter's alone (research 126 §7.2). A LOCKED
+        // keychain is not that failure: its attributes still read (exit 0,
+        // measured on a locked scratch keychain in Phase 281.1), so presence
+        // says present for it, and only a `security` that fails outright
+        // collapses to absent here.
         execFile(
           '/usr/bin/security',
           ['find-generic-password', '-a', account, '-s', service],
@@ -456,6 +460,34 @@ export function defaultLoginAccountDeps(): LoginAccountDeps {
   };
 }
 
+/**
+ * The presence seam a HARNESS launch gets (Phase 281.1): the shipped deps with
+ * a keychain that always answers no, so a probe's app never spawns `security`
+ * for the login list. The file half stays the real reader over the real
+ * locations, which is what the Phase 202 to 206 probes were measured over.
+ *
+ * WHY IT IS INSTALLED BY DEFAULT UNDER `isHarnessLaunch` AND NOT ONLY BY THE
+ * KNOBS. Until Phase 281.1 only `../harness/usage-fixture.ts` and
+ * `../harness/keychain-harness.ts` replaced this seam, so a harness launch
+ * that carried neither knob (`probe:p281` is one) got `defaultLoginAccountDeps`
+ * here while the credentials domain got its refusing file shape
+ * (`../credentials/index.ts`, `harnessFileKeepDeps`, Phase 208). The Phase
+ * 281.1 measure verifier found the gap by reading: a hover over the meter, the
+ * Settings usage group or the add-login modal asks `logins:list`, which reached
+ * `keychainHas` below and spawned an attributes-only `/usr/bin/security` against
+ * the person's login keychain, against the probe's own sentence that only the
+ * meter could reach it. Now the two domains agree: with no knob, a harness
+ * launch spawns `security` for nothing but the meter's own read. The FILE
+ * half is unchanged: `home` is still the person's own, so `logins:list` under
+ * a no-knob harness launch reads `~/.claude.json` (an address, never a token)
+ * and asks whether `~/.claude/.credentials.json` exists. The usage fixture
+ * keeps the real home on purpose; a launch that must not read it carries
+ * `GMUX_USAGE_FIXTURE` (Phase 281.1 reverify, stated rather than changed).
+ */
+export function harnessLoginAccountDeps(): LoginAccountDeps {
+  return { ...defaultLoginAccountDeps(), keychainHas: async () => false };
+}
+
 let installed: LoginAccountDeps | null = null;
 
 /**
@@ -469,7 +501,13 @@ export function setLoginAccountDeps(next: LoginAccountDeps | null): void {
 }
 
 function currentDeps(): LoginAccountDeps {
-  if (installed === null) installed = defaultLoginAccountDeps();
+  if (installed === null) {
+    // A harness launch that installed no knob refuses the keychain here, by
+    // the same widest predicate `../credentials/index.ts`'s `keepDeps` uses.
+    installed = isHarnessLaunch(process.env)
+      ? harnessLoginAccountDeps()
+      : defaultLoginAccountDeps();
+  }
   return installed;
 }
 

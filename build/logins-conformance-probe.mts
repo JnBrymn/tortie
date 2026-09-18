@@ -1000,6 +1000,24 @@ try {
       viaLogin: credentials.claudeKeychainService({}, NFD_DIR),
       presenceAsked: nfdPresenceAsked,
       credentialAsked: nfdCredentialAsked
+    },
+    // THE NAMED EXCEPTION (Phase 281.1, rule 18): what Tortie names for a
+    // chosen login when CLAUDE_SECURESTORAGE_CONFIG_DIR is defined. The gate
+    // derives the vendor's answers itself and pins the disagreement to exactly
+    // the empty and the set rows.
+    secureLogin: {
+      dir: LOGIN_DIR,
+      secure: '/p281/secure',
+      empty: credentials.claudeKeychainService({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' }, LOGIN_DIR),
+      set: credentials.claudeKeychainService(
+        { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/p281/secure' },
+        LOGIN_DIR
+      ),
+      equal: credentials.claudeKeychainService(
+        { CLAUDE_SECURESTORAGE_CONFIG_DIR: LOGIN_DIR },
+        LOGIN_DIR
+      ),
+      unset: credentials.claudeKeychainService({}, LOGIN_DIR)
     }
   };
 

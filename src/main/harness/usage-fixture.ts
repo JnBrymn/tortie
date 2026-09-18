@@ -46,7 +46,7 @@ import { harnessFileKeepDeps, setKeepDeps } from '../credentials';
 import { loginsRoot } from '../logins';
 import { setUsageHarnessOverride } from '../usage/ipc';
 import {
-  defaultLoginAccountDeps,
+  harnessLoginAccountDeps,
   setLoginAccountDeps
 } from '../usage/login-accounts';
 import type { UsageRequest, UsageResponse } from '../usage/transport';
@@ -104,7 +104,9 @@ export function installUsageFixture(): void {
   // other seam stays the shipped one, so what the list reads is real files
   // through the real reader. PHASE 281: presence now asks by service AND
   // account; this answer ignores both, so it still refuses every item.
-  setLoginAccountDeps({ ...defaultLoginAccountDeps(), keychainHas: async () => false });
+  // PHASE 281.1: the shape is built by the usage domain itself, in ONE place,
+  // because a harness launch that carries no knob at all now gets it too.
+  setLoginAccountDeps(harnessLoginAccountDeps());
   // PHASE 204. THE PROBE'S APP OWNS NO KEYCHAIN ENTRY OF HIS EITHER. The store
   // Tortie keeps accounts in becomes a FILE under the probe's own profile, and
   // the vendor stores become files in the directories the probe made, because

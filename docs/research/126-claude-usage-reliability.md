@@ -615,7 +615,9 @@ are.
 - No deletion, repair or migration of the stray item, and no surface that tells a person about it.
 - `CLAUDE_SECURESTORAGE_CONFIG_DIR` changes only the default login's service name, because the name rule
   copies the vendor's whole. The storage lock it also moves stays the limit `locks.ts:59-62` states. A
-  chosen login under that variable is not handled: Claude Code would give every login the one name.
+  chosen login under that variable is not handled: Claude Code gives every login the plain item when the
+  variable is empty and the variable's own scoped item when it is set (corrected by Phase 281.1; "the
+  one name" stood here before, wrong for the empty case, and `build/p281/SPEC.md` §8.2 pins the class).
 - No change to Tortie's vault item addressing, and no change to Codex.
 - Not the Codex observe refusal: `logins.observe provider=codex kind=refused` is logged 2,329 times
   between 2026-09-04 and 2026-09-16. That is its own entry.

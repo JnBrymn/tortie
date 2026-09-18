@@ -14,8 +14,12 @@
  *
  *  - `find-generic-password` answers the first row whose service matches and,
  *    when `-a` was given, whose account matches too. `-w` prints the payload
- *    and one newline; without it, the attribute lines the credentials domain
- *    parses (`acct`, and `mdat` when the row carries one).
+ *    and one newline, AS HEX when the payload holds any byte outside
+ *    0x20–0x7E (`securityPrintsRaw`, the one predicate the shipping decoder
+ *    reads too; measured in Phase 281.1, a tab or any non-ASCII character
+ *    prints hex, which the Phase 281 model got wrong and no test could see);
+ *    without `-w`, the attribute lines the credentials domain parses (`acct`,
+ *    and `mdat` when the row carries one).
  *  - `delete-generic-password` removes the first row matching the same way.
  *    `-w` on a delete is a malformed call.
  *  - the `-i` add line updates the row matching service AND account, or
@@ -41,6 +45,7 @@
  */
 
 import type { SecurityRunner } from '../security';
+import { securityPrintsRaw } from '../security-print';
 
 /** One keychain item, in the order `security` would meet it. */
 export interface KeychainRow {
@@ -125,7 +130,13 @@ export function firstMatchSecurity(rows: KeychainRow[]): FirstMatchSecurity {
     const row = at < 0 ? undefined : rows[at];
     if (argv[0] === 'find-generic-password') {
       if (row === undefined) return { code: 44, stdout: '' };
-      return { code: 0, stdout: wantsPayload ? `${row.payload}\n` : attributes(row) };
+      if (!wantsPayload) return { code: 0, stdout: attributes(row) };
+      // The real program's printing: raw only when every byte is 0x20–0x7E,
+      // lowercase hex otherwise (Phase 281.1).
+      const body = securityPrintsRaw(row.payload)
+        ? row.payload
+        : Buffer.from(row.payload, 'utf8').toString('hex');
+      return { code: 0, stdout: `${body}\n` };
     }
     if (argv[0] === 'delete-generic-password') {
       if (wantsPayload) return { code: 1, stdout: '' };

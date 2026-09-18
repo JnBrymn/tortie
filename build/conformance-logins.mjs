@@ -144,6 +144,15 @@
  *      `missing` for 44 alone and throws for the rest unless the file stands in.
  *  17. A DECOMPOSED DIRECTORY NAMES THE COMPOSED ITEM, driven: every way a
  *      directory reaches a service name hashes its NFC form, re-derived here.
+ *  18. THE NAMED EXCEPTION IS EXACTLY TWO ROWS (Phase 281.1). A chosen login
+ *      under `CLAUDE_SECURESTORAGE_CONFIG_DIR` is the one class where Tortie
+ *      and Claude Code's `mI` disagree: empty, the vendor reads the PLAIN
+ *      item (the default account's credential) while Tortie names the login's
+ *      scoped item; set, the vendor reads the variable's scoped item. With
+ *      the variable equal to the login directory, or unset, they agree. The
+ *      Phase 281 vendor verifier asked for this pin so the disagreement is
+ *      executable and cannot widen in silence; the fix is `loginPaneEnv`
+ *      setting the variable beside `CLAUDE_CONFIG_DIR` (SPEC §8), not built.
  *
  * AND IT REPAIRED THE ABLATIONS, which had proved nothing since Phase 200. The
  * copies went to the system temporary directory, where the usage copy's import
@@ -862,7 +871,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  */
 function vendorFindings(v) {
   if (v === undefined || v === null) {
-    return [13, 15, 16, 17].map((rule) => finding(rule, 'the probe printed no Phase 281 reading'));
+    return [13, 15, 16, 17, 18].map((rule) => finding(rule, 'the probe printed no Phase 281 reading'));
   }
   const out = [];
   const say = (rule, ok, sentence) => {
@@ -915,6 +924,17 @@ function vendorFindings(v) {
     say(17, v.nfc?.[key] === want, `A DECOMPOSED DIRECTORY NAMED ${String(v.nfc?.[key])} through ${key}, and this file derives ${want} from its NFC form, so Tortie asks an item Claude Code never writes`);
   }
   say(17, same(v.nfc?.presenceAsked, one(want)) && same(v.nfc?.credentialAsked, one(want)), `a decomposed directory was asked as ${JSON.stringify([v.nfc?.presenceAsked, v.nfc?.credentialAsked])}, not ${want}`);
+
+  // Rule 18, the named exception, with the vendor's answers derived here.
+  const sl = v.secureLogin ?? {};
+  const loginScoped = derivedScoped(sl.dir ?? '');
+  const vendorEmpty = plain;
+  const vendorSet = derivedScoped(sl.secure ?? '');
+  say(18, typeof sl.dir === 'string' && sl.dir !== '' && typeof sl.secure === 'string' && sl.secure !== '' && sl.secure !== sl.dir, 'the probe printed no named-exception reading');
+  say(18, sl.empty === loginScoped && sl.empty !== vendorEmpty, `A CHOSEN LOGIN UNDER AN EMPTY CLAUDE_SECURESTORAGE_CONFIG_DIR IS NAMED ${String(sl.empty)}; the pinned exception is the login's ${loginScoped} against the vendor's plain item, and this row moved`);
+  say(18, sl.set === loginScoped && sl.set !== vendorSet, `A CHOSEN LOGIN UNDER A SET CLAUDE_SECURESTORAGE_CONFIG_DIR IS NAMED ${String(sl.set)}; the pinned exception is the login's ${loginScoped} against the vendor's ${vendorSet}, and this row moved`);
+  say(18, sl.equal === loginScoped, `with the variable equal to the login directory Tortie named ${String(sl.equal)}, not ${loginScoped}, so the two disagree where they must agree`);
+  say(18, sl.unset === loginScoped, `with the variable unset Tortie named ${String(sl.unset)} for the login, not ${loginScoped}, so the exception is wider than the variable`);
   return out;
 }
 
@@ -1715,6 +1735,22 @@ const ABLATIONS = [
         file: 'credentials.ts',
         from: "    .update(configDir.normalize('NFC'))",
         to: '    .update(configDir)'
+      }
+    ]
+  },
+  {
+    // PHASE 281.1. The named exception widened in silence: a chosen login made
+    // to follow the vendor's mI under the variable, which is the follow-up
+    // SPEC §8 names for `loginPaneEnv` and NOT for this function. Rule 18 must
+    // see the empty and the set rows move.
+    name: 'a chosen login made to follow CLAUDE_SECURESTORAGE_CONFIG_DIR, so the pinned exception moves',
+    rule: 18,
+    dir: 'usage',
+    edits: [
+      {
+        file: 'credentials.ts',
+        from: "  if (loginDir !== null && loginDir !== '') return claudeScopedService(loginDir);\n  const secure = env['CLAUDE_SECURESTORAGE_CONFIG_DIR'];",
+        to: "  const secure = env['CLAUDE_SECURESTORAGE_CONFIG_DIR'];\n  if (loginDir !== null && loginDir !== '' && secure === undefined) return claudeScopedService(loginDir);"
       }
     ]
   }

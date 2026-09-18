@@ -217,10 +217,17 @@ export function claudeScopedService(configDir: string): string {
  *  - Otherwise a non-empty `CLAUDE_CONFIG_DIR` gives the scoped name of its
  *    NFC form and nothing else, and an empty or unset one gives the plain name.
  *
- * THE LIMIT, stated rather than handled: a chosen login under
- * `CLAUDE_SECURESTORAGE_CONFIG_DIR` gets its directory's scoped name here,
- * while Claude Code would give every login the one name that variable names.
- * Research 126 §7.2 leaves that case out of Phase 281.
+ * THE LIMIT, stated rather than handled, and PINNED (Phase 281.1): a chosen
+ * login under `CLAUDE_SECURESTORAGE_CONFIG_DIR` gets its directory's scoped
+ * name here, while Claude Code, for every login, reads the plain item when
+ * the variable is empty and the variable's own scoped item when it is set.
+ * Empty is the worse half: the "second login" session then runs on the
+ * DEFAULT account's credential while the meter, presence and a switch target
+ * the login's scoped item, a name no session reads. `conformance:logins` rule
+ * 18 and `__tests__/p281-vendor-address.test.ts` pin the class to exactly
+ * those two rows, so it cannot widen in silence; the fix is `loginPaneEnv`
+ * setting the variable beside `CLAUDE_CONFIG_DIR` on the pane (SPEC §8), which
+ * research 126 §7.2 leaves out of Phase 281 and nothing has built.
  */
 export function claudeKeychainService(
   env: Readonly<Record<string, string | undefined>>,
@@ -330,24 +337,30 @@ export function keychainReader(bin: string = KEYCHAIN_BIN): {
         if (answered && run.code === 0) return decodeKeychainPayload(run.stdout);
         // EXIT 36 IS NOT ABSENT HERE, and that is a deliberate difference from
         // Claude Code. The vendor's own read answers null for 36 as well as 44
-        // (bundle 2.1.274, `o===Q||o===ee` at offset 170,936,447). 36 is the
-        // keychain refusing to interact, which is what a locked keychain
-        // answers WHERE NO UNLOCK PROMPT CAN BE SHOWN (the vendor's own lock
-        // test is `security show-keychain-info` answering 36, offset
-        // 170,936,603), and a locked keychain is
-        // not a sign out: reading it as one would draw "Sign in with Claude
-        // Code" for a person who is signed in and send them to the wrong
-        // remedy (research 126 §7.2 proof step 4).
+        // (bundle 2.1.274, `o===Q||o===ee` at offset 170,936,447). 36 is
+        // errSecInteractionNotAllowed, the keychain refusing to interact, and
+        // the vendor's own lock test reads `security show-keychain-info`
+        // answering 36 (offset 170,936,603). A locked keychain is not a sign
+        // out: reading it as one would draw "Sign in with Claude Code" for a
+        // person who is signed in and send them to the wrong remedy (research
+        // 126 §7.2 proof step 4).
         //
-        // IN A GUI SESSION A LOCKED KEYCHAIN DID NOT ANSWER 36. The Phase 281
-        // keychain verifier measured it on a scratch keychain in an Aqua
-        // session: the `-w` read printed nothing and did not exit until it was
-        // killed, most likely held on the unlock prompt. So there the read
-        // throws at the five second deadline above, which keeps the last
-        // numbers under the stale state all the same. THE LIMIT, stated and
-        // not new (the parent sent the same `-w` read): every poll against a
-        // locked login keychain can raise that prompt and hold for five
-        // seconds.
+        // A LOCKED KEYCHAIN HAS ANSWERED THREE WAYS ON THIS MACHINE, and every
+        // one of them throws here, which is the point. 36, per the vendor's
+        // reading. A hold with nothing printed until the child was killed,
+        // measured by the Phase 281 keychain verifier on a locked scratch
+        // keychain in an Aqua session, which the deadline above ends. And 152,
+        // errAuthorizationInternal, at once (22 to 145 ms, no prompt), measured
+        // twice in Phase 281.1 on a locked scratch keychain in an Aqua session,
+        // sandboxed and not, with `show-keychain-info` on it answering 152 as
+        // well. The login keychain in the search list was not measured locked.
+        // So the deadline is ONE route a locked keychain takes and not the
+        // route, and the rule is the one below: 44 alone is absent, everything
+        // else keeps the last numbers under the stale state. A locked
+        // keychain's ATTRIBUTES still read (exit 0), so presence in
+        // `login-accounts.ts` says present for it. THE LIMIT, stated and not
+        // new (the parent sent the same `-w` read): a poll that does raise an
+        // unlock prompt holds for five seconds.
         if (answered && run.code === KEYCHAIN_EXIT_NOT_FOUND) return null;
         throw new Error('the keychain item could not be read');
       } finally {

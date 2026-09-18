@@ -23,15 +23,23 @@
  *      that exit 44, 36 and 1, one that cannot be spawned, one that is
  *      cancelled and one that never answers: only 44 is null, every other one
  *      throws, and through the usage service a throw keeps the previous number
- *      under the stale state while 44 draws signed out. THE ONE THAT NEVER
- *      ANSWERS IS THE LOCKED KEYCHAIN of the operator's GUI session: the Phase
- *      281 keychain verifier measured a `-w` read of a locked scratch keychain
- *      in an Aqua session printing nothing and not exiting until it was killed,
- *      so the path a locked keychain actually takes there is the deadline, and
- *      it is driven through the usage service too. Exit 36 is what the same
- *      read answers where no unlock prompt can be shown.
+ *      under the stale state while 44 draws signed out. A LOCKED KEYCHAIN HAS
+ *      ANSWERED THREE WAYS on this machine, and each is a row here: 36 per the
+ *      vendor's own lock test; a child that never answers, which the Phase 281
+ *      keychain verifier measured for a `-w` read of a locked scratch keychain
+ *      in an Aqua session (nothing printed, no exit until killed), driven
+ *      through the usage service too; and exit 152 at once, measured twice in
+ *      Phase 281.1 on a locked scratch keychain in an Aqua session, its own
+ *      row. The deadline is one route, not the route, and every route but 44
+ *      keeps the numbers.
  *  (d) A PAYLOAD `security` PRINTS AS HEX is decoded rather than parsed as hex
- *      (§2.7).
+ *      (§2.7). PHASE 281.1 WIDENED THE ROWS to what the real program was
+ *      MEASURED to print as hex, being any byte outside 0x20-0x7E: a tab, an
+ *      accented letter and an emoji. `JSON.stringify` keeps a non-ASCII
+ *      character raw inside a string and a tab indent puts a raw tab between
+ *      tokens, and the Phase 281 decoder handed each back as the hex string
+ *      itself, so the meter read `missing`. The hex each program prints is
+ *      computed HERE from the payload, never by the predicate under test.
  *
  * WHAT THIS FILE STARTS. Tiny `/bin/sh` programs it writes into its own
  * temporary directory, removed in an `afterAll`. Each records the argv it was
@@ -504,6 +512,7 @@ describe('(c) the miss and failure split, over programs the shipping reader spaw
   const EXITS: { code: number; answer: 'null' | 'throw'; what: string }[] = [
     { code: 44, answer: 'null', what: 'no such item' },
     { code: 36, answer: 'throw', what: 'a locked keychain where no unlock prompt can be shown' },
+    { code: 152, answer: 'throw', what: 'a locked keychain answering at once, as measured in Phase 281.1' },
     { code: 1, answer: 'throw', what: 'any other failure' }
   ];
 
@@ -568,7 +577,7 @@ describe('(c) the miss and failure split, over programs the shipping reader spaw
     }
   }, 15_000);
 
-  it('a child that never answers, the path a locked keychain takes in a GUI session, is ended at the SHIPPING deadline, and the read THROWS', async () => {
+  it('a child that never answers, one route a locked keychain has taken in a GUI session, is ended at the SHIPPING deadline, and the read THROWS', async () => {
     // The deadline is not shortened: the reader's five seconds are driven on a
     // fake clock, so the shipping constant is what is measured. Only the two
     // timer functions are faked; the child, its pipes and `Date` are real.
@@ -674,7 +683,7 @@ describe('(c) through the usage service, a fake transport and an injected clock'
     return row;
   };
 
-  for (const failure of ['36', '1', 'unspawnable']) {
+  for (const failure of ['36', '152', '1', 'unspawnable']) {
     it(`${failure === 'unspawnable' ? 'a program that cannot be spawned' : `exit ${failure}`} keeps the previous number under the stale state`, async () => {
       const program = switchable(`service-${failure}`);
       program.answer('ok');
@@ -701,7 +710,7 @@ describe('(c) through the usage service, a fake transport and an injected clock'
     });
   }
 
-  it('a read held past the SHIPPING deadline, a locked keychain in a GUI session, keeps the previous number under the stale state', async () => {
+  it('a read held past the SHIPPING deadline, one route a locked keychain has taken in a GUI session, keeps the previous number under the stale state', async () => {
     const program = switchable('service-held');
     program.answer('ok');
     const m = meter(program.bin);
@@ -764,29 +773,82 @@ describe('(c) through the usage service, a fake transport and an injected clock'
 // ---------------------------------------------------------------------------
 
 describe('(d) a payload security prints as hex', () => {
-  it('is decoded by the shipping reader and reads ok', async () => {
-    // A payload holding a newline is one `security` will not print raw.
-    const payload = JSON.stringify(
-      { claudeAiOauth: { accessToken: 'P281-HEX-TOKEN', subscriptionType: 'pro' } },
-      null,
-      1
-    );
-    expect(payload).toContain('\n');
-    const program = writeProgram('hex', `cat "$here/hex"\nprintf '\\n'\nexit 0`);
-    const hex = Buffer.from(payload, 'utf8').toString('hex');
-    writeFileSync(join(program.dir, 'hex'), hex, 'utf8');
+  /**
+   * Payloads the real `security` was measured to print as hex (Phase 281.1,
+   * scratch keychain, 2026-09-17), each holding the character named and
+   * otherwise a credential the meter must read. `JSON.stringify` keeps a tab,
+   * an accented letter and an emoji raw, so each is what a real credential
+   * with such an MCP server name holds.
+   */
+  const ROWS: { slug: string; what: string; payload: string }[] = [
+    {
+      slug: 'newline',
+      what: 'a newline',
+      payload: JSON.stringify(
+        { claudeAiOauth: { accessToken: 'P281-HEX-TOKEN', subscriptionType: 'pro' } },
+        null,
+        1
+      )
+    },
+    {
+      slug: 'tab',
+      what: 'a tab (0x09), outside 0x20-0x7E, as tab indentation puts one in',
+      payload: JSON.stringify(
+        { claudeAiOauth: { accessToken: 'P281-HEX-TOKEN', subscriptionType: 'pro' } },
+        null,
+        '\t'
+      ).replace(/\n/g, '')
+    },
+    {
+      slug: 'accent',
+      what: 'an accented letter, whose UTF-8 bytes are all above 0x7F',
+      payload: JSON.stringify({
+        claudeAiOauth: { accessToken: 'P281-HEX-TOKEN', subscriptionType: 'pro' },
+        mcpOAuth: { 'p281-caf\u00e9': 'x' }
+      })
+    },
+    {
+      slug: 'emoji',
+      what: 'an emoji in an mcpOAuth key',
+      payload: JSON.stringify({
+        claudeAiOauth: { accessToken: 'P281-HEX-TOKEN', subscriptionType: 'pro' },
+        mcpOAuth: { 'p281-\u{1F422}': 'x' }
+      })
+    }
+  ];
 
-    // What the program prints is the hex printing, which JSON cannot read.
-    const direct = spawnSync(program.bin, shippingArgv(PLAIN, VENDOR), {
-      encoding: 'utf8',
-      timeout: 5_000
+  for (const row of ROWS) {
+    it(`holding ${row.what} is decoded by the shipping reader and reads ok`, async () => {
+      // eslint-disable-next-line no-control-regex
+      expect(row.payload).toMatch(/[^\u0020-\u007e]/);
+      const program = writeProgram(`hex-${row.slug}`, `cat "$here/hex"\nprintf '\\n'\nexit 0`);
+      const hex = Buffer.from(row.payload, 'utf8').toString('hex');
+      writeFileSync(join(program.dir, 'hex'), hex, 'utf8');
+
+      // What the program prints is the hex printing, which JSON cannot read.
+      const direct = spawnSync(program.bin, shippingArgv(PLAIN, VENDOR), {
+        encoding: 'utf8',
+        timeout: 5_000
+      });
+      expect(direct.stdout).toBe(`${hex}\n`);
+
+      const reader = keychainReader(program.bin);
+      expect(await reader.keychain(PLAIN, VENDOR)).toBe(row.payload);
+      expect(await readClaudeCredential(credentialDeps(reader.keychain, { USER: VENDOR }))).toEqual(
+        okWith('P281-HEX-TOKEN', 'pro')
+      );
     });
-    expect(direct.stdout).toBe(`${hex}\n`);
+  }
 
+  it('a payload with a trailing space is printed raw and read back with the space', async () => {
+    // 0x20 is inside the printable range: measured raw, and a trim would lose it.
+    const payload = `${credential('P281-SPACE-TOKEN', 'pro')} `;
+    const program = writeProgram('raw-space', `cat "$here/raw"\nprintf '\\n'\nexit 0`);
+    writeFileSync(join(program.dir, 'raw'), payload, 'utf8');
     const reader = keychainReader(program.bin);
     expect(await reader.keychain(PLAIN, VENDOR)).toBe(payload);
     expect(await readClaudeCredential(credentialDeps(reader.keychain, { USER: VENDOR }))).toEqual(
-      okWith('P281-HEX-TOKEN', 'pro')
+      okWith('P281-SPACE-TOKEN', 'pro')
     );
   });
 });

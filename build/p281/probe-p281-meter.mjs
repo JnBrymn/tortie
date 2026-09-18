@@ -27,7 +27,21 @@
  *    `harnessFileKeepDeps` (src/main/credentials/index.ts): Tortie's own store
  *    is a FILE under the scratch profile and the credentials domain's
  *    `security` seam refuses every call, so no observe, lift, switch or vault
- *    write can reach his keychain. Only the usage meter reads it.
+ *    write can reach his keychain. Since Phase 281.1 the login list's
+ *    presence seam refuses the keychain under the same predicate
+ *    (`harnessLoginAccountDeps`, src/main/usage/login-accounts.ts), so a
+ *    `logins:list` from the meter's hover card, the Settings usage group or
+ *    the add-login modal spawns no `security` either; until then it spawned
+ *    an attributes-only `find-generic-password` against his login keychain,
+ *    which the Phase 281.1 measure verifier found by reading and this
+ *    script never triggered. So the ONLY `security` this launch can spawn is
+ *    the meter's own `-w` read of the one item, and the only other reader of
+ *    his login keychain is Chromium's `safeStorage` (the Safe Storage item, no
+ *    `security` process), reached only when a danger value is sealed or a
+ *    non-empty seal is opened; this run's profile is fresh and sets no danger
+ *    value, and `use-mock-keychain` is NOT appended, because
+ *    `isIsolatedLaunch` does not count `GMUX_PROBES`. The `logins.boot` line
+ *    is read back below: its `securityCalls` must be 0.
  *  - `HOME` IS HIS OWN, and it has to be. Measured on 2026-09-17: with `HOME`
  *    pointed at an empty directory, `security find-generic-password -a "$USER"
  *    -s "Claude Code-credentials"` exits 44 and the same call with his own
@@ -167,8 +181,8 @@ const code = await withElectron(
     polls.push(second);
     say(`poll 2 ${JSON.stringify(second)}`);
     // The main process's own failure lines, provider and outcome only.
-    const lines = handle
-      .text()
+    const text = handle.text();
+    const lines = text
       .split('\n')
       .filter((l) => /usage\.read\.failed/.test(l))
       .map((l) => {
@@ -177,8 +191,15 @@ const code = await withElectron(
         return `${provider} ${outcome}`;
       });
     say(`usage.read.failed lines: ${lines.length === 0 ? 'none' : lines.join(', ')}`);
+    // The credentials domain's own count of `security` calls at boot, which
+    // the file shape above must keep at zero (Phase 281.1).
+    const bootCalls = /logins\.boot.*?"securityCalls":\s*(\d+)/.exec(text)?.[1] ?? null;
+    say(`logins.boot securityCalls: ${bootCalls ?? 'not logged'}`);
     cdp.close();
-    return polls.length === 2 && polls.every(judge) ? 0 : 1;
+    // A missing line is a FAILED check, not a quiet one (Phase 281.1 reverify):
+    // a boot whose observe never ran, or a moved log format, must not pass.
+    const quiet = bootCalls === '0';
+    return polls.length === 2 && polls.every(judge) && quiet ? 0 : 1;
   }
 );
 

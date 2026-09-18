@@ -69,6 +69,37 @@ import { decodeKeychainPayload } from './security-print';
 /** How long any one `security` call may take. */
 export const SECURITY_TIMEOUT_MS = 10_000;
 
+/**
+ * The longest `-i` line this domain will hand `security`, trailing newline and
+ * any keychain suffix included (Phase 281.1).
+ *
+ * MEASURED on 2026-09-17 under a scratch `HOME` where no default keychain
+ * resolves, twice (the Phase 281.1 measure verifier and its fix round): an
+ * `add-generic-password` line of 3,923 and of 3,995 characters writes and
+ * reads back exactly; a line of 4,123 and of 4,195 characters writes NOTHING
+ * to the keychain named at its end and `security -i` does not exit with stdin
+ * closed until it is killed (65 s and 10 s). The Phase 281.1 reverify then
+ * found the edge by binary search: a 4,097 BYTE line, newline included,
+ * writes and reads back, a 4,098 byte line hangs and writes nothing, and the
+ * buffer counts BYTES (a 4,030 character line of 4,090 bytes wrote, a 4,050
+ * character line of 4,110 bytes hung). This cap compares `.length`, which is
+ * UTF-16 units, and every component of Tortie's own line is ASCII except the
+ * harness keychain path, so a non-ASCII scratch path could pass the cap and
+ * still overrun the buffer; Phase 287 owns that arm. So past the buffer the
+ * line is cut and the trailing keychain path is lost. Claude Code's own
+ * writer switches to the argv form at 4,032 (bundle 2.1.274, its `Z`), which
+ * is the same buffer read from the other side. Tortie writes only over `-i`,
+ * so until Phase 287 (docs/BACKLOG.md, "the `-i` line above the `security`
+ * buffer") decides the long-line form, a line this long is REFUSED before
+ * anything is spawned: {@link keychainWrite} answers false for it, and
+ * {@link defaultSecurityRunner} answers exit 1 for one whose suffix takes it
+ * over. A harness run can therefore never lose the scratch keychain path off
+ * the end of a line and aim a write at the default keychain, and a real run
+ * never spends its ten second deadline on the hang. A credential of the shape
+ * either vendor writes today is well under a quarter of this.
+ */
+export const SECURITY_LINE_MAX = 4_000;
+
 /** The program, named once. Nothing composes this from a setting. */
 export const SECURITY_BIN = '/usr/bin/security';
 
@@ -165,6 +196,13 @@ export function defaultSecurityRunner(
         } else {
           line.push(file);
         }
+      }
+      // A LINE `security` WOULD CUT IS NEVER SENT (Phase 281.1). The suffix
+      // above is what {@link keychainWrite}'s own check cannot see, and a cut
+      // line loses exactly that suffix, which is the keychain the write was
+      // meant for. {@link SECURITY_LINE_MAX} has the measurement.
+      if (argv[0] === '-i' && input !== undefined && input.length > SECURITY_LINE_MAX) {
+        return { code: 1, stdout: '' };
       }
       // PHASE 220. THROUGH `../proc/guarded` RATHER THAN A BARE `execFile`.
       // This was the one child in the product that nothing could reach: not
@@ -337,6 +375,12 @@ export async function keychainHasItem(
  *
  * THE PAYLOAD GOES OVER STDIN AS HEX and reaches no argv. `-U` is what makes
  * this an update rather than a second item beside the first.
+ *
+ * A LINE LONGER THAN {@link SECURITY_LINE_MAX} IS REFUSED before the runner
+ * sees it (Phase 281.1): `security -i` cuts such a line and hangs, measured,
+ * and the cut end is where a harness keychain path goes. The refusal is
+ * false, the same answer every other refused write gives, and the runner is
+ * not called, so no fake and no real `security` sees a line this long.
  */
 export async function keychainWrite(
   runner: SecurityRunner,
@@ -349,6 +393,7 @@ export async function keychainWrite(
   if (payload === '') return false;
   const hex = Buffer.from(payload, 'utf8').toString('hex');
   const command = `add-generic-password -U -a "${account}" -s "${service}" -X "${hex}"\n`;
+  if (command.length > SECURITY_LINE_MAX) return false;
   const { code } = await runner.run(['-i'], command);
   return code === 0;
 }

@@ -32,6 +32,7 @@ import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { addLogin, readLoginsFile } from '../src/main/logins/store';
 import { loginDirIn, loginsFileIn } from '../src/main/logins/dirs';
+import { securityPrintsRaw } from '../src/main/credentials/security-print';
 import {
   CLAUDE_KEYCHAIN_SERVICE,
   claudeKeychainAccount,
@@ -220,7 +221,9 @@ interface KeychainItems {
  *    rather than adding a second one, moving it behind the other items of its
  *    name (measured 2026-09-17 by the Phase 281 keychain verifier);
  *  - `find-generic-password -s <service> -w` prints the payload plus exactly
- *    one newline, and prints it AS HEX when it is not printable;
+ *    one newline, and prints it AS HEX when any byte of it is outside
+ *    0x20-0x7E (a tab or a non-ASCII character included; Phase 281.1 measured
+ *    the table and both fakes now print by the shipping `securityPrintsRaw`);
  *  - the same call without `-w` prints the item's attributes, `acct` included,
  *    and never the payload.
  *
@@ -314,11 +317,12 @@ function fakeSecurity(w: World): {
         if (argv[0] === 'find-generic-password') {
           if (item === undefined) return { code: 44, stdout: '' };
           if (wantsPayload) {
-            // eslint-disable-next-line no-control-regex
-            const printable = !/[\u0000-\u0008\u000a-\u001f\u007f]/.test(
-              item.payload
-            );
-            const body = printable
+            // PHASE 281.1. The real program prints raw only when every byte
+            // is 0x20-0x7E and lowercase hex otherwise, so a tab or any
+            // non-ASCII character prints hex. The predicate is the shipping
+            // decoder's own, and `p281-stores-address.test.ts` pins it
+            // against measured rows so the two cannot be wrong together.
+            const body = securityPrintsRaw(item.payload)
               ? item.payload
               : Buffer.from(item.payload, 'utf8').toString('hex');
             return { code: 0, stdout: `${body}\n` };
