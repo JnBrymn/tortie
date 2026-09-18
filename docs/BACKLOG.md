@@ -29913,6 +29913,112 @@ measured the limit. This is the entry.
 - No change to the meter's reader; it reads whatever Claude Code wrote, however long.
 - No release.
 
+## Phase 288 — the meters float in the middle of an empty session list (operator, 2026-09-18)
+
+**Subject.** `fix(chrome): the meters keep the foot of an empty session list`
+
+**First body line.** `Phase 288: the meters sit where the sessions would have ended`
+
+**Semver.** Patch. With the session list on the right and no session in the project, the usage meters sit
+at the foot of the list, directly above the position button, exactly where they sit once a session
+exists, instead of halfway down the rail or directly under "No sessions yet".
+
+**Tier 2, and the parent measurement is mandatory.** The operator reported it with a photograph. It is a
+rendered surface with no new state, one rule per density, and its proof fits in one app run. The
+independent methods are the parent measurement (the probe has a parent arm and the number must move from
+half the free height to zero) and an attack: the verifier drives the states the builder did not, being
+the meters off, one provider on, the rail at the window's width floor, the expanded list at its 160px
+floor, focus mode and both colour bases, and reads rectangles rather than photographs.
+
+**Charter.** The operator, 2026-09-18 11:42, with a CleanShot of the collapsed rail on the right of a
+project with no session: the two meter rows sit in the vertical middle of the rail, under a hairline,
+with the position button alone at the foot. His words: "when there is no session in a project and
+sessions are to the right instead of being aligned to the bottom (when there are sessions), it orients
+to the middle, which is wrong."
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **The rail has two `margin-top: auto` items and nothing between them when the list is empty.**
+  `src/renderer/app/SessionRail.tsx:317` returns null at zero surfaces, so the collapsed dock draws no
+  `.rail-list`, which is the one item with `flex: 1` (`src/renderer/app/session-rail.css:36-54`). What
+  remains in the column is the band, the meter and the footer, and both the meter
+  (`src/renderer/app/usage-meter.css:214-219`, `.session-dock.collapsed > .usage-mini`, written by Phase
+  181.1 in `ed977d0f`) and the footer (`session-rail.css:59-69`, `.rail-footer`, written by Phase 18 in
+  `bfa67d72`) carry `margin-top: auto`. CSS Flexible Box Layout §8.1 distributes positive free space
+  EQUALLY among the auto margins in that axis, so the meter takes half the rail's spare height above it
+  and the footer takes the other half. That is the photograph. With one session the list's `flex: 1`
+  leaves no free space, both auto margins resolve to zero and the meter sits on the footer, which is why
+  he only sees it in an empty project.
+- **The expanded list has the mirror defect, at the other end.** `src/renderer/app/SessionDock.tsx:467-470`
+  draws `.dock-stub` ("No sessions yet — press ⌘T") in place of `.dock-list`; the stub has no `flex`
+  (`src/renderer/styles/app.css:1233-1238`) where the list has `flex: 1` (`:1240-1247`), and `.usage-full`
+  (`usage-meter.css:104-109`) has no auto margin at all. So with no session the full meter sits directly
+  under the stub, at the TOP of the list, and drops to the foot the moment a session is created. Nobody
+  reported that one; it is the same cause read in the other density and this phase fixes both.
+- **The comment on `.rail-footer` already promised the right thing for the wrong reason.** It says
+  "`margin-top: auto` rather than a spacer element, so the empty state (no sessions, hence no .rail-list)
+  still puts it in the same place instead of letting it float under the band". That was true from Phase 18
+  until Phase 181 put a second auto margin above it, and neither phase's probe drove an empty project with
+  the meters on.
+- **Where it is NOT wrong.** The top strip has its own meter (`src/renderer/app/StripUsageMeter.tsx`) in a
+  row, not a column, and is untouched. With both providers off the meter draws nothing in either density
+  and the footer's single auto margin puts it at the foot, which is every fresh install and why the
+  smoke photographs never showed it.
+
+### The mechanism
+
+1. **The rail: the meter takes the spare height and the footer keeps it only when the meter is absent.**
+   In `src/renderer/app/session-rail.css`, one adjacent-sibling rule beside `.rail-footer`:
+   `.usage-mini + .rail-footer { margin-top: 0; }`. When the meter is drawn it is the one auto margin in
+   the column and takes all the free space, so it sits directly on the footer; when the meter is absent
+   the footer's own auto margin still pins it to the foot. No DOM change, no new element, no colour, no
+   token, and the rule reads as a sentence about the two items it names. The comment on `.rail-footer`
+   is corrected to say why the footer's margin is conditional.
+2. **The expanded list: the full meter takes the spare height the same way.** In
+   `src/renderer/app/usage-meter.css`, `.session-dock > .usage-full { margin-top: auto; }` beside the
+   `.usage-full` rule, with `margin: 0 var(--space-3)` left as it is for the sides. Nothing else in the
+   expanded column has an auto margin, so with the stub the meter drops to the foot and with the list
+   (`flex: 1`) nothing moves. `.dock-stub` is NOT given `flex: 1` instead: the fix is one idea in both
+   densities, the meter takes the spare height, and it lives in the meter's own stylesheet where the
+   rail's rule already is, rather than as a second idea on the stub.
+3. **The populated case is byte-identical at both densities.** With one session, every rectangle the probe
+   reads (`.usage-mini`, `.usage-full`, `.rail-footer`, `.dock-list`, `.rail-list`, the dock itself)
+   is the same at the parent and at HEAD, to the pixel. That is the regression guard.
+
+### The proof, run rather than read
+
+- **`npm run probe:p288`**, new, `build/p288/probe-p288.mjs`, ONE Electron through `build/electron-run.mjs`
+  ended in its `finally`, `GMUX_PROBES=1`, a scratch `HOME`, a harness tmux socket, a scratch project with
+  no session, and the meters answered from a `GMUX_USAGE_FIXTURE` file exactly as `build/probe-p202-logins.mjs`
+  launches (the fixture refuses the keychain outright, so no credential of his is read and no request
+  leaves the machine; the probe REFUSES without the knob). It sets `usage: { claude: true, codex: true }`
+  through the settings door, puts the sessions on the right, and reads rectangles by CDP, never a photograph:
+  (a) rail, no session: `usage-mini.bottom === rail-footer.top` and `rail-footer.bottom === dock.bottom`, the
+  gap between meter and footer read as a number and required to be 0; (b) expanded, no session:
+  `usage-full` ends at the dock's foot and `.dock-stub` is at the top under the band; (c) both densities,
+  meters OFF: the footer at the foot, no meter drawn; (d) one provider on; (e) one session created through
+  the harness: every rectangle in item 3 equal to the parent's reading; (f) the rail at the width floor
+  `PROJECT_RAIL_MIN_WINDOW_W` and the expanded list at `DOCK_MIN`; (g) focus mode on and off around (a).
+  `P288_PARENT_CHECKOUT` points the same run at a parent build, one after the other and never at once, and
+  the parent must read the meter's gap to the footer as half the free height in (a) and the meter under
+  the stub in (b). Under ~60 s so a verifier can run it inside the harness limit.
+- **`src/renderer/app/__tests__/p288-empty-foot.test.ts`**, red at the parent: reads both stylesheets as
+  text and pins that `.usage-mini + .rail-footer` sets `margin-top: 0`, that `.session-dock > .usage-full`
+  sets `margin-top: auto`, that `.rail-footer` still sets `margin-top: auto`, that `.dock-stub` sets no
+  `flex`, and that neither rule names a colour literal.
+- `HELPER_USER_FLOOR` 142 → 143 in the same commit (obligation 1).
+- Gates: typecheck, build, npm test, smoke:t1, `probe:p284` unchanged at PASS (its A-M states include the
+  rail and the dock with sessions, so an accidental move of the populated geometry shows there too).
+
+### What is NOT in this phase
+
+- No new element, no spacer, no change to `SessionRail.tsx`, `SessionDock.tsx` or the stub's copy.
+- No change to the top strip's meter, the hover card, the meter's own rows or its colours.
+- No change to the footer's height, hairline or the position button.
+- No colour literal, no token change, no edit to `tokens.css`.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -30673,3 +30779,5 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 287 QUEUED, the `-i` line above the `security` buffer, Tier 3.** Phase 281's vendor verifier asked for this as its own entry and Phase 281 recorded it as queued when no entry existed (SPEC §8.2 said "queued as its own entry" and the commit body "queued on its own", and `grep "^## Phase"` found nothing); the Phase 281.1 re-derive verifier found the gap and its measure verifier measured the limit, 3,995 characters writing and 4,195 cutting the line and hanging `security -i` under a scratch `HOME`. Phase 281.1 refuses such a line before the spawn (`SECURITY_LINE_MAX`, 4,000); this entry decides the long-line form, with the argv form refused by charter unless he rules otherwise.
 
 - 2026-09-17, **PHASE 281.1 LANDED, the Claude meter's fix round re-verified, `b21456b8`, version 0.107.0 unmoved, no tag, pushed.** Two independent verifiers (real `security` on a guarded scratch keychain; SPEC §8.2 re-derived from the vendor verifier's journal and the 2.1.274 bundle) said needs_work, one fix round answered every finding, and both reverifiers passed. **A shipping reader defect fixed**: `security -w` prints hex for any byte outside 0x20-0x7E and the decoder only took the decoding for a control character, so a Claude login with a tab, an accent or an emoji in its JSON read as no usable credential; `securityPrintsRaw` is the measured rule and both fakes follow it. **A safety claim narrowed to the code**: the login list's presence check could still spawn an attributes-only `security` against his keychain in a harness launch; it now answers absent without a spawn. **A limit that was never queued is now Phase 287** (the `-i` line above the buffer: 4,097 bytes writes, 4,098 hangs, measured; a 4,000 cap refuses longer lines before the runner). §8.2 carries the vendor verifier's full major finding, rule 18 pins the named SECURESTORAGE exception, his user name is gone from SPEC §6.2, and the locked-keychain comment records the three answers measured. Search list identical before and after every run; no synthetic item reached his keychain; the real-keychain app run was not repeated.
+
+- 2026-09-18, **PHASE 288 QUEUED AND STARTED, the meters float in the middle of an empty session list (operator), Tier 2.** He sent a photograph of the collapsed rail on the right of a project with no session: the two meter rows halfway down the rail, the position button alone at the foot. Measured before the entry was written: `SessionRail.tsx:317` draws no list at zero surfaces, so the rail's column holds two `margin-top: auto` items, the meter (`usage-meter.css:214`, Phase 181.1) and the footer (`session-rail.css:60`, Phase 18), and flexbox shares the free height equally between them. The expanded list has the mirror defect at the other end: the full meter has no auto margin and the stub no `flex`, so it sits directly under "No sessions yet". One rule per density, no element, no colour; `probe:p288` reads the rectangles at the parent and at HEAD with the meters on a fixture and no credential of his read. The queue behind it is unchanged: 282.1 waits on his call, then 285, 283, 286, 287.
