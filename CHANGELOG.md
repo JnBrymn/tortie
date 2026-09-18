@@ -10,7 +10,7 @@ This release is about the keyboard ending up where you are. Entering session foc
 
 ### Changed
 
-- In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last.
+- In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last. Contributed by [John Berryman](https://github.com/JnBrymn) in [#28](https://github.com/gregce/tortie/pull/28).
 - The terminal and editor now sit inside one rounded outline with a little room around it, and the title bar, the sidebar and the session list lose the lines that divided them from it; the selected session and the active view are marked by a soft fill instead of a bar down the edge. Nothing works differently, and each open session is a few columns narrower.
 
 ### Fixed
