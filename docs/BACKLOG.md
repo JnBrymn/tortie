@@ -30019,6 +30019,132 @@ to the middle, which is wrong."
 - No release.
 
 
+## Phase 282.2 — the way out the sentence promises (Phase 282.1's reverify, operator's call, 2026-09-18)
+
+**Subject.** `fix(editor): undoing your edits lets a rewound change be accepted`
+
+**First body line.** `Phase 282.2: the way out the sentence promises`
+
+**Semver.** Patch. In the Redline view, after a rewind lands on a tab you had typed in, the sentence says
+"Save or undo your edits first, then accept". Undo now works as a way out: ⌘Z back to clean, and the next
+⌥↩ accepts. Before, the hold lingered until the agent next wrote to that repository or the tab was closed
+and reopened, and every ⌥↩ said "still being rewound" while nothing was.
+
+**Tier 3.** The redline rewrites a person's file, and this phase adds a READ on a transition of the tab's
+own state, which is the kind of read Phase 282's reverify found rolling a rewind back in 37 of 500
+interleavings. Two independent methods: an attack (the verifier drives the read into every ordering the
+Phase 282 rules 22 and 26 exist for — the model replaced, the baseline moved, a save in flight, a second
+undo, a redo — through the shipping `tab-io` and store, never by `setState`) and a re-derivation (the
+verifier writes its own after-undo rig from the sentence alone, without reading the fix). One app run, the
+new arm of `probe:redlinemoveon`, measures the debounce window the reverifiers reasoned about and did not
+measure. Fix once, reverify, stop.
+
+**Charter.** Phase 282.1's two reverifiers, independently, on 2026-09-18 00:36 to 00:50 (its workflow
+`wf_35461079-9dd`, outcome `needs_work`). The attack lens graded it major ("F1 NOT FIXED — the linger
+moved one step"); the re-derive lens graded it minor ("N1 the undo way out needs a repo event"). The
+operator read both on 2026-09-18 and chose to make the read happen rather than reword the sentence. Per
+the method, a second `needs_work` on one item means the spec was wrong, so this entry is the rewritten
+spec, and it LANDS PHASE 282.1's FIX ROUND WITH IT: nothing from 282.1 is committed, its fix round sits in
+`/private/tmp/wt-p2821`, and this phase builds on those bytes and commits both, 282.1's fix round first
+under its own label and this phase second.
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **The read the sentence assumes does not exist.** `refreshRepo` (`src/renderer/editor/tab-io.ts:1916`)
+  has ONE caller, `onRepoChanged` in `src/renderer/editor/store.ts:839-842`, which is the watcher's
+  debounced tick. `markDirty` (`store.ts:1439`) patches the flag and calls `autoSave.noteChanged` and
+  nothing else; Monaco's undo reaches it through `redline-edits.ts:325`,
+  `markDirty(tabId, text !== live.savedContents)`. The other three reads under `src/renderer/editor`
+  (`loadContents` at open, `diskReading` and `openCompare` inside the save's stale door) are not on the
+  undo path. Both reverifiers traced this independently and agree.
+- **Why the rewind's own tick did not release it.** The rewind's guarded write raises the watcher's tick
+  about 150 ms later (`src/renderer/state/repo-changed.ts`); a keystroke that landed inside the write made
+  the tab dirty before the tick, `refreshRepo` skipped the dirty tab, and no tick comes again until some
+  file in that repository changes. On a paused agent none does.
+- **The shape, driven.** The attack reverifier's `p2821-rv-after-undo.test.ts` (a copy is in the session
+  scratchpad under `p2821-reverify-tests/`; this phase adopts it) on the fix round's own mounted-view rig:
+  mount BASE/AGENT, ⌥↓, hold the write, ⌥⌫, a keystroke inside the write, the landing, ⌥↩ answers the
+  `acceptDirty` sentence; then `markDirty(ID, false)` and NO read: ⌥↩ twice answers
+  `{dirty: false, savedContents: AGENT, disk: REWOUND, toasts: ['A change in notes.txt is still being
+  rewound, so nothing was accepted.' ×2]}` with the rewound change still drawn from the trailing buffer.
+  CONTROL: the same, then one watcher read, and the next ⌥↩ accepts. The re-derive reverifier's
+  `p2821-rv-dirty-hold.test.ts` drove both roads through the shipping `useEditor.getState().save()` and
+  `useApp.getState().confirm.onAlt()` with a gated compare-and-swap main and read the same:
+  `main.reads === 1` after the undo, nothing pulled a read.
+- **The Save road works and reverses the rewind.** ⌘S on that tab reaches the stale dialog ("Something
+  wrote to it after Tortie read it" — the something being the person's own ⌥⌫), Compare is the default,
+  and Overwrite writes the agent's words back over the rewind: `disk.text` contains `red fox leaps` and
+  not `brown fox` after it. A stated limit of §3.2's bind; no text the person meets names it.
+- **The 282.1 fix round's own test hides the gap.** `p282-view-presses.test.ts`'s new case calls
+  `watcherReads(ID)` by hand right after `markDirty(ID, false)`, which is why it is green.
+- **Two nits from the same reverify, carried here.** (1) `build/conformance-save.mjs:1370-1381` rule 11
+  accepts a statement that returns THROUGH the plain door
+  (`if (reason === 'auto' && !guarded) return saveOutsideProject(…)` leaves the gate green, and only the
+  vitest `p277-save-completion`'s "a timer's request never reaches the plain door" goes red). (2)
+  `build/p268/ablation.mjs:89-100` `runGate` answers `code: r.status ?? 1`, never reads `r.error` and
+  prints none of the gate's text when the gate exits non-zero without naming a rule, so a 2-of-18 flake
+  ("22. rule 26 did not go red / 23. rule 26 did not go red / 28. rule 11 did not go red", no companion
+  "passed the gate" line, load 4.9) could not be diagnosed.
+
+### The mechanism
+
+1. **One read on the dirty→clean transition, when a landed hold exists.** A store action
+   `rereadRepo(repoPath)` in `src/renderer/editor/store.ts` that delegates to `io.refreshRepo(repoPath)`
+   — already serialised by its queue, so a second call joins rather than races — and in
+   `src/renderer/editor/RedlineDocument.tsx` an effect keyed on `[tab.dirty]`: on the transition to
+   `false`, if `rewindHolds.current` has a hold whose `landed` is not null, call it. Nothing is read
+   when no hold is landed, so an ordinary undo on an ordinary tab pulls no read. Rule 22 (model identity)
+   and rule 26 (`savedContents` unmoved since the read began) already guard that read, and they are why
+   this is a read rather than an adoption of the bytes the hold remembers: a read asks the disk what is
+   there NOW, so a write that landed between the rewind and the undo is what the picture shows. After the
+   read `savedContents` moves to the disk's bytes, `releaseHolds`' second clause lets the hold go, and
+   the next ⌥↩ accepts.
+2. **The hand-made read comes out of the test.** `p282-view-presses.test.ts` removes the `watcherReads(ID)`
+   after `markDirty(ID, false)` and asserts the between-step: ⌥↩ right after the undo accepts, or says a
+   true sentence. The reverifier's after-undo test is adopted as
+   `src/renderer/editor/__tests__/p2822-after-undo.test.ts`, red at the 282.1 bytes.
+3. **`conformance:redline` rule 40 gains the clause**: the clean transition names the re-read (the effect
+   keyed on `tab.dirty` calls `rereadRepo`, and `rereadRepo` reaches `refreshRepo`), with an ablation that
+   removes the effect and one that removes the landed-hold test, both red.
+4. **`probe:redlinemoveon` gains one arm** (`build/probe-redline-move-on.mjs`): in the app, rewind a change
+   with a keystroke typed inside the write, wait past the debounce, ⌘Z, ⌥↩ — the change is accepted, the
+   picture is the disk's, and the same arm at the parent reads the held sentence. That is the
+   measurement of the window both reverifiers reasoned about.
+5. **The nits.** `conformance-save.mjs` rule 11 gains `else if (refusal.includes('saveOutsideProject'))`
+   → fail("11. the statement that tests the auto reason returns through the plain door"), with
+   `ablation:p268` arm 32 planting that shape and the PASS count raised to 32. `ablation.mjs`'s
+   `runGate` throws `r.error` when the spawn failed and, when the code is non-zero with no rule named,
+   prints the gate's text under the arm's line so the next flake names its cause. `build/p277/SPEC.md`'s
+   corrections say the gate reads text and the vitest is the runtime pin. `build/p282/SPEC.md` §11.1's
+   "leads to the watcher's read" is rewritten to name the read the view makes, and its cost paragraph
+   records that Overwrite on the Save road puts the agent's change back, in those words.
+6. **What Phase 282.1 already holds, landed with this** (its fix round, confirmed by both reverifiers on
+   items 2 and 3): `releaseHolds(holds, drawn, saved)` without the dirty parameter, `redlineHeldSentence`'s
+   `acceptDirty` sentence, the release effect keyed on `[composed, tab.savedContents]`, rule 40's dirty
+   clause removed, `saveSettingsWindowBounds`'s unreadable-file arm writing `{ ...held, settings:
+   getSettings() }` with three `it.each` arms in `p278-env-cap.test.ts`, conformance:save rules 11/18/19/20
+   tightened through `statementHolding` with ablation arms 28-31, `tab-io.ts`'s never-settling-read limit
+   stated, SPEC 282 §11 and the SPEC 277/278 correction sections.
+
+### The proof, run rather than read
+
+- `p2822-after-undo.test.ts` red at the 282.1 bytes and green at HEAD; `p282-view-presses.test.ts` with no
+  hand-made read; `conformance:redline` rule 40 with its two new ablations red; `conformance:save` rule 11
+  red on the planted through-the-door shape; `ablation:p268` 32 of 32.
+- `probe:redlinemoveon` at HEAD (the new arm accepts) and at the 282.1 bytes (the new arm reads the held
+  sentence), one Electron each, never at once.
+- The battery on the committed bytes: typecheck, build, npm test, smoke:t1, gate:checks, conformance:save,
+  ablation:p268, conformance:redline, conformance:redline-write, probe:p277, probe:p268, probe:redlinemoveon.
+
+### What is NOT in this phase
+
+- No change to the `acceptDirty` sentence or the held sentences: the words stay, the road they name
+  becomes real.
+- No read when no landed hold exists; no read on the way INTO dirty; no adoption of remembered bytes.
+- No change to the stale dialog, its default or its body; the Save road's cost is stated, not changed.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -30781,3 +30907,7 @@ cycle rather than only the evening it was written.
 - 2026-09-17, **PHASE 281.1 LANDED, the Claude meter's fix round re-verified, `b21456b8`, version 0.107.0 unmoved, no tag, pushed.** Two independent verifiers (real `security` on a guarded scratch keychain; SPEC §8.2 re-derived from the vendor verifier's journal and the 2.1.274 bundle) said needs_work, one fix round answered every finding, and both reverifiers passed. **A shipping reader defect fixed**: `security -w` prints hex for any byte outside 0x20-0x7E and the decoder only took the decoding for a control character, so a Claude login with a tab, an accent or an emoji in its JSON read as no usable credential; `securityPrintsRaw` is the measured rule and both fakes follow it. **A safety claim narrowed to the code**: the login list's presence check could still spawn an attributes-only `security` against his keychain in a harness launch; it now answers absent without a spawn. **A limit that was never queued is now Phase 287** (the `-i` line above the buffer: 4,097 bytes writes, 4,098 hangs, measured; a 4,000 cap refuses longer lines before the runner). §8.2 carries the vendor verifier's full major finding, rule 18 pins the named SECURESTORAGE exception, his user name is gone from SPEC §6.2, and the locked-keychain comment records the three answers measured. Search list identical before and after every run; no synthetic item reached his keychain; the real-keychain app run was not repeated.
 
 - 2026-09-18, **PHASE 288 QUEUED AND STARTED, the meters float in the middle of an empty session list (operator), Tier 2.** He sent a photograph of the collapsed rail on the right of a project with no session: the two meter rows halfway down the rail, the position button alone at the foot. Measured before the entry was written: `SessionRail.tsx:317` draws no list at zero surfaces, so the rail's column holds two `margin-top: auto` items, the meter (`usage-meter.css:214`, Phase 181.1) and the footer (`session-rail.css:60`, Phase 18), and flexbox shares the free height equally between them. The expanded list has the mirror defect at the other end: the full meter has no auto margin and the stub no `flex`, so it sits directly under "No sessions yet". One rule per density, no element, no colour; `probe:p288` reads the rectangles at the parent and at HEAD with the meters on a fixture and no credential of his read. The queue behind it is unchanged: 282.1 waits on his call, then 285, 283, 286, 287.
+
+- 2026-09-18, **PHASE 282.2 QUEUED, the way out the sentence promises (Phase 282.1's reverify, his call), Tier 3.** Phase 282.1's workflow ended `needs_work` at its reverify at 00:50: both reverifiers, independently, found that "Save or undo your edits first, then accept" names a road that does not complete — `refreshRepo` has one caller, the watcher's tick, `markDirty` pulls no read, and the rewind's own tick was consumed while the tab was dirty, so after ⌘Z the hold lingers until the agent next writes to that repository. Per the method the workflow stopped and nothing was committed; the fix round sits in `/private/tmp/wt-p2821`. He read the finding at 10:40 and chose the read over the reword. This phase adds one read on the dirty-to-clean transition when a landed hold exists, adopts the reverifier's after-undo test, takes the hand-made read out of the fix round's test, gives rule 40 the clause, adds the arm to `probe:redlinemoveon`, carries the two nits (rule 11's through-the-door shape, `runGate`'s silent failure), and lands 282.1's fix round with it. It starts after Phase 288's verification, so at most two workflows run at once.
+
+- 2026-09-18, **PHASE 286 STARTED, entering session focus takes the keyboard out of the session, Tier 2.** He asked for it drained before the next release, because it is the one queued defect a person hits daily. Worktree at `ba9e1567`; the entry's parent numbers (`out/p284/readings-parent.json`, `activeElement` = `body` 100 ms after the chord) are the measurement the phase must move.
