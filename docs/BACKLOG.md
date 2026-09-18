@@ -30194,6 +30194,16 @@ leave, the page opened from the session list).
    the measured `body`.
 3. **Nothing is focused that was not the terminal's to take**: a leave whose project has no session
    focuses nothing and says nothing.
+4. **`focusTerminal()` prefers the pane that is outlined** (amended 2026-09-18 from Phase 286's
+   reverify, its finding N1). `src/renderer/app/session-focus.ts:56-60` picks
+   `.gmux-terminal-mount textarea`, the FIRST in document order, so in a split the row's Enter handler
+   (`SessionStrip.tsx:178`, `SessionDock.tsx:356`) and this phase's leave both put the keyboard in the
+   first pane while the outline sits on another. Phase 286 made the menu path into session focus land in
+   the outlined pane, so two doors from the same seat now disagree. It asks the selector Phase 286
+   ships, `.split-pane.focused .xterm-helper-textarea, .surface-single .xterm-helper-textarea`, first,
+   and falls back to document order only when nothing is marked. Its callers are unchanged. Stated and
+   not fixed (N2): when the held pane's session EXITS during a focus flight the leaf draws its ended
+   state, no textarea exists to take the keyboard, and it rests on nothing until a click.
 
 ### The proof, run rather than read
 
@@ -30205,7 +30215,7 @@ leave, the page opened from the session list).
 
 ### What is NOT in this phase
 
-- No change to `focusTerminal()`, to the jump, to the overview's chord or to its flight's timing.
+- No change to `focusTerminal()`'s callers, to the jump, to the overview's chord or to its flight's timing.
 - No change to what the page draws.
 - No release.
 
@@ -30984,4 +30994,6 @@ cycle rather than only the evening it was written.
 - 2026-09-18, **PHASE 282.2 STARTED, the way out the sentence promises, Tier 3.** Worktree at `4d89dde0` with Phase 282.1's fix round applied, 15 files sha256-identical to its worktree. Three builders on disjoint files (the read and its tests, the gates, the probe's arm) and an integrator.
 
 - 2026-09-18, **PHASE 288 LANDED, the meters keep the foot of an empty session list, `b33ae19c`, version 0.107.0 unmoved, no tag, pushed.** With the session list on the right and no session in the project, the usage meters now sit at the foot directly above the position button, in the collapsed rail and in the expanded list alike, exactly where they sit once a session exists. **The cause was two `margin-top: auto` items sharing an empty column**: at the parent the probe reads the meter 373.5 px above the footer, 50% of the 747 px free height, and the footer's own margin the other half; the expanded list had the mirror defect nobody had reported, the full meter directly under "No sessions yet". One rule per density, no element, no colour. `probe:p288` is new (floor 142 to 143), draws the meters from a fixture so no credential is read, and reads 0 px at HEAD at both densities, one provider, the 1044 px window floor and the 160 px list floor, with the populated rectangles identical to the parent's; light base and top strip checked by the attack verifier. **Verify passed twice first time; a round on the minor findings hardened the text test (13 to 20 cases) and made the probe refuse a stale build; its reverify came back needs_work on the test alone, he chose one more targeted test fix, and the fresh reverify passed** with every earlier hole red and 27 further hostile shapes red. Stated limits: focus mode around the empty rail is not driven because the list and the mode are never on screen together (the entry's proof line is corrected in place), and the text test cannot see a fourth stylesheet or a meter moved behind a helper, for which the probe is the backstop. Gates: typecheck, build, npm test at 935 files and 14,908 tests, smoke:t1, probe:p284 with no finding.
+
+- 2026-09-18, **PHASE 289 AMENDED IN PLACE, and two changelog lines written that their commits had not.** Phase 286's attack reverifier found a seam this phase made visible: from a session-list row the View-menu path into session focus now lands in the OUTLINED pane while the chord pressed at the row still lands in the FIRST pane, because `focusTerminal()` picks the first textarea in document order. It is the function Phase 289 already touches the caller of, so 289's entry gains a fourth mechanism item rather than a new phase. Phase 281 (`79c6c8fe`) and Phase 288 (`b33ae19c`) landed without the Unreleased line their neighbours carry; both are written now, one bullet each under Fixed.
 

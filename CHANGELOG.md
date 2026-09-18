@@ -20,6 +20,8 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 - Typing into a file while the project's changes are being refreshed is no longer thrown away.
 - A file open on another machine, in a folder you allowed editing in, now shows as unsaved when you type into it, so closing it asks first.
 - Rewinding a change in the Redline view redraws as you press it. It used to wait for the file to be noticed on disk, which made ⌥⌫ feel slower than ⌥↩.
+- The Claude usage meter no longer says "Sign in with Claude Code to see usage" while you are signed in. Tortie now reads the same keychain item Claude Code itself reads, where before a stray item with the same name could answer first; a keychain that cannot be read keeps the last numbers rather than claiming you are signed out.
+- With the session list on the right and no session in the project, the usage meters sit at the bottom of the list where they sit once a session exists, instead of halfway down it.
 
 ## 0.107.0 (2026-09-16)
 
