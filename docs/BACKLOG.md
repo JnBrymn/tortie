@@ -30446,6 +30446,335 @@ not hold 0.108.0 for it.
 - No release.
 
 
+## Phase 291 — two more places the keyboard is left on nothing: closing the editor out of editor fill, and closing the shortcuts sheet (found by Phase 289's attack verifier, 2026-09-18)
+
+**Subject.** `fix(keyboard): closing the filled editor or the shortcuts sheet gives the keyboard back`
+
+**First body line.** `Phase 291: nothing that closes leaves the keyboard on nothing`
+
+**Semver.** Patch. After ⇧⌘B fills the window with the editor, ⌘E closes it and you can type into your
+session at once. After the shortcuts sheet closes, the same. Today both leave the keyboard on nothing
+until you click.
+
+**Tier 2, and the parent measurement is mandatory.** Two rendered surfaces, no new state, a proof that
+fits in one app run, and measured parent readings that must move. It is the defect Phases 286 and 289
+closed, in a third and a fourth surface, so its methods are theirs: the parent measurement, and an
+attack on the doors the builder did not drive.
+
+**Charter.** Phase 289's attack verifier, 2026-09-18 (`wf_1c2d4628-2bd`, findings A2 graded major and
+A4 graded minor), both measured identical at HEAD and at the parent, both outside that phase's charter
+and stated in its entry rather than widened into it. The reverifier noted that a stated finding is not
+a queued one; this is the queue.
+
+### What was measured before this entry was written, so no round re-derives it
+
+- **A2, the filled editor.** ⇧⌘B then ⌘E: `fill afterCmdE: where=body typed-> []`, a string typed
+  with real keys arrived in no session, at both builds, re-measured on Phase 289's fixed bytes.
+  `src/renderer/editor/EditorPanel.tsx:180` `focusTerminal()` runs in the same task as `hidePanel()`
+  (`:558`) and `exitEditorFill()` (`:570`), while nothing in the work row is drawn yet, so the
+  terminal's textarea refuses the focus. Phase 289 rewrote this door to ask the one helper and kept a
+  fallback to `[data-slot="terminal-stack"]`, which carries no `tabIndex` and so takes nothing. The
+  comment at `:176` records the reading.
+- **A4, the shortcuts sheet.** With the ⌘/ sheet open over Catch Me Up, ⇧⌘U closes the page behind
+  the sheet; Phase 289's guard correctly leaves the keyboard in the sheet's input; Escape then closes
+  the sheet and the keyboard falls to `body`. Four ordinary keys, identical at the parent.
+- **The rule both break** is the one Phases 286 and 289 wrote down: an element that is not drawn
+  refuses the keyboard, so a close that focuses in the same task as the store write that un-hides the
+  work focuses nothing.
+
+### The mechanism
+
+1. **The filled editor's close gives the keyboard back once the work row is drawn**, in the shape
+   Phase 289 ships: `afterOverviewLeavesTheDom` in `src/renderer/overview/overview-flight.ts` is a
+   one-shot `MutationObserver` on the fact being waited for. Grep for it before writing a second one:
+   the honest shape is one helper that waits for a named class to leave the shell, used by both. No
+   timer with a number, no frame, cancelled if the editor is filled again first, and it does nothing
+   when the person has put the keyboard somewhere else in between.
+2. **⇧⌘U is swallowed while a modal layer is open**, the way `focusChordSwallowed()`
+   (`src/renderer/app/keyboard.ts:84`) already swallows ⇧⌘↩, so the page cannot close behind a sheet;
+   and the sheet's own close hands the keyboard back where it was when the sheet opened, else to the
+   terminal, which is Phase 289's rule.
+3. **Nothing is sent to a session that was not there before.** Both closes give the keyboard back
+   where it was, and to `focusTerminal()` only when nothing was recorded or the element is gone.
+
+### The proof, run rather than read
+
+- Phase 289's attack probe (`scratchpad/p289-attack/attack.mjs`, arms `fillleave` and `modal`) adopted
+  as a launch of `probe:p137` or a probe of this phase's own: red at the parent on `body`, green at
+  HEAD, a typed string read from the pane.
+- Unit cases beside `p289-leave-keyboard.test.ts`, red at the parent.
+- Gates: typecheck, build, test, smoke:t1, probe:sessionfocus and probe:p284 because a keyboard rule
+  changed under them.
+
+### What is NOT in this phase
+
+- The ended outlined pane (Phase 289's A3): when the outlined pane's session has ended, every door
+  gives the keyboard to the first live pane while the outline stays on the ended one. Whether an ended
+  pane should take nothing is the operator's ruling.
+- No change to what ⇧⌘B or ⌘E do, to the sheet's contents, or to `focusTerminal()`.
+- No release.
+
+
+## Phase 293 — a session manager: direction D, the Tabbed sheet (operator, 2026-09-18)
+
+**Subject.** `feat(sessions): manage every session from one sheet`
+
+**First body line.** `Phase 293: the Tabbed sheet`
+
+**Semver.** Minor. From Session → Manage Sessions… a person sees every session Tortie manages, across
+every project and machine, whether or not that project's tab is open; ends one or many; removes ended
+ones; and restores past ones, without opening each project to find them.
+
+**The operator's instruction, verbatim.** "Implement direction D, the Tabbed sheet, including the
+compact header, activity columns, inline actions, and batch End." The context he named, in his own
+checkout and UNTRACKED there: start at `designs/session-manager/README.md`; the selected mockup is
+`designs/tabbed-sheet.html` (it redirects to `designs/index.html#sheet/managed`, drawn by
+`designs/session-manager/views.js`, `app.js`, `styles.css` and the fixture `data.js`); the existing code
+and the gaps are `designs/session-manager/research/reuse-map.md`; the visual contract is
+`designs/session-manager/DESIGN.md`. **Builders and verifiers read those at
+`/Users/gdc/gmux/designs/` by absolute path, read-only.** Committing the study is HIS call and not this
+phase's: `research/past-sessions-current.png` is a capture of his own app with his own session names,
+the same question `unpeel.png` raised.
+
+**Tier 3.** It ends processes, one and many at a time, which is session lifecycle and can lose a
+person's running work; it claims to work across every project, machine and agent; and a batch is a new
+way to be wrong about a target. Two independent methods, one an attack; the per-row matrix over real
+data is mandatory (local and remote, open and closed tabs, every state); fix once, reverify, stop.
+
+**Charter.** The operator's design study of 2026-09-18, four directions drawn and D selected during
+review, inside the Quiet surround (Phase 284). It answers the first half of GitHub issue 27 (JnBrymn: an
+agent session in a closed project held memory for a week, unseen), by making such a session VISIBLE and
+endable; the issue's other half, suspending sessions on a timer or when a project closes, is a policy
+this phase does not make.
+
+### What the study and the tree already say, so no round re-derives it
+
+- **The inventory is already global.** `src/main/sessions/core.ts:2536` `listSessions()` answers every
+  managed session from the manifest and the remote projections, not the active project's; `:2644`
+  `listRemovedSessions()` is the past list, ordered by removal. Closed tabs filter nothing out at that
+  layer: the filtering is the renderer's.
+- **The lifecycle verbs exist and are the ONLY action boundary.** End is `endSession` in
+  `src/renderer/state/sessions-slice.ts:1066` over core's `killSession` (`core.ts:2743`), and it keeps
+  the recovery material and leaves the row under Managed as Ended. Remove is `removeSession`
+  (`sessions-slice.ts:1155`) over core's `removeSession` (`:2890`), a tombstone for 90 days; **never**
+  core's `discardSession` (`:2864`), the hard delete. Restore is `restorePastSession`
+  (`sessions-slice.ts:293`) with `src/main/restore/ask-open-project.ts` asking to open a closed local
+  project first, and `src/renderer/state/resume.ts` (`pastSessionPromise`, `restoreActionCopy`) saying
+  whether a conversation continues or a fresh shell opens.
+- **The action policy exists once.** `src/renderer/app/session-actions.tsx:732` `sessionMenuItems()` and
+  `:938` `closeSession()` carry the state-dependent gates: unknown rows get saved-record reads only,
+  remote rows have capability limits. The sheet REUSES them; a second action policy is this phase's
+  first refusal.
+- **The surface to extend exists.** `src/renderer/app/PastSessionsModal.tsx` and `past-sessions.css`:
+  search, the recovery promise, the busy state, the machine-removed refusal, 90-day retention. The
+  Session menu already carries `Past Sessions…` (`src/main/menu.ts:932`).
+- **The activity columns do NOT exist.** `Session.createdAt` (`src/shared/types.ts:206`) is the original
+  creation time. Message counts and the last message's time are nowhere: `overview:sessions`
+  (`src/shared/ipc/overview.ts`) returns a BOUNDED turn payload (50 by default, 200 at most), so its
+  length is not a count; `countTurns()` (`src/main/overview/store/store.ts:612`) counts normalised
+  turns, not messages; diagnostics' `lastSeen` means last confirmed alive, not last message.
+- **The study's own statement of what is missing** (`reuse-map.md`, "What still needs implementation",
+  eight items) is the build list below, and its Boundaries section is this entry's refusals.
+
+### The mechanism
+
+1. **The door.** Session → **Manage Sessions…** opens the sheet on Managed; **Past Sessions…** stays and
+   opens the same sheet on its Past tab. Reachable with NO project tab open. Native menu rows through
+   `src/main/menu.ts` and the menu-actions seam, per the UI rules; the phase brief names both rows.
+2. **The projection.** One renderer-side join of the global managed list, the removed list, each
+   target's open-tab state, and the existing state and capability helpers, grouped by the WORKSPACE
+   TARGET including machine identity and never by folder basename. A closed tab filters nothing out. A
+   row whose identity is unknown is drawn and offers reads only.
+3. **The sheet, as drawn in D.** A wide centred modal inside the Quiet surround: a 52px title bar holding
+   Sessions, the Managed and Past Sessions tabs with counts, refresh and close; a 47px toolbar holding
+   search and the project, tab-status and state filters; the grid takes the rest and scrolls under
+   sticky column headings. Rows: selection, identity (agent mark, name, machine), state, created date
+   and age, message counts, last-message age, and ONE visible button, **End session…** or **Restore**;
+   an ellipsis opens the quieter actions from `sessionMenuItems()` through `ui:popupMenu`, never a
+   DOM-drawn menu. Columns sort. Tokens only, no colour literal, no tmux vocabulary, just enough words.
+4. **Inline, never stacked.** Details, rename, saved output, confirmations and errors expand inside the
+   row; no modal opens above the sheet. Focus stays inside the sheet, returns to the row after a
+   change, and scroll position is kept. A failed restore KEEPS its row and says why; Retry is offered.
+5. **Batch End.** Row checkboxes and a header checkbox that selects all FILTERED rows. While anything
+   is selected the toolbar's filters are replaced, at no cost in height, by a count and **End selected
+   sessions…**. ONE inline confirmation names the eligible running sessions across projects and says
+   how many selected records are skipped and why (already ended, unavailable, identity unknown).
+   Cancel keeps the selection. Confirm calls the EXISTING per-session end for each target, re-checking
+   capability immediately before each call, leaving ineligible targets untouched, and reports partial
+   results row by row. Ending keeps saved material and leaves each row under Managed as Ended.
+6. **The activity summary, a new main-side aggregate.** Per session: user message count, agent message
+   count, the last actual message's time and author, and explicit COVERAGE (complete, partial,
+   unavailable, not applicable). Tool events and terminal output are excluded. It is an aggregate query
+   over the stored conversation history, never whole histories loaded per row. **Null is preserved and
+   never drawn as zero**: a shell shows a dash with its reason, partial history is marked `+`, a new
+   conversation may truthfully show 0. One new contract channel in `src/shared/ipc/`, so
+   `gate:contract`'s baseline is regenerated in the same commit with the moved lines named.
+7. **Navigation.** Go to session on a live session in a closed project opens the CORRECT target, local
+   or remote, then focuses the session by ID. A remote path is never opened as a local folder. After a
+   restore the sheet stays open, the row moves tabs, and the person chooses whether to go there.
+8. **Refresh without losing the place.** A change from anywhere (a session ends by itself, a restore
+   lands, a project tab opens) updates counts and rows; the tab, filters, sort, selection, expanded
+   row and scroll survive it.
+
+### The proof, run rather than read
+
+- **A per-row matrix over REAL data**: a scratch profile holding local and remote targets, open and
+  closed tabs, and every state (working, needs input, idle, ended, restorable, unknown, machine
+  removed), each row's drawn state, offered actions and refused actions compared with what
+  `sessionMenuItems()` offers for the same session. Universality is claimed, so the matrix is the evidence.
+- **`probe:p293`**, one Electron through `build/electron-run.mjs`: the door with no project open; a
+  closed-tab project's sessions visible; End with a cancel then a confirm, the row Ended and still
+  there; Remove to Past; Restore to a closed project asking to open it; a restore failure keeping its
+  row; select-all under a filter; the batch confirmation's eligible and skipped counts against the
+  fixture's truth; a batch in which one target ends by itself between the confirmation and the call.
+  HELPER_USER_FLOOR raised in the same commit.
+- **The activity aggregate re-derived independently** by the verifier from the stored histories of real
+  sessions across providers (the Phase 137 corpus): counts, last-message time, coverage, and that a
+  shell reads as not applicable and never as zero.
+- **The attack**: a batch over a session whose identity changed, a remote machine that goes unreachable
+  mid-batch, a row removed from another window, a process with no session id (diagnostics has such
+  rows; none may become a target), a project whose folder is gone, 300 sessions for scroll and sort.
+- Gates: the battery, `conformance:overview` if the aggregate touches `src/main/overview/**`,
+  `gate:contract` regenerated, the native menus updated in the same commit, `probe:p284` still green.
+
+### What is NOT in this phase
+
+- **No second action policy.** Every gate is `sessionMenuItems()`'s and the existing lifecycle methods';
+  the sheet presents them.
+- **No permanent delete**, no batch Remove, no batch Restore: D draws batch End only (B draws the
+  others; they stay in the study).
+- **No policy that ends or suspends sessions by itself**, on a timer or when a project closes (issue
+  27's second half). His ruling first.
+- **No memory or CPU meters on the sheet**; those stay in Diagnostics.
+- **Unknown state never gains a destructive action.** A process with no stable session identity is
+  never a target.
+- Directions A, B and C stay in the study. The study itself is not committed by this phase.
+- No release.
+
+
+## Phase 292 — scrollback is not anchored (GitHub issue 29 and pull request 30, John Berryman, 2026-09-18)
+
+**Subject.** `fix(terminal): a parked pane holds its place by itself, so stop scrolling it` (the pull
+request's own)
+
+**First body line.** `Phase 292: the reader's line stays where they put it`
+
+**Semver.** Patch. Scroll back in a session to read while the agent keeps writing, and the text stays
+where you put it. Today it slides away from you, one line for every line printed, until it reaches the
+top of the transcript and sticks there.
+
+**Tier 3.** It is wrong in every local session on both tmux versions Tortie runs, it was reported from
+outside with a reproduction, and the mechanism being deleted was itself built on a measurement. Two
+independent methods, one an attack; the parent measurement is mandatory and already exists below; fix
+once, reverify, stop.
+
+**Charter.** Issue 29, filed 2026-09-18 by John Berryman with steps (a shell loop printing a line every
+50 ms; scroll back; "it scrolls in the reverse direction") and the reason it matters: you start reading
+an agent's long answer, prompt it again, scroll up to finish reading, and the text is moving. Pull
+request 30, his, `fix/pane-scroll-holds-place` at `27794be4` on `59ed244b`, deletes the mechanism. The
+operator asked on 2026-09-18 for it to be looked at, reproduced, and queued. It is built the way Phase
+282 built his pull request 28: on his branch (it accepts maintainer pushes), his fix under his name, our
+rounds under the operator's, closed and integrated once verified, and **named in the changelog item**:
+`Contributed by [John Berryman](https://github.com/JnBrymn) in [#30](https://github.com/gregce/tortie/pull/30)`.
+
+### What was measured before this entry was written, so no round re-derives it
+
+Two reproducers, independently, neither trusting the issue nor the pull request
+(`wf_58a096e0-950`; scratch probe `scratchpad/i29-app/probe-i29.mjs` with six run logs, tmux rig
+`scratchpad/i29-rig/rig.mts` with its JSON readings).
+
+- **In the app, the issue's own steps, the SCREEN as the ruler** (the pane's xterm buffer rows, checked
+  against two screenshots, because `capture-pane` cannot see a scrolled-back view). Real wheel events,
+  about 100 lines back, then nothing touched for 8 s at 17.5 lines printed per second:
+
+  | Build | tmux | Top line at the park → after 8 s | Moved per line printed |
+  | --- | --- | --- | --- |
+  | main `739a9109` | 3.7b (bundled) | 259 → 117 | −1.014 |
+  | main `739a9109` | 3.6a (system, what `npm run dev` uses) | 259 → 118 | −1.007 |
+  | PR 30 `27794be4` | 3.7b | 261 → 261, all 33 samples | 0 |
+  | PR 30 `27794be4` | 3.6a | 261 → 261, all 33 samples | 0 |
+
+  Parked 201 lines back on main it reached the top of the transcript in 3.75 s and stuck there.
+- **tmux holds a scrolled-back view still by itself, on both versions.** Three readings: PR 30's build
+  above; INSIDE the main build during a held scrollbar drag, when the app suspends its correction, the
+  top line stayed 73 for a second while history grew 330 → 348, and fell 18 lines a second again the
+  moment the drag was released; and the on-screen top line equals (history when copy mode was entered)
+  − `scroll_position` − 2 to the line, so `scroll_position` counts from the bottom AS IT WAS FROZEN
+  AT ENTRY, not from the live bottom.
+- **The app's correction is the thing moving it.** `src/renderer/terminal/scroll/surface.ts` `refresh()`
+  (~:344) polls every `SCROLLED_POLL_MS` = 250 ms while scrolled and sends `anchorFrom`;
+  `src/main/sessions/core.ts` (~:2441) calls `anchorPaneScroll` in `src/main/tmux/scroll.ts` (~:306),
+  which scrolls UP by `history − seenHistory`. `scroll_position` rose +142 against +140 lines printed,
+  4 or 5 lines per tick, and the screen fell by the same.
+- **Why it went unseen since Phase 12.3.** The founding measurement in `scroll.ts`'s comment ("LINE-272
+  became LINE-280 after eight new lines") was read with `capture-pane -p`, which answered the LIVE
+  screen the whole time the pane was scrolled back (newest line 414 → 554 while the screen showed 259
+  to 302). And by tmux's own formats `history_size − scroll_position` stays constant on main, which
+  LOOKS like a held view while the screen slides; on PR 30 it grows while the screen is still.
+- **What pull request 30 leaves, measured.** (1) THE THUMB NOW LIES: `TerminalScrollbar.tsx:68-69` draws
+  `1 − position / history`, a frozen-frame position over a live history, so with the text held the
+  thumb creeps DOWN (531 → 601 px of an 810 px lane in 8 s, and 390.8 → 410.2 px under a stationary
+  pointer during a drag) while the reader is in fact getting FURTHER from live; an honest thumb is
+  `position + (liveHistory − historyAtEntry)`. (2) The drag's pixel-to-line map (`:88`) is off by the
+  same growth; a drag to the top sends the live history and tmux clamps it. (3) It changes
+  `SCROLLED_POLL_MS` 250 → 100 under a comment that still describes the deleted correction, and its
+  commit message names deletions that exist at neither head. (4) Its rig is opt-in (`GMUX_SCROLL_IT=1`),
+  its "for the record" arm drives its own `goto-line` rule and not the shipped `anchorPaneScroll`, and
+  it reads the first NON-BLANK row rather than row 0. (5) Its changelog item sits under what is now
+  `## 0.108.0`.
+- **What moves a parked view on BOTH builds and is not this defect.** A WINDOW resize jumps it forward
+  by rows − 1 (114 → 157 on PR 30, 32 → 71 on main): `holdPositionAcrossResize` is called from the zoom
+  and font effects only (`TerminalPane.tsx:670`, `:724`). Lines printed during the park are skipped on
+  the way down, because scrolling to the bottom leaves copy mode and jumps to live. With a full history
+  main sawtooths (421..442) and PR 30 does not. tmux 3.6a and 3.7b differ on `refresh-from-pane` (3.7b
+  holds the content and re-bases the position, 3.6a slides it). A session on another machine has no
+  scroll target (`scrollTarget()` answers null), so neither the defect nor the fix runs there; read, not
+  measured.
+
+### The mechanism
+
+1. **Take his deletion as it is**: no `anchorPaneScroll`, no `anchorFrom` in
+   `src/shared/ipc/terminal.ts`, the poll a bare `readPaneScroll`. `gate:contract`'s baseline is
+   regenerated in the same commit and the commit body names the lines that moved.
+2. **An honest thumb.** The surface records the history at the moment the pane entered copy mode and
+   the scrollbar draws, and the drag maps, `position + (liveHistory − historyAtEntry)` over the live
+   history. Computed in the renderer from the two numbers the poll already returns, so it is the same
+   on 3.6a and 3.7b and asks tmux for nothing new. The poll returns to 250 ms and its comment says what
+   it is for now: the thumb.
+3. **The window-resize hold.** `holdPositionAcrossResize` is called from the fit that follows a window
+   resize as well as from zoom and font, so narrowing the window keeps the reader's line. Under PR 30
+   the held position is stable, which makes the existing hold correct where main's kept growing.
+4. **The founding comment is corrected in place**, saying which ruler it used and why that ruler cannot
+   see a scrolled-back view, so nobody rebuilds the correction from a `capture-pane` reading again.
+5. **His rig, made honest and cheap**: its "for the record" arm drives the SHIPPED function from the
+   parent commit's behaviour described as a fixture, it reads row 0, and if it fits the battery's
+   budget it loses its opt-in flag.
+6. **The changelog item moves under a new `## Unreleased`**, names him, and gets its commit link from
+   the follow-up docs commit.
+
+### The proof, run rather than read
+
+- **`probe:p292`**, the reproduction's app probe adopted: real wheel events, the screen as the ruler,
+  8 s of samples: red at the parent (−1.0 lines per line printed), green at HEAD (0), on BOTH tmux
+  binaries (`GMUX_TMUX_BIN`); the thumb's position against the honest formula while parked and during
+  a held drag; a window resize while parked. HELPER_USER_FLOOR raised in the same commit.
+- `probe:p95`, the existing scroll probe, still green; its unit suite `p95-scroll-stops.test.ts` kept.
+- The attack: an alt-screen app inside the pane, wrapped long lines across a width change, a history
+  at its limit, a split with two parked panes, a keystroke that leaves copy mode on purpose, the jump
+  back to live, and 200,000 lines for the drag (the rig's existing arm).
+- Gates: typecheck, build with `gate:contract` regenerated, test, smoke:t1.
+
+### What is NOT in this phase
+
+- The lines skipped on the way back down to live: a real cost to the issue's own use, but a different
+  mechanism (leaving copy mode), and its own entry once this one lands.
+- The half-width glitch on jumping back to a project that the pull request's body mentions: his
+  observation, unmeasured.
+- Remote sessions gain no scrollback here; they have none today.
+- No change to how the scrollbar looks.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -31228,4 +31557,12 @@ cycle rather than only the evening it was written.
 - 2026-09-18, **PHASES 282.1 AND 282.2 LANDED TOGETHER, the save surface's fix rounds re-verified and the way out the sentence promises, `14658526` + `280def9f`, version 0.107.0 unmoved, no tag, pushed.** In the Redline view, after a rewind lands on a file you were typing in, ⌥↩ says "Save or undo your edits first, then accept", and the undo half now works: against the 282.1 bytes the app still answers "still being rewound" 1,515 ms after ⌘Z, and at HEAD the change is accepted 12 to 16 ms after it. **282.1 is the reverify three phases had landed without**: it withdrew a release clause Phase 282's own fix round had added, which let an accept draw a rewound change backwards; it made conformance:save's rules 11 and 18 to 20 read the refusal rather than the order two names are mentioned in; and it stopped the Settings window's close from writing a cut list over a confirmed shell variable name when the file cannot be read. Both of its reverifiers then found the undo road did not complete, a second needs_work went to him, and he chose the read over a reworded sentence. **282.2's attack verifier found a real bug in that read**: a second ⌘Z landing inside it let the hold go on a dirty buffer's empty picture, and one ⌘⇧Z later ⌥↩ accepted the rewound change with nothing said; a hold whose adoption refused is now let go by bytes and never by a picture alone, the attack's own rig is adopted with five of seven cases red at the 282.1 bytes, and probe arm Z is red before the fix and green after. The gate's new clause could not see which way the flag was tested and now can. **STILL NOT TRUE, HIS RULING, AND QUEUED NEXT AS PHASE 290**: the hold belongs to the mounted view, so a tab switch, the mode chip to File and back, or an undo made in the File view forgets it, and then the rewound change is accepted silently and a later ⌥⌫ writes the agent's words back over the rewind (`[wrote REWOUND, wrote AGENT]`); identical on main before these commits, and it needs a keystroke inside a rewind's write to begin. He read it at 16:40, said land it, and the release is not held for it. One ⌘Z too many un-applies the pulled read and redo is lost once it lands; both stated. Gates: the whole battery green, ablation:p268 32 of 32, conformance:redline with 15 of 15 ablations, probe:p277, probe:p268 and probe:redlinemoveon.
 
 - 2026-09-18, **PHASE 290 QUEUED, a rewind's caution belongs to the file and not to the view that is open, Tier 3.** Phase 282.2's two verifiers independently measured that the hold lives in the mounted Redline view: a tab switch, the mode chip to File and back, or an undo made in the File view forgets it, after which the rewound change is accepted with nothing said and a later ⌥⌫ writes the agent's words back over the rewind. Identical on main before and after 282.2, and it needs a keystroke inside a rewind's write to begin. He read the three options at 16:40 and took the first: a per-tab mark set where the adoption refuses, cleared by a read or a save, with the clean transition and a Redline mount both pulling the read and ⌥↩ asking the mark. The release is not held for it; it runs after 0.108.0.
+
+- 2026-09-18, **PHASE 289 LANDED, the keyboard goes back where it was when Catch Me Up closes, `59ed244b`, version 0.107.0 unmoved, no tag, pushed.** After ⇧⌘U and Escape you can type at once. At the parent the keyboard sat on `body`, never inside a terminal in 500 ms of 5 ms samples, and a string typed with real keys arrived in no session; at HEAD it is back within a few milliseconds and the string arrives. The leave focused the terminal in the same task as the store write, while the work was still not drawn; it now waits for the class to leave the shell with a one-shot observer, no timer and no frame. **In a split the keyboard now goes to the OUTLINED pane from every door**: `focusTerminal` asks Phase 286's selector first, and five doors that spelled the first-pane query for themselves call it; driven in a four-pane split with the last pane outlined, the strip rows, the dock, the view chord, the editor's close and the jump out of the page all typed into the outlined pane at HEAD and into the first at the parent. **THE ATTACK VERIFIER CHANGED THE DESIGN**: the first build sent every leave to the terminal, so with the keyboard in an open file ⇧⌘U, Escape and the next typed line went to the outlined session, whose shell RAN it; the opening gesture now records where the keyboard was and the leave gives it back THERE, the terminal only as the fallback, which amends Phase 137's documented leave. The reverifier passed each item live. **Phase 291 is queued from it**: closing the editor out of editor fill, and closing the shortcuts sheet after the page closed behind it, both leave the keyboard on nothing, identical at the parent. His to rule: whether an ended outlined pane should take the keyboard. Gates: typecheck, build, npm test at 937 files and 14,985 tests, smoke:t1, conformance:overview, probe:p137 0 at HEAD and 1 at the parent by design, probe:sessionfocus, probe:p284.
+
+- 2026-09-18, **v0.108.0 RELEASED from `739a9109`, tortie.sh updated to match, and John Berryman named as a contributor.** Gates `35391972432` were green on the release commit itself and durability `35391927731` was DISPATCHED on the candidate `f0b167af` rather than inherited from the nightly, and only then was the tag pushed; release run `35392980685` built, signed, notarized and published the draft with all six assets in 22 minutes, most of it Apple's notary. The app INSIDE the DMG reads `accepted` / `source=Notarized Developer ID` / `origin=Developer ID Application: Gregory Ceccarelli (4GRQMF5T5U)` at `CFBundleShortVersionString` 0.108.0, `codesign --verify --deep --strict` exit 0, `xcrun stapler validate` worked on the app and on the DMG, mounted read-only and nothing installed; the stable download and `latest-mac.yml` answer 200 at 0.108.0. **THE RELEASE PAGE CARRIES THE CHANGELOG ENTRY, READ BACK AND DIFFED EMPTY**, at his word: the body is the 0.108.0 section without its heading line, 22 lines and 15 bullets, the same sha256 on both sides, and it was synced again after the credit below. **The release carries twelve phases**: 277 a write clears only the text it wrote, 278 a confirmed variable name survives a filled cap, 279 readiness and teardown fail differently, 281 and 281.1 the Claude meter reads the item Claude Code reads, 282 the press that moves on (PR 28), 282.1 and 282.2 the save surface re-verified and undo as a way out after a rewind, 284 and 284.1 the quiet surround, 286 the keyboard stays in the session across the focus flight, 288 the meters keep the foot of an empty session list, 289 the keyboard goes back where it was when Catch Me Up closes; with 280's research and the method in CLAUDE.md. **John Berryman is named on the first bullet**, his pull request 28 landed as `d8debd9d`, in the shape 0.97.0 uses for a contributor, which is what the site's feed reads to draw its Contributors row. tortie.sh: the changelog feed synced through 0.108.0 and SIX sentences added where the release made a page incomplete, none rewritten, being the Redline page's rewind and accept paragraphs and its three shortcut rows (the press moves on, the arrows come round) and the ⇧⌘Return row (press it again to go back, since Escape inside the mode now goes to the agent); the usage meters, Catch Me Up, Appearance and llms.txt were read and left alone. **Queued behind it**: 292 for issue 29 (scrollback is not anchored, PR 30, its reproduction running), 290 a rewind's caution belongs to the file, 291 the filled editor's and the shortcuts sheet's close, 285, 283, 287. **His plate**: issues 27, 26, 23 and 14; the stray `unknown` keychain item; the status-line tap ordering defects; whether an ended outlined pane should take the keyboard; one ⌘Z too many un-applying a pulled read. My fourteen commits of today carry greg@itavero.software where the repository's own identity is gregce@gmail.com; from the release commit on they use the repository's.
+
+- 2026-09-18, **PHASE 293 QUEUED, a session manager, direction D the Tabbed sheet (operator), Tier 3, minor.** His words: "Implement direction D, the Tabbed sheet, including the compact header, activity columns, inline actions, and batch End." His design study of today drew four directions inside the Quiet surround and selected D; it lives UNTRACKED in his checkout under `designs/`, and the entry tells builders to read it there by absolute path and leaves committing it to him, because one of its files is a capture of his own app. The entry carries the study's reuse map checked against the tree (the inventory is already global at `core.ts:2536`, the lifecycle verbs and the one action policy exist, the Past Sessions modal is the surface to extend, and the activity columns exist NOWHERE, since the overview's turn payload is bounded and is not a count), the eight things to build, batch End as orchestration over the existing per-session end with a re-check before every call, the new main-side activity aggregate with null never drawn as zero, and its refusals: no second action policy, no permanent delete, no batch Remove or Restore, and no policy that ends sessions by itself. It answers the first half of GitHub issue 27 by making a forgotten session visible and endable. **Also today after the release**: every item from 0.105.0 on names its commit again (`1c74121d`, 33 items, four release pages and the site feed synced, each read back and diffed empty) and the rule is in CLAUDE.md (`53014a8f`), because he opened tortie.sh and found the last four releases with no commit links and John Berryman unnamed.
+
+- 2026-09-18, **ISSUE 29 REPRODUCED AND PHASE 292 QUEUED, scrollback is not anchored (John Berryman, pull request 30), Tier 3.** Two reproducers, independently. In the app with his own steps and the screen as the ruler, the line a person scrolled back to slides toward older text at one line for every line printed, 259 to 117 in eight seconds, the same on the bundled tmux 3.7b and the system 3.6a, and runs to the top of the transcript and sticks; on his build it holds at 261 for all 33 samples on both. **He is right about the cause**: tmux holds a scrolled-back view still by itself (measured three ways, one of them inside the main build during a held drag, when the app's correction is suspended), and the 250 ms correction is what drags it; the measurement that correction was built on in Phase 12.3 was read with `capture-pane`, which shows the live screen and cannot see the view. **What his pull request leaves, measured**: the scrollbar thumb now lies, creeping DOWN while the reader gets further from live, because it divides a frozen-frame position by a live history; the poll went 250 to 100 ms under a comment describing the deleted mechanism; and its rig's "for the record" arm drives its own rule and not the shipped function. A window resize moves a parked view on both builds, because the hold is wired to zoom and font only. The phase takes his deletion as it is on his own branch, under his name, and adds an honest thumb, the window-resize hold and the corrected founding comment; the changelog item names him.
 

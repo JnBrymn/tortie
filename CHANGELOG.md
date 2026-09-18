@@ -6,27 +6,34 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 
 ## Unreleased
 
+### Fixed
+
+- Scrolling back in a session and reading stays where you put it while the agent keeps writing. It used to slide away from you, a line for every line printed, until it reached the top. Contributed by [John Berryman](https://github.com/JnBrymn) in [#30](https://github.com/gregce/tortie/pull/30)
+
+## 0.108.0 (2026-09-18)
+
+This release is about the keyboard ending up where you are. Entering session focus, closing Catch Me Up and coming back from the editor could each leave it on nothing until you clicked, and in a split it went to the first pane rather than the one that is outlined; it now stays with you, and the session focus chord no longer sends Enter to your agent on the way. Alongside that, a save or a rewind no longer loses what you typed at the wrong moment, the Redline chords move on to the next change by themselves, the window goes quiet around a single outline, and the Claude usage meter stops telling you to sign in when you already are.
+
 ### Changed
 
-- In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last.
-- The terminal and editor now sit inside one rounded outline with a little room around it, and the title bar, the sidebar and the session list lose the lines that divided them from it; the selected session and the active view are marked by a soft fill instead of a bar down the edge. Nothing works differently, and each open session is a few columns narrower.
+- In the Redline view, ⌥↩ and ⌥⌫ move to the next change after the one you pressed, so approving or rejecting a run of changes is one chord pressed over and over instead of alternating with ⌥↓. ⌥↓ and ⌥↑ loop at the ends: past the last change they come round to the first, and before the first back to the last. Contributed by [John Berryman](https://github.com/JnBrymn) in [#28](https://github.com/gregce/tortie/pull/28) ([`d8debd9d`](https://github.com/gregce/tortie/commit/d8debd9d)), ([`3ea54ad9`](https://github.com/gregce/tortie/commit/3ea54ad9)), ([`117e7a85`](https://github.com/gregce/tortie/commit/117e7a85))
+- The terminal and editor now sit inside one rounded outline with a little room around it, and the title bar, the sidebar and the session list lose the lines that divided them from it; the selected session and the active view are marked by a soft fill instead of a bar down the edge. Nothing works differently, and each open session is a few columns narrower ([`8f36e18a`](https://github.com/gregce/tortie/commit/8f36e18a))
 
 ### Fixed
 
-- Scrolling back in a session and reading stays where you put it while the agent keeps writing. It used to slide in the wrong direction, moving a line for every line printed.
-- A shell variable name you added in Settings is no longer pushed off its list by names written into the settings file by hand ahead of it. Those names are still ignored, and closing the Settings window no longer drops yours.
-- Typing into a file while it was being saved no longer marks that file saved. The newer text stays unsaved until it is written, and closing the file still asks about it; before, the save's answer marked it clean, so closing it asked nothing and the newest typing was lost.
-- Turning auto save off, or switching it to save when you click away, now stops a save that was already waiting on its timer. A waiting save also no longer writes while a question like "Save changes to…?" is on screen, or into a file you closed and opened again.
-- Pressing Save in the "Save changes to…?" question no longer closes a file you typed into while it was saving; it asks again.
-- Typing into a file while the project's changes are being refreshed is no longer thrown away.
-- A file open on another machine, in a folder you allowed editing in, now shows as unsaved when you type into it, so closing it asks first.
-- Rewinding a change in the Redline view redraws as you press it. It used to wait for the file to be noticed on disk, which made ⌥⌫ feel slower than ⌥↩.
-- In the Redline view, after you rewind a change on a file you were typing in, undoing your edits now lets you accept again; it used to keep saying the change was still being rewound until the agent wrote something else. Switching tabs or looking at the File view in between still loses that.
-- The Claude usage meter no longer says "Sign in with Claude Code to see usage" while you are signed in. Tortie now reads the same keychain item Claude Code itself reads, where before a stray item with the same name could answer first; a keychain that cannot be read keeps the last numbers rather than claiming you are signed out.
-- With the session list on the right and no session in the project, the usage meters sit at the bottom of the list where they sit once a session exists, instead of halfway down it.
-- Entering session focus with ⇧⌘↩ keeps the keyboard in your session, so you can type at once and press the chord again to leave; it used to land on nothing until you clicked. The chord also no longer sends Enter to the session, which could submit whatever you had typed. Keys pressed during the brief animation are dropped, and Escape inside the mode now goes to your agent, so the chord is the way out.
-- Closing Catch Me Up puts the keyboard back where it was, so you can type at once; it used to land on nothing until you clicked. In a split, the keyboard now returns to the pane that is outlined rather than the first one, from the session list, the editor and the sidebar alike.
-- Closing the Settings window while the settings file cannot be read no longer drops a shell variable name you confirmed.
+- A shell variable name you added in Settings is no longer pushed off its list by names written into the settings file by hand ahead of it. Those names are still ignored, and closing the Settings window no longer drops yours ([`85b76948`](https://github.com/gregce/tortie/commit/85b76948))
+- Typing into a file while it was being saved no longer marks that file saved. The newer text stays unsaved until it is written, and closing the file still asks about it; before, the save's answer marked it clean, so closing it asked nothing and the newest typing was lost ([`29f47742`](https://github.com/gregce/tortie/commit/29f47742))
+- Turning auto save off, or switching it to save when you click away, now stops a save that was already waiting on its timer. A waiting save also no longer writes while a question like "Save changes to…?" is on screen, or into a file you closed and opened again ([`29f47742`](https://github.com/gregce/tortie/commit/29f47742))
+- Pressing Save in the "Save changes to…?" question no longer closes a file you typed into while it was saving; it asks again ([`29f47742`](https://github.com/gregce/tortie/commit/29f47742))
+- Typing into a file while the project's changes are being refreshed is no longer thrown away ([`29f47742`](https://github.com/gregce/tortie/commit/29f47742))
+- A file open on another machine, in a folder you allowed editing in, now shows as unsaved when you type into it, so closing it asks first ([`29f47742`](https://github.com/gregce/tortie/commit/29f47742))
+- Rewinding a change in the Redline view redraws as you press it. It used to wait for the file to be noticed on disk, which made ⌥⌫ feel slower than ⌥↩ ([`d8debd9d`](https://github.com/gregce/tortie/commit/d8debd9d))
+- In the Redline view, after you rewind a change on a file you were typing in, undoing your edits now lets you accept again; it used to keep saying the change was still being rewound until the agent wrote something else. Switching tabs or looking at the File view in between still loses that ([`280def9f`](https://github.com/gregce/tortie/commit/280def9f))
+- The Claude usage meter no longer says "Sign in with Claude Code to see usage" while you are signed in. Tortie now reads the same keychain item Claude Code itself reads, where before a stray item with the same name could answer first; a keychain that cannot be read keeps the last numbers rather than claiming you are signed out ([`79c6c8fe`](https://github.com/gregce/tortie/commit/79c6c8fe)), ([`b21456b8`](https://github.com/gregce/tortie/commit/b21456b8))
+- With the session list on the right and no session in the project, the usage meters sit at the bottom of the list where they sit once a session exists, instead of halfway down it ([`b33ae19c`](https://github.com/gregce/tortie/commit/b33ae19c))
+- Entering session focus with ⇧⌘↩ keeps the keyboard in your session, so you can type at once and press the chord again to leave; it used to land on nothing until you clicked. The chord also no longer sends Enter to the session, which could submit whatever you had typed. Keys pressed during the brief animation are dropped, and Escape inside the mode now goes to your agent, so the chord is the way out ([`fb0f37ed`](https://github.com/gregce/tortie/commit/fb0f37ed))
+- Closing Catch Me Up puts the keyboard back where it was, so you can type at once; it used to land on nothing until you clicked. In a split, the keyboard now returns to the pane that is outlined rather than the first one, from the session list, the editor and the sidebar alike ([`59ed244b`](https://github.com/gregce/tortie/commit/59ed244b))
+- Closing the Settings window while the settings file cannot be read no longer drops a shell variable name you confirmed ([`14658526`](https://github.com/gregce/tortie/commit/14658526))
 
 ## 0.107.0 (2026-09-16)
 
@@ -34,24 +41,24 @@ This release is about a project Tortie did not recognise as its own. A folder op
 
 ### Added
 
-- You can now name the shell variables every agent needs once, under Every agent in Settings, instead of naming them again for each agent; each agent's card says what it inherits, and you can still narrow one agent by naming variables on its own card. The confirmation says what you are agreeing to, which is that every agent Tortie launches gets them, including agents you install later.
-- The list of names your shell exports now scrolls and filters as you type, and takes several names at once under one confirmation instead of one trip per name. A name your shell does not export yet is still typed and accepted, and now appears as a row of its own so you can see that it took.
+- You can now name the shell variables every agent needs once, under Every agent in Settings, instead of naming them again for each agent; each agent's card says what it inherits, and you can still narrow one agent by naming variables on its own card. The confirmation says what you are agreeing to, which is that every agent Tortie launches gets them, including agents you install later ([`b34122fa`](https://github.com/gregce/tortie/commit/b34122fa))
+- The list of names your shell exports now scrolls and filters as you type, and takes several names at once under one confirmation instead of one trip per name. A name your shell does not export yet is still typed and accepted, and now appears as a row of its own so you can see that it took ([`b34122fa`](https://github.com/gregce/tortie/commit/b34122fa))
 
 ### Changed
 
-- A shell variable you name in Settings now reaches a session that comes back after a quit or a reboot, not only a session you start fresh.
-- Starting a session no longer waits about a second on your login shell. Tortie asks your shell for the variables you named once per launch instead of once per session, and watches your shell config files, so rotating a key still takes effect on the next session you start with nothing to restart; a key that comes from somewhere those files do not show — a file your .zshrc sources, or a vault it calls — needs the new Re-read shell button under Settings, Launch defaults.
+- A shell variable you name in Settings now reaches a session that comes back after a quit or a reboot, not only a session you start fresh ([`b34122fa`](https://github.com/gregce/tortie/commit/b34122fa))
+- Starting a session no longer waits about a second on your login shell. Tortie asks your shell for the variables you named once per launch instead of once per session, and watches your shell config files, so rotating a key still takes effect on the next session you start with nothing to restart; a key that comes from somewhere those files do not show — a file your .zshrc sources, or a vault it calls — needs the new Re-read shell button under Settings, Launch defaults ([`f2d173fd`](https://github.com/gregce/tortie/commit/f2d173fd))
 
 ### Fixed
 
-- A project you opened through a symbolic link now saves. Every file in one used to refuse every save with a message saying the project was not open, when it was.
-- Opening one folder twice, spelled two different ways, no longer makes two tabs for it. It used to make a second tab with the same name and divide your sessions between the two, so each tab hid the other's work; if you already have two tabs for one folder they stay two for now, and every spelling of it lands on the same one of them from now on.
-- Creating, renaming, duplicating, moving and deleting files now work in a project you opened under a spelling the disk does not use — a lower-case folder name, say, or a folder reached through a symbolic link. A created file opens its tab, a rename takes its open tab with it, and a move that would overwrite something asks first; all of that used to do nothing at all, without saying so.
-- Copy Relative Path no longer appears on a tab whose file sits outside your project, where it used to copy the file's whole path out of a row labelled Relative. Copy Path still gives you that path.
-- A save that is refused now says what actually happened — the project was closed, a folder on the way to the file could not be read, the file is inside a .git folder — instead of saying your project is not open whatever the cause, and the cause is written to Tortie's own log so a report of one can be answered.
-- A file at the top of a project whose name begins with two dots now saves. It used to be refused with that same wrong message.
-- Settings now says on the card itself when a shell variable name in the settings file was ignored, and whether adding it in Settings would help, instead of leaving that only in Tortie's own log.
-- A session on another machine now names the variables it could not carry when you have asked for more than it will take, instead of dropping them with nothing said.
+- A project you opened through a symbolic link now saves. Every file in one used to refuse every save with a message saying the project was not open, when it was ([`25801fc9`](https://github.com/gregce/tortie/commit/25801fc9))
+- Opening one folder twice, spelled two different ways, no longer makes two tabs for it. It used to make a second tab with the same name and divide your sessions between the two, so each tab hid the other's work; if you already have two tabs for one folder they stay two for now, and every spelling of it lands on the same one of them from now on ([`25801fc9`](https://github.com/gregce/tortie/commit/25801fc9))
+- Creating, renaming, duplicating, moving and deleting files now work in a project you opened under a spelling the disk does not use — a lower-case folder name, say, or a folder reached through a symbolic link. A created file opens its tab, a rename takes its open tab with it, and a move that would overwrite something asks first; all of that used to do nothing at all, without saying so ([`25801fc9`](https://github.com/gregce/tortie/commit/25801fc9))
+- Copy Relative Path no longer appears on a tab whose file sits outside your project, where it used to copy the file's whole path out of a row labelled Relative. Copy Path still gives you that path ([`25801fc9`](https://github.com/gregce/tortie/commit/25801fc9))
+- A save that is refused now says what actually happened — the project was closed, a folder on the way to the file could not be read, the file is inside a .git folder — instead of saying your project is not open whatever the cause, and the cause is written to Tortie's own log so a report of one can be answered ([`06264269`](https://github.com/gregce/tortie/commit/06264269))
+- A file at the top of a project whose name begins with two dots now saves. It used to be refused with that same wrong message ([`06264269`](https://github.com/gregce/tortie/commit/06264269))
+- Settings now says on the card itself when a shell variable name in the settings file was ignored, and whether adding it in Settings would help, instead of leaving that only in Tortie's own log ([`b34122fa`](https://github.com/gregce/tortie/commit/b34122fa))
+- A session on another machine now names the variables it could not carry when you have asked for more than it will take, instead of dropping them with nothing said ([`b34122fa`](https://github.com/gregce/tortie/commit/b34122fa))
 
 ## 0.106.0 (2026-09-14)
 
@@ -59,9 +66,9 @@ This release is about two things you tell Tortie to do for you. It can save a fi
 
 ### Added
 
-- Tortie can now save a file for you a moment after you stop typing, or when you click away from it. It is off until you turn it on under File > Auto Save, and if something else wrote to the file while you were typing it steps aside rather than overwriting — it stops saving that file on its own, says so once, and leaves it to you to save.
-- You can now tell Tortie which variables from your shell an agent needs — an API key for a provider, say — beside that agent's launch flags in Settings, and it reads their current value from your login shell each time a session starts, so rotating a key takes effect on the next session you start with nothing to restart. Tortie keeps the names and never the values, a name applies to sessions you start after adding it rather than to ones already running, and a name only counts if you added it in Settings, because one written into the settings file by hand is ignored.
-- The shell variables you name for an agent now work when that agent runs on another machine, and the value comes from that machine's own login shell rather than from this one, so a key that lives over there is the one the session gets and nothing of yours is sent across. If that machine has no value for one of them, Tortie now names it instead of leaving you to find out from the agent minutes later.
+- Tortie can now save a file for you a moment after you stop typing, or when you click away from it. It is off until you turn it on under File > Auto Save, and if something else wrote to the file while you were typing it steps aside rather than overwriting — it stops saving that file on its own, says so once, and leaves it to you to save ([`e4b5af81`](https://github.com/gregce/tortie/commit/e4b5af81))
+- You can now tell Tortie which variables from your shell an agent needs — an API key for a provider, say — beside that agent's launch flags in Settings, and it reads their current value from your login shell each time a session starts, so rotating a key takes effect on the next session you start with nothing to restart. Tortie keeps the names and never the values, a name applies to sessions you start after adding it rather than to ones already running, and a name only counts if you added it in Settings, because one written into the settings file by hand is ignored ([`e00d8b64`](https://github.com/gregce/tortie/commit/e00d8b64))
+- The shell variables you name for an agent now work when that agent runs on another machine, and the value comes from that machine's own login shell rather than from this one, so a key that lives over there is the one the session gets and nothing of yours is sent across. If that machine has no value for one of them, Tortie now names it instead of leaving you to find out from the agent minutes later ([`e0afb04f`](https://github.com/gregce/tortie/commit/e0afb04f))
 
 ## 0.105.0 (2026-09-14)
 
@@ -69,12 +76,12 @@ This release adds opencode as a supported agent, sitting alongside the others in
 
 ### Added
 
-- opencode is now a supported agent: launch it, resume a conversation, and have it come back after a quit or reboot, the same as every other agent Tortie knows. Its conversation is not captured yet, because the bundled recorder does not know opencode, and two opencode sessions started in one folder cannot be told apart when they come back.
+- opencode is now a supported agent: launch it, resume a conversation, and have it come back after a quit or reboot, the same as every other agent Tortie knows. Its conversation is not captured yet, because the bundled recorder does not know opencode, and two opencode sessions started in one folder cannot be told apart when they come back ([`20abba43`](https://github.com/gregce/tortie/commit/20abba43))
 
 ### Fixed
 
-- Creating a file or folder in a brand-new empty project now works from the New File and New Folder buttons. It used to do nothing and show an error until the folder already had a file in it.
-- Splitting and closing terminals over a long session no longer leaves memory behind. Each pane's scheduled redraw and its cursor blink now stop the moment the pane goes away, so the app stays as light after a day of rearranging panes as it was at launch.
+- Creating a file or folder in a brand-new empty project now works from the New File and New Folder buttons. It used to do nothing and show an error until the folder already had a file in it ([`d8142ee5`](https://github.com/gregce/tortie/commit/d8142ee5))
+- Splitting and closing terminals over a long session no longer leaves memory behind. Each pane's scheduled redraw and its cursor blink now stop the moment the pane goes away, so the app stays as light after a day of rearranging panes as it was at launch ([`0fcbdc55`](https://github.com/gregce/tortie/commit/0fcbdc55))
 
 ## 0.104.0 (2026-09-12)
 

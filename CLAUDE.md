@@ -179,6 +179,18 @@ or three sentences and lists nothing. The long form with every measurement and e
 belongs in the commit body, where it already is. Release pages carry the CHANGELOG entry verbatim,
 and when CHANGELOG.md changes the release pages are synced to match.
 
+**Every item ends with its commit link, and a contributor is named on the item.** The shape is
+` ([`1a2b3c4d`](https://github.com/gregce/tortie/commit/1a2b3c4d))` after the last word, with no full
+stop before it, several commits as `(...), (...)`; tortie.sh draws its commit marks from exactly that,
+and an item without one is drawn with no way to reach the change. A commit cannot name its own hash, so
+the phase commit writes the item under `## Unreleased` and the FOLLOW-UP docs commit that writes the
+running-log line adds the link. An outside contribution ends `Contributed by [Name](https://github.com/login)
+in [#N](https://github.com/gregce/tortie/pull/N)` before the link, which is what the site reads to draw
+its Contributors row. On 2026-09-18 the operator found 0.105.0 through 0.108.0 published with no commit
+links at all, 33 items, and John Berryman unnamed on his own pull request; both were repaired after the
+release was out. Before a release commit, count: every `- ` line in the entry must match
+`tortie/commit/`.
+
 ## Verification (rewritten 2026-08-23 from what actually caught defects)
 
 The old section said how MUCH to verify and never said what KIND. That is why a five item polish round
