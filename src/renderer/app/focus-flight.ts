@@ -42,6 +42,18 @@
  * at its framed end, with no toggle and no forced layout of its own, and hands
  * it to ./focus-copy.ts. Nothing is animated for it. The radius is a static style
  * on the copy and `transform` is still the only property a keyframe names.
+ *
+ * THE KEYBOARD SINCE PHASE 286. Hiding the surface under the photograph blurs
+ * whatever inside it held the keyboard, so `fly` remembers that element before
+ * the hide and gives the keyboard back in the tidy up. One keyboard is MOVED,
+ * and only on the way in: one parked in the session list, which the mode stops
+ * drawing, goes to the focused pane. The chord's refusal in no region
+ * (./fill-chord.ts) is untouched. Two limits, stated rather than fixed. Keys
+ * pressed while the photograph is in the air, about 200 ms, are not delivered
+ * to the session. And Escape no longer leaves the mode from inside a session,
+ * because the keyboard is now in the session and Escape there is the agent's
+ * (./keyboard.ts); the chord is the way out, and ../terminal/keys keeps it
+ * from reaching the session as a carriage return.
  */
 
 import type { SessionStatus } from '@shared/types';
@@ -52,6 +64,7 @@ import {
   type FlightRect,
   type StillCopy
 } from './focus-copy';
+import { keyboardIsInASessionList } from './session-list-keyboard';
 
 export type { FlightRect };
 
@@ -100,6 +113,24 @@ const SHELL_SELECTOR = '.shell';
  * squares off again while the mode is on.
  */
 const FRAME_SELECTOR = '.work-area';
+/**
+ * xterm's own textarea, the element that holds the keyboard inside a
+ * terminal (Phase 286). Named here for the two cases where the flight has to
+ * choose one: the element that held the keyboard on the way in is gone by the
+ * way out, or the keyboard was parked in a session list the mode un-draws.
+ */
+const HELPER_TEXTAREA_SELECTOR = '.xterm-helper-textarea';
+/**
+ * The focused pane's textarea, by the two marks the surface already wears.
+ * `./split/SplitSurface.tsx` puts `focused` on the one `.split-pane` whose
+ * session is the layout's active leaf, and `./TerminalRegion.tsx` draws a
+ * surface of one as `.surface-single`, whose only pane is that leaf. These
+ * are the panes `TerminalPane` is handed `focused` for, so the keyboard and
+ * the outline end up on the same pane.
+ */
+const FOCUSED_LEAF_TEXTAREA_SELECTOR =
+  `.split-pane.focused ${HELPER_TEXTAREA_SELECTOR}, ` +
+  `.surface-single ${HELPER_TEXTAREA_SELECTOR}`;
 
 /** Fallbacks for the two motion tokens, used only when they cannot be read. */
 const FALLBACK_MS = 200;
@@ -390,6 +421,117 @@ export function nextFrame(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// The keyboard (Phase 286)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the keyboard was when the gesture began, in the three answers the
+ * tidy up can act on.
+ */
+type KeyboardBefore =
+  | { where: 'surface'; held: HTMLElement }
+  | { where: 'list' }
+  | { where: 'elsewhere' };
+
+/**
+ * Read the keyboard. Called BEFORE the hide, which is the only moment an
+ * element inside the surface still has it.
+ *
+ * `surface` is an element inside the surface, and it is given back as it was.
+ *
+ * `list` is the session strip or the session dock, and it is an answer on the
+ * way IN only. The mode does not draw the session list (focus-mode.css section
+ * 1), so a keyboard parked there cannot stay there: the swap un-draws the list
+ * and the keyboard falls to `body`, where typing goes nowhere and the chord is
+ * silent. Measured on 2026-09-18 with the keyboard on a strip tab and the mode
+ * entered the way View > Focus the Session or File enters it, by a keydown no
+ * row handler sees: `body` after the enter, the typed text in no session, and
+ * the leave chord doing nothing. ⇧⌘↩ pressed ON a row never gets this far,
+ * because the row's own Enter handler is blind to modifiers and hands the
+ * keyboard to the terminal about 1.5 ms before the hide, which the flight then
+ * keeps as `surface`. On the way OUT the list is not drawn, so it is never the
+ * answer there and a leave moves nothing.
+ *
+ * `elsewhere` is left alone, on the way in and on the way out.
+ */
+function keyboardBefore(
+  surface: HTMLElement,
+  to: FlightDestination
+): KeyboardBefore {
+  const active = document.activeElement;
+  if (active !== null && surface.contains(active)) {
+    return { where: 'surface', held: active as HTMLElement };
+  }
+  if (to === 'focused' && keyboardIsInASessionList()) return { where: 'list' };
+  return { where: 'elsewhere' };
+}
+
+/**
+ * Put the keyboard where `keyboardBefore` says it belongs.
+ *
+ * WHY IT LEFT. The flight sets the surface `visibility: hidden` so the
+ * photograph can fly over it, and Chromium blurs a focused element the
+ * moment it becomes hidden. The keyboard fell to `body` on every flight
+ * since Phase 80.1, and nothing brought it back. Measured on 2026-09-17:
+ * `textarea.xterm-helper-textarea` before the chord, `body` 100 ms after it,
+ * and still `body` at 1.5 s with the mode on. What a person typed went
+ * nowhere, and the chord that leaves was silent, because ./fill-chord.ts
+ * reads the region the keyboard is in and `body` is in no region.
+ *
+ * WHY HERE AND NOT IN FILL-CHORD. The chord's refusal in no region is right
+ * and stays. The flight is what moved the keyboard, so the flight is what
+ * gives it back, beside the line that undoes the hide and after it, because
+ * a hidden element cannot take the keyboard.
+ *
+ * WHEN THE FLIGHT OUTLIVED THE ELEMENT the focused pane's textarea is the
+ * honest answer, and with no pane marked NOTHING is focused. A pane that
+ * closes mid flight makes another pane the focused one, and `TerminalPane`
+ * asks for the keyboard for it through its own `focused` effect. A request
+ * made under the hide is refused, so the tidy up repeats it for that same
+ * pane and for no other. The first textarea in document order, which this
+ * took until the fix round, is a different pane from the outlined one in any
+ * split where the first pane is not the selected one (measured: held
+ * `split-4`, outlined `split-2`, and the keyboard went to `p286-a`).
+ *
+ * FROM THE LIST the focused pane's textarea again, and only when no pane is
+ * marked, or the marked one draws no terminal, the first one the surface
+ * draws, which is the pane `focusTerminal()` in ./session-focus.ts has always
+ * picked for Enter on a row.
+ *
+ * `preventScroll` because the row is `overflow: clip` since Phase 284 and a
+ * scroll container is exactly what it refuses to be.
+ */
+function giveKeyboardBack(surface: HTMLElement, before: KeyboardBefore): void {
+  if (before.where === 'elsewhere') return;
+  if (before.where === 'surface' && before.held.isConnected) {
+    before.held.focus({ preventScroll: true });
+    return;
+  }
+  const target =
+    surface.querySelector<HTMLElement>(FOCUSED_LEAF_TEXTAREA_SELECTOR) ??
+    (before.where === 'list'
+      ? surface.querySelector<HTMLElement>(HELPER_TEXTAREA_SELECTOR)
+      : null);
+  target?.focus({ preventScroll: true });
+}
+
+/**
+ * The gesture with no flight in it: reduced motion, or no photograph could be
+ * built. Nothing is hidden, so a keyboard inside the surface never leaves it
+ * and there is nothing to give back. A keyboard in the session list still
+ * loses its seat at the swap, so on the way in it is handed over now, while
+ * the surface is drawn and before the store write un-draws the list. Measured
+ * under `prefers-reduced-motion` on 2026-09-18: `body` without this.
+ */
+function handOverWithoutAFlight(
+  surface: HTMLElement,
+  to: FlightDestination
+): void {
+  const before = keyboardBefore(surface, to);
+  if (before.where === 'list') giveKeyboardBack(surface, before);
+}
+
+// ---------------------------------------------------------------------------
 // The gesture
 // ---------------------------------------------------------------------------
 
@@ -442,6 +584,7 @@ async function fly(to: FlightDestination): Promise<void> {
   // out that is still a state the person must be able to reach, so the mode
   // flips with no motion rather than refusing.
   if (shell === null || surface === null || prefersReducedMotion()) {
+    if (surface !== null) handOverWithoutAFlight(surface, to);
     commit();
     return;
   }
@@ -449,6 +592,8 @@ async function fly(to: FlightDestination): Promise<void> {
   flying = true;
   /** The photograph, once it is in the document. The tidy up is its guard. */
   let node: HTMLElement | null = null;
+  /** Where the keyboard was before the hide. Read once, just before it. */
+  let before: KeyboardBefore = { where: 'elsewhere' };
   try {
     const first = rectOf(surface);
     // PHASE 284. The work's frame, so the photograph can wear its curve. The
@@ -483,12 +628,16 @@ async function fly(to: FlightDestination): Promise<void> {
       copy = null;
     }
     if (copy === null || typeof copy.node.animate !== 'function') {
+      handOverWithoutAFlight(surface, to);
       commit();
       return;
     }
 
     node = copy.node;
     document.body.appendChild(node);
+    // PHASE 286. Read BEFORE the hide, because the hide is what blurs it, and
+    // a read one line later finds `body`.
+    before = keyboardBefore(surface, to);
     // `visibility` changes no border box, so this fires no ResizeObserver and
     // sends no resize. `display: none` here would send one per leaf.
     surface.style.visibility = 'hidden';
@@ -533,6 +682,9 @@ async function fly(to: FlightDestination): Promise<void> {
       shell.classList.remove(FLIGHT_CLASS);
       surface.style.visibility = '';
       node.remove();
+      // PHASE 286. After the visibility, never before it: a hidden element
+      // refuses the keyboard, and this is the one place the hide is undone.
+      giveKeyboardBack(surface, before);
     }
   }
 }

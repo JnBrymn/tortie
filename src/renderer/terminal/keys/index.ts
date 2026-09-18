@@ -36,6 +36,14 @@
  * submitting. The bytes are registry data (src/main/agents/registry.ts
  * `multilineKey`, whose header records WHY they are those bytes);
  * ./multiline.ts is only the renderer-side cache in front of it.
+ *
+ * ⇧⌘↩ (Phase 286) is Tortie's and never the session's. xterm turns key code
+ * 13 into a carriage return whatever the modifiers, so the chord that enters
+ * and leaves session focus also pressed Return in the session underneath it.
+ * MEASURED on 2026-09-18 with real key events at a focused pane: one more
+ * prompt line after the chord in, and after the chord out
+ * `zsh: command not found: p286beforea`, the text typed inside the mode,
+ * executed. In an agent that is a drafted prompt, submitted by leaving.
  */
 
 import type { Terminal } from '@xterm/xterm';
@@ -55,6 +63,23 @@ function isPlainMeta(event: KeyboardEvent): boolean {
 }
 
 /**
+ * ⇧⌘↩, the keymap's `view.sessionFocus`, in the same words
+ * src/renderer/app/keyboard.ts matches it with. Written out like every other
+ * chord in this file, which runs once per keystroke, and held to the keymap
+ * row by ./__tests__/multiline.test.ts, which builds its event from that
+ * row's accelerator.
+ */
+function isSessionFocusChord(event: KeyboardEvent): boolean {
+  return (
+    event.key === 'Enter' &&
+    event.metaKey &&
+    event.shiftKey &&
+    !event.ctrlKey &&
+    !event.altKey
+  );
+}
+
+/**
  * An xterm `attachCustomKeyEventHandler`. Returning false stops xterm from
  * processing the key; the explicit `preventDefault()` is what stops the
  * application menu from also acting on it.
@@ -71,6 +96,18 @@ export function terminalKeyHandler(
 ): (event: KeyboardEvent) => boolean {
   return (event: KeyboardEvent): boolean => {
     if (event.type !== 'keydown') return true;
+
+    // ⇧⌘↩ — session focus (Phase 286). xterm never sees it, so it never
+    // becomes a carriage return in the session. The window's own ladder
+    // (src/renderer/app/keyboard.ts) has already run, in the capture phase,
+    // and is what acts on the chord; nothing here toggles anything. It has
+    // also already called preventDefault, which is what keeps the keypress
+    // from following, and the call is repeated here so this handler does not
+    // lean on the order two listeners happen to run in.
+    if (isSessionFocusChord(event)) {
+      event.preventDefault();
+      return false;
+    }
 
     // ⇧↩ — a newline in the prompt, not a submit (Phase 12.5).
     //

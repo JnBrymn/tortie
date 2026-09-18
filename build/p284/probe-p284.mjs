@@ -57,17 +57,18 @@
  *   F  the file filling the window
  *   G  sidebar hidden and the session list collapsed to its 48px rail
  *   H  focus mode, in and out, with the flying copy's corners recorded at the
- *      moment it is appended. THE WAY OUT IS A CLICK AND THE CHORD, as it is
- *      for a person today: entering the mode takes the keyboard out of the
- *      session (`document.activeElement` becomes `body`, because the flight
- *      hides the surface for a moment and Chromium blurs a hidden element),
- *      and the chord is routed by where the keyboard is, so a second chord
- *      with nothing focused does nothing. The first run pressed it twice with
- *      no click between, never left, and read K, I and J INSIDE the mode,
- *      where the frame is off by design; 16 of its 33 findings were that. The
- *      keyboard loss is the app's and pre-existing (the parent reads the same)
- *      and is queued as its own entry; this run notes it and does what a
- *      person does. If the chord still does not leave, Escape is tried with
+ *      moment it is appended. THE WAY OUT IS A CLICK AND THE CHORD. Until
+ *      Phase 286 entering the mode took the keyboard out of the session
+ *      (`document.activeElement` became `body`, because the flight hides the
+ *      surface for a moment and Chromium blurs a hidden element), and the
+ *      chord is routed by where the keyboard is, so a second chord with
+ *      nothing focused did nothing. The first run pressed it twice with no
+ *      click between, never left, and read K, I and J INSIDE the mode, where
+ *      the frame is off by design; 16 of its 33 findings were that. Since
+ *      Phase 286 the flight gives the keyboard back, so a keyboard outside
+ *      the session after the enter is a FINDING here; the click before the
+ *      leave stays, because a person may still click, and it keeps K, I and
+ *      J readable. If the chord still does not leave, Escape is tried with
  *      the keyboard out of the terminal, and if THAT does not leave the run
  *      stops, so K, I and J can never again be read with the frame off
  *   K  the projects on the left, which is the only state that draws the
@@ -2125,13 +2126,14 @@ async function runBuild(tag, cwd, profile) {
           await photograph('H-focus');
           let leftBy = 'the chord';
           if (on.focused) {
-            // THE KEYBOARD, stated and put back. Entering the mode leaves the
-            // keyboard in no region (the header says why), and the chord
-            // does nothing there. The parent reads the same, so it is not
-            // this phase's; it is queued as its own entry. A click puts it
-            // back, which is what a person does today.
+            // THE KEYBOARD, asserted since Phase 286. Entering the mode used to
+            // leave the keyboard in no region (the flight hid the surface and
+            // Chromium blurred the focused textarea), and the chord does
+            // nothing there. The flight now gives the keyboard back, so a
+            // keyboard outside the session after the enter is a finding. The
+            // click before the leave stays, because a person may still click.
             if (!on.keyboard.inSession) {
-              note(`H entering focus mode took the keyboard out of the session: the active element is ${on.keyboard.active}. Pre-existing, queued as its own entry; a click puts it back before the leave, as a person must.`);
+              arms.RUN.push(`H entering focus mode took the keyboard out of the session (active element ${on.keyboard.active})`);
             }
             await intoTerminal();
             await kit(cdp, 'pressFocusChord()');

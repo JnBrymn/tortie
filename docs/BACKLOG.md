@@ -29799,11 +29799,18 @@ change to what anything DOES". This is that entry.
 
 1. **`fly()` in `src/renderer/app/focus-flight.ts` remembers where the keyboard was and gives it back.**
    Before `surface.style.visibility = 'hidden'`, read `document.activeElement` and keep it ONLY if it is
-   inside `surface` (`surface.contains(el)`); after the swap and the two frames, if the element is still
-   connected, `el.focus({ preventScroll: true })`, else focus the surface's `.xterm-helper-textarea` if
-   one is drawn. `preventScroll` because the row is `overflow: clip` since Phase 284 and a scroll
-   container is exactly what it refuses to be. Nothing is focused on the way OUT that was not focused on
-   the way in: a person who left with the keyboard in the dock keeps it there.
+   inside `surface` (`surface.contains(el)`); after the swap and the two frames, once the visibility is
+   restored, if the element is still connected, `el.focus({ preventScroll: true })`. `preventScroll`
+   because the row is `overflow: clip` since Phase 284 and a scroll container is exactly what it refuses
+   to be. **CORRECTED IN PLACE when the phase landed (2026-09-18), from its verify round.** This item
+   first said a person who entered with the keyboard in the session list keeps it there. That state
+   cannot exist: the list is not drawn in the mode, so the swap blurred a keyboard parked there to
+   nothing. On an ENTER with the keyboard in the strip or the dock it now goes to the OUTLINED pane's
+   textarea (`.split-pane.focused`, `.surface-single`), also under reduced motion where no flight runs;
+   a keyboard anywhere else is left alone and a leave moves nothing. When the kept element is gone the
+   fallback is the outlined pane's textarea, or nothing, never the first in document order. And
+   `src/renderer/terminal/keys/index.ts` refuses the chord, because xterm maps key 13 to a carriage
+   return whatever the modifiers and ⇧⌘↩ pressed inside a terminal was also sending Enter to the session.
 2. **The refusal stands.** Nothing here makes the chord act in no region; `fill-chord.ts` is untouched.
 3. **`build/probe-session-focus.mjs` asserts the leave LEFT.** After the leave gesture it reads the
    shell's class list and fails when `session-focus` is still there, and it reads `activeElement` after
@@ -29814,7 +29821,7 @@ change to what anything DOES". This is that entry.
 
 ### The proof, run rather than read
 
-- A vitest case in `src/renderer/app/__tests__/focus-flight.test.ts`, red at the parent: a `fly()` over
+- Vitest cases in `src/renderer/app/__tests__/focus-flight.test.ts` and the terminal key suite, 13 of 65 red at the parent: a `fly()` over
   the test doubles with a focused element inside the surface ends with that element focused, and one
   with the keyboard outside the surface ends with it untouched.
 - `npm run probe:sessionfocus` at the parent (red on the new assertion, by the measured `body`) and at

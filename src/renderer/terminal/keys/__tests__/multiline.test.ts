@@ -21,6 +21,7 @@ vi.mock('../../capture', () => ({
   selectAll: vi.fn()
 }));
 
+import { accelerator, normalizeAccelerator } from '@shared/keymap';
 import { clearSession } from '../../capture';
 import { terminalKeyHandler } from '../index';
 import {
@@ -109,8 +110,11 @@ describe('Shift+Enter', () => {
     expect(prevented()).toBe(false);
   });
 
-  it('leaves ⌥Enter, ⌃Enter and ⌘Enter to xterm and to the agent', () => {
-    for (const mod of ['altKey', 'ctrlKey', 'metaKey'] as const) {
+  it('leaves ⌥⇧Enter and ⌃⇧Enter to xterm and to the agent', () => {
+    // Until Phase 286 this loop carried `metaKey` as well, and so pinned
+    // ⇧⌘↩ being handed to xterm, which is the defect that phase measured.
+    // That chord has its own block at the bottom of this file now.
+    for (const mod of ['altKey', 'ctrlKey'] as const) {
       const h = harness();
       const { event } = keydown({ key: 'Enter', shiftKey: true, [mod]: true });
       expect(h.handler(event)).toBe(true);
@@ -251,5 +255,86 @@ describe('⌘K', () => {
     expect(h.handler(event)).toBe(false);
     expect(vi.mocked(clearSession).mock.calls).toEqual([]);
     expect(prevented()).toBe(true);
+  });
+});
+
+/**
+ * PHASE 286. ⇧⌘↩ enters and leaves session focus, and it is Tortie's.
+ *
+ * xterm turns key code 13 into a carriage return whatever the modifiers, and
+ * this handler used to hand the chord to it. MEASURED on 2026-09-18 with real
+ * key events at a focused pane: one more prompt line after the chord in, and
+ * after the chord out `zsh: command not found: p286beforea`, which is the
+ * text typed inside the mode, executed. In an agent that is a drafted prompt
+ * submitted by leaving the mode.
+ *
+ * The event is BUILT FROM THE KEYMAP ROW rather than written out, so moving
+ * `view.sessionFocus` to another chord turns this block red until the handler
+ * follows it.
+ */
+describe('⇧⌘↩, session focus', () => {
+  /** The keymap's chord as the fields of a keydown. */
+  function chordFromKeymap(): Partial<KeyboardEvent> & { key: string } {
+    const tokens = normalizeAccelerator(accelerator('view.sessionFocus')).split(
+      '+'
+    );
+    const key = tokens[tokens.length - 1] ?? '';
+    const mods = new Set(tokens.slice(0, -1));
+    return {
+      key,
+      metaKey: mods.has('Cmd'),
+      shiftKey: mods.has('Shift'),
+      ctrlKey: mods.has('Ctrl'),
+      altKey: mods.has('Alt')
+    };
+  }
+
+  it('is still the chord this block was written for', () => {
+    expect(chordFromKeymap()).toEqual({
+      key: 'Enter',
+      metaKey: true,
+      shiftKey: true,
+      ctrlKey: false,
+      altKey: false
+    });
+  });
+
+  it('never reaches xterm, and writes nothing to the session', () => {
+    const h = harness();
+    const { event, prevented } = keydown(chordFromKeymap());
+    // false is what stops xterm turning the key into a carriage return.
+    expect(h.handler(event)).toBe(false);
+    expect(h.written).toEqual([]);
+    expect(prevented()).toBe(true);
+  });
+
+  it('is swallowed for an agent with no multiline input too', () => {
+    // The ⇧↩ branch hands the key back when there is no sequence. This chord
+    // must never take that road, or it is a submit again.
+    const h = harness(null);
+    const { event } = keydown(chordFromKeymap());
+    expect(h.handler(event)).toBe(false);
+    expect(h.written).toEqual([]);
+  });
+
+  it('is exactly that chord: a further modifier, or no Shift, is not it', () => {
+    for (const extra of [
+      { ctrlKey: true },
+      { altKey: true },
+      { shiftKey: false }
+    ]) {
+      const h = harness();
+      const { event, prevented } = keydown({ ...chordFromKeymap(), ...extra });
+      expect(h.handler(event)).toBe(true);
+      expect(prevented()).toBe(false);
+    }
+  });
+
+  it('only acts on the keydown', () => {
+    const h = harness();
+    const { event, prevented } = keydown(chordFromKeymap());
+    (event as unknown as { type: string }).type = 'keyup';
+    expect(h.handler(event)).toBe(true);
+    expect(prevented()).toBe(false);
   });
 });

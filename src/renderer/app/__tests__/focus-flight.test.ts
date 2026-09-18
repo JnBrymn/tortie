@@ -27,7 +27,19 @@
  *  - the work's frame (Phase 284) is read at the ONE end of the flight that
  *    has one, inside the toggle the destination already pays for. A second
  *    toggle is a second forced layout inside the gesture, and the frame read
- *    at the wrong end is the whole window, which rounds nothing.
+ *    at the wrong end is the whole window, which rounds nothing;
+ *  - the keyboard (Phase 286) ends the flight where it began it. Chromium
+ *    blurs a focused element that becomes `visibility: hidden`, so the hide
+ *    that lets the photograph fly sent the keyboard to `body` on every
+ *    flight since Phase 80.1, and nothing brought it back. The doubles model
+ *    that blur, so an implementation that read the keyboard AFTER the hide
+ *    would find `body` and fail here;
+ *  - a keyboard parked in the session list (Phase 286, the fix round) goes to
+ *    the focused pane on the way in, because the mode does not draw the list.
+ *    The doubles blur it at the store write, which is the swap, and they draw
+ *    TWO textareas so "the focused pane" and "the first in document order"
+ *    are different elements, as they are in any split whose selected pane is
+ *    not the first.
  *
  * The vitest environment is node and jsdom is not a dependency of this
  * repository, so the DOM is a hand built stub and the copy builder is mocked.
@@ -129,6 +141,31 @@ function classList(initial: string[] = []): {
   };
 }
 
+/**
+ * An element that can hold the keyboard (Phase 286). It records every
+ * `focus` call with its options, because the claim under test is not only
+ * WHETHER the keyboard came back but that it came back without a scroll.
+ */
+function focusable(): {
+  focus: ReturnType<typeof vi.fn>;
+  isConnected: boolean;
+  closest: (sel: string) => unknown;
+} {
+  // `closest` answers null: an element that is inside no session list, which
+  // is what ./session-list-keyboard.ts asks of whatever holds the keyboard.
+  return { focus: vi.fn(), isConnected: true, closest: () => null };
+}
+
+/**
+ * The focused pane's textarea, in the module's own words (Phase 286 fix
+ * round). Spelled out here rather than imported, so the two marks are pinned:
+ * `.split-pane.focused` is the layout's active leaf in a split, and
+ * `.surface-single` is the one pane of a surface of one.
+ */
+const FOCUSED_LEAF_TEXTAREA =
+  '.split-pane.focused .xterm-helper-textarea, ' +
+  '.surface-single .xterm-helper-textarea';
+
 const FIRST = { left: 220, top: 74, width: 800, height: 600 };
 const LAST = { left: 0, top: 38, width: 1440, height: 862 };
 /**
@@ -150,6 +187,31 @@ function installDom(opts: {
    * frame existed: a surface with no `closest` and a radius of zero.
    */
   framed?: boolean;
+  /**
+   * Phase 286. Where the keyboard is when the chord fires. `session` is an
+   * element inside the surface, `dock` one in the session list, `elsewhere`
+   * one in neither (an open file, the sidebar), and the default is `body`,
+   * which is where a real document keeps it when nothing has it.
+   */
+  keyboard?: 'session' | 'dock' | 'elsewhere';
+  /**
+   * Phase 286. Whether the surface draws a helper textarea in a pane that is
+   * NOT the focused one. It is the FIRST in document order when it is drawn.
+   */
+  helper?: boolean;
+  /**
+   * Phase 286 fix round. Whether a pane is marked focused and draws a
+   * terminal. Its textarea is a different element from `helper`, which is
+   * what a split whose selected pane is not the first one looks like.
+   */
+  focusedLeaf?: boolean;
+  /**
+   * Phase 286 fix round. A state the stylesheet does not allow: the session
+   * list still holds the keyboard with the mode on. It exists so the case
+   * that says a LEAVE moves nothing tests the module's own guard and not
+   * focus-mode.css.
+   */
+  listStaysDrawn?: boolean;
 }): {
   shell: {
     classList: ReturnType<typeof classList>;
@@ -158,6 +220,13 @@ function installDom(opts: {
   surface: { style: Record<string, string> };
   frame: { reads: () => number };
   appended: unknown[];
+  /** The element that had the keyboard when the chord fired. */
+  held: ReturnType<typeof focusable>;
+  /** The `.xterm-helper-textarea` the surface draws, when `helper` is on. */
+  helper: ReturnType<typeof focusable>;
+  /** The focused pane's textarea, when `focusedLeaf` is on. */
+  focusedHelper: ReturnType<typeof focusable>;
+  body: ReturnType<typeof focusable>;
 } {
   // `attrs` is separate from `classList` on purpose, and the separation is
   // the point of the arrival marker. React owns the shell's class attribute
@@ -188,24 +257,71 @@ function installDom(opts: {
       return focusedNow() ? LAST : FRAME;
     }
   };
+  const held = focusable();
+  if (opts.keyboard === 'dock') {
+    // The one question ./session-list-keyboard.ts asks, answered the way the
+    // dock's listbox answers it.
+    held.closest = (sel: string): unknown =>
+      sel.includes('[data-slot="session-dock"]') ? held : null;
+  }
+  const helper = focusable();
+  const focusedHelper = focusable();
   const surface: {
     style: Record<string, string>;
     getBoundingClientRect: () => typeof FIRST;
     closest?: (sel: string) => unknown;
+    contains: (el: unknown) => boolean;
+    querySelector: (sel: string) => unknown;
   } = {
     style: {} as Record<string, string>,
-    getBoundingClientRect: (): typeof FIRST => (focusedNow() ? LAST : FIRST)
+    getBoundingClientRect: (): typeof FIRST => (focusedNow() ? LAST : FIRST),
+    // Phase 286. The surface holds `held` only when the keyboard is on the
+    // session side, and draws each textarea only when asked to. The plain
+    // selector answers in document order, so the unfocused pane's textarea
+    // comes first whenever it is drawn.
+    contains: (el: unknown): boolean =>
+      opts.keyboard === 'session' && el === held,
+    querySelector: (sel: string): unknown => {
+      if (sel === FOCUSED_LEAF_TEXTAREA) {
+        return opts.focusedLeaf === true ? focusedHelper : null;
+      }
+      if (sel !== '.xterm-helper-textarea') return null;
+      if (opts.helper === true) return helper;
+      return opts.focusedLeaf === true ? focusedHelper : null;
+    }
   };
   if (opts.framed === true) {
     surface.closest = (sel: string) => (sel === '.work-area' ? frame : null);
   }
   const appended: unknown[] = [];
+  const body = {
+    ...focusable(),
+    appendChild: (node: unknown) => {
+      appended.push(node);
+    }
+  };
   vi.stubGlobal('document', {
     documentElement: {},
-    body: {
-      appendChild: (node: unknown) => {
-        appended.push(node);
-      }
+    body,
+    // Phase 286. Chromium's rule, in one line: a focused element that becomes
+    // `visibility: hidden` is blurred and the keyboard falls to `body`. So an
+    // element inside the surface is the answer only while the surface is
+    // drawn, and a read after the hide finds `body`, as the app did.
+    //
+    // The fix round's second line of the same rule: the mode does not draw
+    // the session list, so an element in it is blurred at the SWAP, which
+    // here is the store write. A read after the swap finds `body` too.
+    get activeElement(): unknown {
+      if (opts.keyboard === undefined) return body;
+      if (opts.keyboard === 'session' && surface.style['visibility'] === 'hidden')
+        return body;
+      if (
+        opts.keyboard === 'dock' &&
+        store.sessionFocus &&
+        opts.listStaysDrawn !== true
+      )
+        return body;
+      return held;
     },
     querySelector: (sel: string) => {
       if (sel === '.shell') return shell;
@@ -230,7 +346,7 @@ function installDom(opts: {
     }, 0);
     return 0;
   });
-  return { shell, surface, frame, appended };
+  return { shell, surface, frame, appended, held, helper, focusedHelper, body };
 }
 
 const {
@@ -724,5 +840,335 @@ describe('a whole gesture', () => {
     await toggleSessionFocus();
     expect(appended).toEqual([]);
     expect(store.setSessionFocus.mock.calls).toEqual([[true]]);
+  });
+});
+
+// PHASE 286. Measured in a scratch Electron on 2026-09-17: before the chord
+// `document.activeElement` was `textarea.xterm-helper-textarea`, 100 ms after
+// it `body`, and 1.5 s after it still `body` with the mode on. What a person
+// typed went nowhere, and the chord that leaves was silent because
+// ./fill-chord.ts reads the region the keyboard is in and `body` is in none.
+describe('the keyboard across the flight', () => {
+  /** The two frames the module waits after the swap, then the tidy up. */
+  const settled = (): Promise<void> =>
+    new Promise((r) => {
+      setTimeout(r, 20);
+    });
+
+  it('gives the keyboard back to the element that held it, without a scroll', async () => {
+    const { held, surface } = installDom({ surface: true, keyboard: 'session' });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(surface.style['visibility']).toBe('');
+    // `preventScroll` because the row is `overflow: clip` since Phase 284, and
+    // a scroll container is exactly what it refuses to be.
+    expect(held.focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+  });
+
+  it('gives it back on the way out as well', async () => {
+    const { held } = installDom({
+      surface: true,
+      keyboard: 'session',
+      shellClasses: ['session-focus']
+    });
+    store.sessionFocus = true;
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(store.setSessionFocus.mock.calls).toEqual([[false]]);
+    expect(held.focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+  });
+
+  it('gives it back only once the surface is drawn again', async () => {
+    // A `visibility: hidden` element cannot take the keyboard, so a focus
+    // call made before the hide is undone is a focus call made to nothing.
+    const { held, surface } = installDom({ surface: true, keyboard: 'session' });
+    let visibilityAtFocus: string | undefined = 'unread';
+    held.focus.mockImplementation(() => {
+      visibilityAtFocus = surface.style['visibility'];
+    });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(held.focus).toHaveBeenCalledTimes(1);
+    expect(visibilityAtFocus).toBe('');
+  });
+
+  it('touches nothing when the keyboard was in neither the surface nor the list', async () => {
+    // An open file, the sidebar. Nothing is focused that the flight did not
+    // itself take the keyboard from.
+    const { held, helper, focusedHelper, body } = installDom({
+      surface: true,
+      keyboard: 'elsewhere',
+      helper: true,
+      focusedLeaf: true
+    });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(store.setSessionFocus.mock.calls).toEqual([[true]]);
+    expect(held.focus).not.toHaveBeenCalled();
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(focusedHelper.focus).not.toHaveBeenCalled();
+    expect(body.focus).not.toHaveBeenCalled();
+  });
+
+  it('touches nothing when nothing held the keyboard', async () => {
+    const { held, helper, focusedHelper, body } = installDom({
+      surface: true,
+      helper: true,
+      focusedLeaf: true
+    });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(held.focus).not.toHaveBeenCalled();
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(focusedHelper.focus).not.toHaveBeenCalled();
+    expect(body.focus).not.toHaveBeenCalled();
+  });
+
+  it('goes to the focused pane when the flight outlived the element, never to the first textarea', async () => {
+    // Two textareas. The first in document order belongs to a pane that is
+    // not the selected one, which is the split the fix round measured: held
+    // `split-4`, outlined `split-2`, and the keyboard went to `p286-a`.
+    const { held, helper, focusedHelper } = installDom({
+      surface: true,
+      keyboard: 'session',
+      helper: true,
+      focusedLeaf: true
+    });
+    const node = makeCopyNode();
+    // The element leaves the document while the photograph is in the air.
+    node.animate.mockImplementation(() => {
+      held.isConnected = false;
+      return { finished: Promise.resolve() };
+    });
+    copyPlan.node = node;
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(held.focus).not.toHaveBeenCalled();
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(focusedHelper.focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+  });
+
+  it('focuses nothing when the element is gone and no pane is marked focused', async () => {
+    // `TerminalPane` owns the keyboard from here, through its own `focused`
+    // effect. A textarea is drawn, and it is not taken.
+    const { held, helper, body } = installDom({
+      surface: true,
+      keyboard: 'session',
+      helper: true
+    });
+    held.isConnected = false;
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(held.focus).not.toHaveBeenCalled();
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(body.focus).not.toHaveBeenCalled();
+  });
+
+  it('focuses nothing when the element is gone and no helper is drawn', async () => {
+    const { held, helper, body } = installDom({
+      surface: true,
+      keyboard: 'session'
+    });
+    held.isConnected = false;
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(held.focus).not.toHaveBeenCalled();
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(body.focus).not.toHaveBeenCalled();
+  });
+
+  it('reads the keyboard before the hide, which is the only moment it is inside', async () => {
+    // The double blurs on the hide exactly as Chromium does. Reading
+    // `activeElement` in the `finally` instead would find `body`, keep
+    // nothing, and this case would be the one that says so.
+    const { held } = installDom({ surface: true, keyboard: 'session' });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(held.focus).toHaveBeenCalledTimes(1);
+  });
+});
+
+// PHASE 286, THE FIX ROUND. Measured on 2026-09-18 with the keyboard on a strip
+// tab and the mode entered by a keydown no row handler sees, which is how
+// View > Focus the Session or File enters it: `body` after the enter, the
+// typed text in no session, and the leave chord doing nothing. The mode does
+// not draw the session list, so a keyboard parked there has nowhere to stay.
+describe('a keyboard parked in the session list', () => {
+  const settled = (): Promise<void> =>
+    new Promise((r) => {
+      setTimeout(r, 20);
+    });
+
+  it('goes to the focused pane on the way in, not to the first textarea', async () => {
+    const { held, helper, focusedHelper } = installDom({
+      surface: true,
+      keyboard: 'dock',
+      helper: true,
+      focusedLeaf: true
+    });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(store.setSessionFocus.mock.calls).toEqual([[true]]);
+    expect(focusedHelper.focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(held.focus).not.toHaveBeenCalled();
+  });
+
+  it('takes the first textarea only when no pane is marked focused', async () => {
+    const { helper } = installDom({
+      surface: true,
+      keyboard: 'dock',
+      helper: true
+    });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(helper.focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+  });
+
+  it('is read before the swap and handed over after the hide is undone', async () => {
+    // The double blurs the list at the store write, as the stylesheet does.
+    // A read in the tidy up would find `body` and move nothing.
+    const { surface, focusedHelper } = installDom({
+      surface: true,
+      keyboard: 'dock',
+      focusedLeaf: true
+    });
+    let at: { visibility: string | undefined; modeOn: boolean } | null = null;
+    focusedHelper.focus.mockImplementation(() => {
+      at = {
+        visibility: surface.style['visibility'],
+        modeOn: store.sessionFocus
+      };
+    });
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(focusedHelper.focus).toHaveBeenCalledTimes(1);
+    expect(at).toEqual({ visibility: '', modeOn: true });
+  });
+
+  it('is handed over BEFORE the store write when there is no flight', () => {
+    // Reduced motion hides nothing, so the swap alone un-draws the list. The
+    // hand over happens while the list is still drawn, in the same task.
+    const { focusedHelper } = installDom({
+      surface: true,
+      reducedMotion: true,
+      keyboard: 'dock',
+      focusedLeaf: true
+    });
+    let modeOnAtFocus: boolean | null = null;
+    focusedHelper.focus.mockImplementation(() => {
+      modeOnAtFocus = store.sessionFocus;
+    });
+
+    void toggleSessionFocus();
+
+    expect(focusedHelper.focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+    expect(modeOnAtFocus).toBe(false);
+    expect(store.setSessionFocus.mock.calls).toEqual([[true]]);
+  });
+
+  it('is handed over when no photograph could be built', async () => {
+    const { focusedHelper } = installDom({
+      surface: true,
+      keyboard: 'dock',
+      focusedLeaf: true
+    });
+    copyPlan.node = null;
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(store.setSessionFocus.mock.calls).toEqual([[true]]);
+    expect(focusedHelper.focus.mock.calls).toEqual([[{ preventScroll: true }]]);
+  });
+
+  it('moves nothing with no flight when the keyboard is already in the surface', () => {
+    const { held, helper, focusedHelper } = installDom({
+      surface: true,
+      reducedMotion: true,
+      keyboard: 'session',
+      helper: true,
+      focusedLeaf: true
+    });
+
+    void toggleSessionFocus();
+
+    expect(store.setSessionFocus.mock.calls).toEqual([[true]]);
+    expect(held.focus).not.toHaveBeenCalled();
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(focusedHelper.focus).not.toHaveBeenCalled();
+  });
+
+  it('moves nothing on the way out', async () => {
+    // The list is not drawn while the mode is on, so this state cannot be
+    // reached in the app. It is built here so that what is tested is the
+    // module's own rule, that only an ENTER takes the keyboard from a list.
+    const { held, helper, focusedHelper, body } = installDom({
+      surface: true,
+      keyboard: 'dock',
+      helper: true,
+      focusedLeaf: true,
+      listStaysDrawn: true,
+      shellClasses: ['session-focus']
+    });
+    store.sessionFocus = true;
+    copyPlan.node = makeCopyNode();
+
+    await toggleSessionFocus();
+    await settled();
+
+    expect(store.setSessionFocus.mock.calls).toEqual([[false]]);
+    expect(held.focus).not.toHaveBeenCalled();
+    expect(helper.focus).not.toHaveBeenCalled();
+    expect(focusedHelper.focus).not.toHaveBeenCalled();
+    expect(body.focus).not.toHaveBeenCalled();
+  });
+
+  it('names the two marks the surface really wears', () => {
+    // The selector is a string, and a rename in either component would turn
+    // it into one that matches nothing, silently. Read as text, the house way.
+    const app = join(__dirname, '..');
+    const split = readFileSync(join(app, 'split', 'SplitSurface.tsx'), 'utf8');
+    const region = readFileSync(join(app, 'TerminalRegion.tsx'), 'utf8');
+    const flight = readFileSync(join(app, 'focus-flight.ts'), 'utf8');
+    expect(split).toContain("className={`split-pane${focused ? ' focused' : ''}`}");
+    expect(region).toContain('className="surface-single"');
+    expect(flight).toContain('`.split-pane.focused ${HELPER_TEXTAREA_SELECTOR}, `');
+    expect(flight).toContain('`.surface-single ${HELPER_TEXTAREA_SELECTOR}`');
   });
 });

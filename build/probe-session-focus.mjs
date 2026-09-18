@@ -21,6 +21,40 @@
  * live layout box would show a staircase of five to twelve intermediate
  * sizes. Two sizes and one transition is the shape that cannot be faked.
  *
+ * READING THREE, THE KEYBOARD, OVER DEVTOOLS (Phase 286). The flight sets the
+ * surface `visibility: hidden` so the photograph can fly over it, and Chromium
+ * blurs a focused element that becomes hidden. For a year the only leave check
+ * here was "the renderer recorded no leave gesture", and the renderer's drive
+ * presses the chord twice with no click between, so the gesture was recorded
+ * and the mode was never observed to end: after the enter the keyboard was on
+ * `body`, what a person typed went nowhere, and the second chord was silent
+ * because fill-chord.ts found no region. This file now attaches a devtools
+ * client of its own, samples `document.activeElement` and the shell's class
+ * list every 100 ms across both gestures, lines the samples up with the
+ * renderer's press times, and fails when the keyboard is not inside the
+ * surface after the enter or when `session-focus` is still on the shell after
+ * the leave. Both readings are printed whatever the outcome, so a run at the
+ * parent shows the numbers the entry names.
+ *
+ * READING FOUR, THE KEYBOARD PARKED IN THE SESSION LIST (Phase 286, the fix
+ * round). The mode does not draw the session list, so a keyboard left on it
+ * has nowhere to stay: entered the way View > Focus the Session or File enters
+ * the mode, by a keydown no row handler sees, the keyboard fell to `body`,
+ * what a person typed went nowhere and the leave chord was silent. After the
+ * renderer's drive has finished, one expression in the app window selects a
+ * pane that is NOT first in document order, parks the keyboard on the list,
+ * presses the chord the way the drive does, reads where the keyboard landed,
+ * presses again and reads the shell. It fails when the keyboard is not inside
+ * the surface after the enter, when it is in a pane other than the one the
+ * surface marks focused, or when the mode is still on after the leave. It is
+ * skipped under `--stayfocused`, where the list is not drawn at all.
+ *
+ * WHAT `--reduced` DOES NOT MEASURE. Under reduced motion `fly()` returns
+ * before it hides anything, so the keyboard never leaves the surface and
+ * reading three is green at the parent as well. It says nothing about what
+ * Phase 286 changed in the flight. Reading four is the one reading there that
+ * does, because the hand over from the list has a path with no flight in it.
+ *
  * SAFETY, ABSOLUTE. The probe runs on the socket build/harness-socket.mjs
  * gave it, which that script refuses to let be `gmux` or `default`. It uses
  * its own user data directory and its own scratch project. It names `-L gmux`
@@ -50,17 +84,26 @@
  * The last one skips the way out, so the screenshot it writes shows the
  * settled focus rather than the layout after leaving it.
  *
- * Exit code 0 when both readings pass. Exit code 1 otherwise, with every
+ * Exit code 0 when all four readings pass. Exit code 1 otherwise, with every
  * failing row named. Exit code 2 when the probe refuses to run at all.
  */
 
 import { execFile, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { cdpEval, wsConnect } from './cdp-client.mjs';
+import { pickRendererTarget } from './cdp-target.mjs';
 import { withElectron } from './electron-run.mjs';
 
 const execFileP = promisify(execFile);
@@ -235,6 +278,227 @@ function stopPolling() {
 }
 
 // ---------------------------------------------------------------------------
+// The keyboard poll (Phase 286)
+// ---------------------------------------------------------------------------
+
+/**
+ * The node fly() hides for the flight, which is the node the keyboard must be
+ * inside afterwards. It is the same selector focus-flight.ts and the renderer
+ * drive read, and the xterm textarea of every leaf is a descendant of it.
+ */
+const SURFACE_SELECTOR = '[data-surface-leaves]';
+/** The class App.tsx puts on `.shell` while the mode is on. */
+const FOCUS_CLASS = 'session-focus';
+const KEYBOARD_POLL_MS = 100;
+
+/**
+ * One expression, evaluated in the app window. It answers where the keyboard
+ * is as a tag with its classes, whether that element is inside the surface,
+ * and the shell's class list as one string, so the printed line reads the way
+ * the entry's measurement does: `body` and `shell session-focus`.
+ */
+const KEYBOARD_READ = `(() => {
+  const ae = document.activeElement;
+  const classes = ae !== null && typeof ae.className === 'string'
+    ? ae.className.trim().split(/\\s+/).filter((c) => c !== '').join('.')
+    : '';
+  const shell = document.querySelector('.shell');
+  return {
+    active: ae === null ? 'null' : ae.tagName.toLowerCase() + (classes === '' ? '' : '.' + classes),
+    inSurface: ae !== null && ae.closest(${JSON.stringify(SURFACE_SELECTOR)}) !== null,
+    shellClasses: shell === null ? null : shell.className
+  };
+})()`;
+
+/** One sample: `{ at, active, inSurface, shellClasses }`. */
+const keyboardTimeline = [];
+let cdp = null;
+let attachWhy = 'the attach never finished';
+let keyboardTimer = null;
+
+async function targetsFor(profileDir) {
+  const port = Number(
+    readFileSync(join(profileDir, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim()
+  );
+  if (!Number.isFinite(port) || port <= 0) throw new Error('no devtools port yet');
+  return await (await fetch(`http://127.0.0.1:${String(port)}/json/list`)).json();
+}
+
+/**
+ * Attach to the main window once it is listed. It starts as soon as Electron
+ * is spawned and retries until the window is there, so the first keyboard
+ * sample lands well before the arm wait ends whatever `--arm` was set to.
+ * `stillRunning` is asked before every retry: an Electron that has already
+ * exited leaves a stale port file behind, and a loop that kept asking it would
+ * hold the run for the whole timeout after the app was gone.
+ */
+async function attachMain(profileDir, timeoutMs, stillRunning) {
+  const started = Date.now();
+  let lastWhy = 'no devtools port yet';
+  for (;;) {
+    try {
+      const picked = pickRendererTarget(await targetsFor(profileDir));
+      if (picked.target !== null && picked.target.webSocketDebuggerUrl) {
+        return await wsConnect(picked.target.webSocketDebuggerUrl);
+      }
+      lastWhy = picked.why ?? lastWhy;
+    } catch (err) {
+      lastWhy = err instanceof Error ? err.message : String(err);
+    }
+    if (!stillRunning()) throw new Error(`electron exited before the window was listed: ${lastWhy}`);
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`no main window target within ${String(timeoutMs / 1000)} s: ${lastWhy}`);
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+function startKeyboardSampling() {
+  if (keyboardTimer !== null) return;
+  say(`sampling the keyboard over devtools every ${String(KEYBOARD_POLL_MS)} ms`);
+  let busy = false;
+  keyboardTimer = setInterval(() => {
+    if (cdp === null || busy) return;
+    busy = true;
+    // Stamped when the question is sent, which is the same clock the renderer
+    // stamps its presses with, so the samples line up with the gestures below.
+    const at = Date.now();
+    cdpEval(cdp, KEYBOARD_READ, 5_000)
+      .then((r) => {
+        if (r !== null && typeof r === 'object') keyboardTimeline.push({ at, ...r });
+      })
+      .catch(() => undefined) // the window is going away. Not a sample.
+      .finally(() => {
+        busy = false;
+      });
+  }, KEYBOARD_POLL_MS);
+}
+
+function stopKeyboardSampling() {
+  if (keyboardTimer !== null) clearInterval(keyboardTimer);
+  keyboardTimer = null;
+}
+
+/** The last sample stamped inside `[fromAt, toAt)`, or null. */
+function lastSampleIn(fromAt, toAt) {
+  let found = null;
+  for (const sample of keyboardTimeline) {
+    if (sample.at < fromAt || sample.at >= toAt) continue;
+    found = sample;
+  }
+  return found;
+}
+
+function describeSample(sample, pressedAt) {
+  if (sample === null) return 'no sample';
+  return (
+    `active=${sample.active} inSurface=${String(sample.inSurface)} ` +
+    `shell="${sample.shellClasses ?? 'no .shell'}" ` +
+    `@+${String(sample.at - pressedAt)}ms`
+  );
+}
+
+function shellHasFocusClass(sample) {
+  return (sample.shellClasses ?? '').split(/\s+/).includes(FOCUS_CLASS);
+}
+
+// ---------------------------------------------------------------------------
+// The keyboard parked in the session list (Phase 286, the fix round)
+// ---------------------------------------------------------------------------
+
+/** What the harness prints in front of a GMUX_SHOT_JS value. */
+const LIST_ARM_MARKER = '[gmux-shot] probe ';
+
+/**
+ * Reading four, as ONE expression the shot harness evaluates in the app
+ * window after the drive and before the capture (GMUX_SHOT_JS). It runs there
+ * and not over this file's devtools client because the harness already waits
+ * for it, so the capture cannot race it and no second clock is needed.
+ *
+ * The pane it selects is the LAST in document order, by the same pointer
+ * press a person's click begins with, because the drive leaves the first pane
+ * selected and "the focused pane" and "the first textarea" are then the same
+ * element, which would let the old document order rule pass. The chord is the
+ * drive's own: a keydown on `window`, which the rows' Enter handlers never
+ * see. That is the menu row's shape. A real ⇧⌘↩ on a row is a different path,
+ * where the row hands the keyboard to the terminal before the flight begins.
+ */
+function listArmExpression(waitMs) {
+  return `(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const leafOf = (el) => {
+    const l = el !== null && typeof el.closest === 'function' ? el.closest('[data-split-leaf]') : null;
+    return l === null ? null : l.getAttribute('data-split-leaf');
+  };
+  const read = () => {
+    const ae = document.activeElement;
+    const classes = ae !== null && typeof ae.className === 'string'
+      ? ae.className.trim().split(/\\s+/).filter((c) => c !== '').join('.')
+      : '';
+    const shell = document.querySelector('.shell');
+    const marked = document.querySelector('${SURFACE_SELECTOR} .split-pane.focused, ${SURFACE_SELECTOR} .surface-single');
+    return {
+      active: ae === null ? 'null' : ae.tagName.toLowerCase() + (classes === '' ? '' : '.' + classes),
+      inSurface: ae !== null && ae.closest('${SURFACE_SELECTOR}') !== null,
+      inList: ae !== null && ae.closest('[data-slot="session-strip"], [data-slot="session-dock"]') !== null,
+      leaf: leafOf(ae),
+      focusedLeaf: marked === null ? null : marked.getAttribute('data-split-leaf'),
+      shellClasses: shell === null ? null : shell.className
+    };
+  };
+  const press = () => window.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Enter', code: 'Enter', metaKey: true, shiftKey: true, bubbles: true
+  }));
+  const leaves = Array.from(document.querySelectorAll('${SURFACE_SELECTOR} [data-split-leaf]'));
+  const firstLeaf = leaves.length === 0 ? null : leaves[0].getAttribute('data-split-leaf');
+  const last = leaves.length > 1 ? leaves[leaves.length - 1] : null;
+  if (last !== null) {
+    (last.querySelector('.split-pane-body') ?? last).dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true })
+    );
+    await wait(300);
+  }
+  const list =
+    document.querySelector('[data-slot="session-dock"] .dock-list') ??
+    document.querySelector('[data-slot="session-strip"] [tabindex]');
+  if (list !== null) list.focus();
+  await wait(150);
+  const before = read();
+  press();
+  await wait(${String(waitMs)});
+  const afterEnter = read();
+  press();
+  await wait(${String(waitMs)});
+  const afterLeave = read();
+  return { listArm: true, leafCount: leaves.length, firstLeaf, before, afterEnter, afterLeave };
+})()`;
+}
+
+/** The list arm's answer out of everything Electron printed, or null. */
+function listArmReport(output) {
+  let at = output.lastIndexOf(LIST_ARM_MARKER);
+  while (at !== -1) {
+    const line = output.slice(at + LIST_ARM_MARKER.length).split('\n')[0] ?? '';
+    try {
+      const value = JSON.parse(line);
+      if (value !== null && typeof value === 'object' && value.listArm === true) return value;
+    } catch {
+      // Not this line.
+    }
+    at = at === 0 ? -1 : output.lastIndexOf(LIST_ARM_MARKER, at - 1);
+  }
+  return null;
+}
+
+function describeListRead(r) {
+  return (
+    `active=${r.active} inSurface=${String(r.inSurface)} ` +
+    `leaf=${r.leaf ?? 'none'} focusedLeaf=${r.focusedLeaf ?? 'none'} ` +
+    `shell="${r.shellClasses ?? 'no .shell'}"`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // The run
 // ---------------------------------------------------------------------------
 
@@ -249,28 +513,60 @@ await withElectron(
     label: 'session-focus',
     userDataDir: profile,
     cwd: repoRoot,
-    args: reduced ? ['--force-prefers-reduced-motion'] : [],
+    // The devtools port is for reading three. It is opened on a free port and
+    // read back from the profile's DevToolsActivePort, never guessed.
+    args: [
+      '--remote-debugging-port=0',
+      ...(reduced ? ['--force-prefers-reduced-motion'] : [])
+    ],
     env: {
       ...process.env,
       GMUX_SHOT: shotPath,
       GMUX_SHOT_VERBOSE: '1',
       GMUX_SHOT_DELAY_MS: String(armMs + settleMs * 2 + 14_000),
-      GMUX_SHOT_DRIVE: JSON.stringify(drive)
+      GMUX_SHOT_DRIVE: JSON.stringify(drive),
+      // Reading four. Evaluated by the harness after the drive and before the
+      // capture. Empty under --stayfocused, which is also what keeps a value
+      // inherited from the caller's environment from running instead.
+      GMUX_SHOT_JS: stayFocused ? '' : listArmExpression(settleMs)
     }
   },
   async (handle) => {
   const child = handle.child;
 
+  // Reading three's client. Attaching starts now, in parallel with the app's
+  // own boot, and the sampler below only sends once it has landed.
+  let childGone = false;
+  const noteGone = () => {
+    childGone = true;
+  };
+  child.once('exit', noteGone);
+  child.once('error', noteGone);
+  const attaching = attachMain(profile, 90_000, () => !childGone).then(
+    (client) => {
+      cdp = client;
+    },
+    (err) => {
+      attachWhy = err instanceof Error ? err.message : String(err);
+    }
+  );
+
   function onText(chunk) {
     process.stdout.write(chunk);
     text += chunk;
-    if (chunk.includes('[focus-probe] arming')) startPolling();
+    if (chunk.includes('[focus-probe] arming')) {
+      startPolling();
+      startKeyboardSampling();
+    }
     const marker = '[focus-probe] result ';
     let at = text.lastIndexOf(marker);
     if (at === -1) return;
     const line = text.slice(at + marker.length).split('\n')[0] ?? '';
     try {
       rendererReport = JSON.parse(line);
+      // The drive is over, and the keyboard timeline ends with it: nothing
+      // main does next (raising the window for the capture) is a gesture.
+      stopKeyboardSampling();
     } catch {
       // The line is still arriving. Try again on the next chunk.
     }
@@ -329,6 +625,17 @@ await withElectron(
   child.stdout.destroy();
   child.stderr.destroy();
   stopPolling();
+  stopKeyboardSampling();
+  // The devtools socket is the third handle that would keep node alive. The
+  // attach is awaited first so a late success cannot open one after the close.
+  await attaching;
+  if (cdp !== null) {
+    try {
+      cdp.close();
+    } catch {
+      // Electron has already gone, and the socket with it.
+    }
+  }
   const loadAfter = loadavg()[0];
 
   // ---------------------------------------------------------------------------
@@ -458,6 +765,166 @@ await withElectron(
     }
   }
 
+  // -- reading three ----------------------------------------------------------
+
+  /**
+   * The samples are lined up with the renderer's press times. "After the
+   * enter" is the LAST sample before the leave press, so it reads the settled
+   * mode and never the flight itself; "after the leave" is the last sample
+   * the sampler took before the drive printed its result. Both lines print
+   * whatever they read: at the parent they read `body` and a shell that still
+   * says `session-focus`, which is the measurement Phase 286 was queued on.
+   *
+   * THE LOWER BOUND IS LOOSE, AND IT IS NOT WHAT KEEPS THE FLIGHT OUT.
+   * `pressed + flightMs + 100` is not the end of the flight. The flight ends
+   * at the press plus the time the photograph took to build plus 200 ms plus
+   * two frames, and on 2026-09-18 the photograph was still in the document
+   * 295 ms after the press with the fits landing at 304 to 308 ms, past this
+   * bound. What excludes the flight is taking the LAST sample in the window,
+   * which the same three runs put 1.17 to 1.24 s after the last fit. A
+   * sampler that stalled could only turn that into a false FAIL ("no sample
+   * landed"), never into a false pass.
+   */
+  console.log('');
+  say(`reading three, the keyboard over devtools. ${String(keyboardTimeline.length)} samples`);
+  if (cdp === null) {
+    failures.push(`devtools never attached (${attachWhy}), so the keyboard was not read`);
+  }
+  if (enter !== null) {
+    const pressed = enter.pressedAtEpochMs;
+    // A sample is stamped when it is sent, and one sent a few milliseconds
+    // before the press could be answered after it, so "before" stops short of
+    // the press by more than a round trip on this machine takes.
+    const before = lastSampleIn(0, pressed - 50);
+    const afterEnter = lastSampleIn(
+      pressed + flightMs + 100,
+      leave === null ? Number.POSITIVE_INFINITY : leave.pressedAtEpochMs
+    );
+    say(`keyboard before the enter: ${describeSample(before, pressed)}`);
+    say(`keyboard after the enter:  ${describeSample(afterEnter, pressed)}`);
+    if (afterEnter === null) {
+      if (cdp !== null) {
+        failures.push(
+          'no keyboard sample landed between the end of the enter flight and ' +
+            'the leave press, so the keyboard after the enter was not read'
+        );
+      }
+    } else if (before !== null && !before.inSurface) {
+      // A keyboard that was never in the surface says nothing about the
+      // flight, and blaming the flight for it would be the wrong finding.
+      failures.push(
+        `the keyboard was not inside the surface before the enter (active ` +
+          `element ${before.active}), so what the flight does with it was not measured`
+      );
+    } else {
+      if (!shellHasFocusClass(afterEnter)) {
+        failures.push(
+          `after the enter the shell reads "${afterEnter.shellClasses ?? ''}" ` +
+            `without ${FOCUS_CLASS}, so the chord did not enter the mode`
+        );
+      }
+      if (!afterEnter.inSurface) {
+        failures.push(
+          `after the enter the keyboard is on ${afterEnter.active}, not inside ` +
+            `the surface ${SURFACE_SELECTOR}. What a person types goes nowhere ` +
+            'and the leave chord is silent'
+        );
+      }
+    }
+  }
+  if (leave !== null) {
+    const pressed = leave.pressedAtEpochMs;
+    const afterLeave = lastSampleIn(pressed + flightMs + 100, Number.POSITIVE_INFINITY);
+    say(`shell after the leave:     ${describeSample(afterLeave, pressed)}`);
+    if (afterLeave === null) {
+      if (cdp !== null) {
+        failures.push(
+          'no keyboard sample landed after the end of the leave flight, so ' +
+            'the shell after the leave was not read'
+        );
+      }
+    } else if (shellHasFocusClass(afterLeave)) {
+      failures.push(
+        `after the leave the shell still reads "${afterLeave.shellClasses ?? ''}", ` +
+          `so the second chord did not leave the mode`
+      );
+    }
+  }
+
+  // -- reading four -----------------------------------------------------------
+
+  /**
+   * The keyboard parked in the session list. The precondition is judged on
+   * its own line, as reading three's is: a keyboard that never reached the
+   * list says nothing about what the mode did with it. At the parent the mode
+   * is still ON when this arm starts, because the drive's leave chord was
+   * silent there, so the list is not drawn and the precondition is what fails.
+   */
+  if (!stayFocused) {
+    console.log('');
+    const arm = listArmReport(text);
+    if (arm === null) {
+      say('reading four, the keyboard parked in the session list. No answer');
+      failures.push(
+        'the list arm printed no answer, so a keyboard parked in the session ' +
+          'list was not measured'
+      );
+    } else {
+      say(
+        `reading four, the keyboard parked in the session list. ` +
+          `${String(arm.leafCount)} leaves, first in document order ${arm.firstLeaf ?? 'none'}`
+      );
+      say(`list arm before the enter: ${describeListRead(arm.before)} inList=${String(arm.before.inList)}`);
+      say(`list arm after the enter:  ${describeListRead(arm.afterEnter)}`);
+      say(`list arm after the leave:  ${describeListRead(arm.afterLeave)}`);
+      if (!arm.before.inList || shellHasFocusClass(arm.before)) {
+        failures.push(
+          `the list arm could not park the keyboard in the session list ` +
+            `(active element ${arm.before.active}, shell "${arm.before.shellClasses ?? ''}"), ` +
+            'so what the mode does with a keyboard parked there was not measured'
+        );
+      } else {
+        if (arm.leafCount > 1 && arm.before.focusedLeaf === arm.firstLeaf) {
+          failures.push(
+            'the list arm could not select a pane other than the first, so the ' +
+              'focused pane and the first textarea are the same element and the ' +
+              'reading cannot tell them apart'
+          );
+        }
+        if (!shellHasFocusClass(arm.afterEnter)) {
+          failures.push(
+            `from the session list the shell reads "${arm.afterEnter.shellClasses ?? ''}" ` +
+              `after the chord, without ${FOCUS_CLASS}, so the mode was not entered`
+          );
+        } else if (!arm.afterEnter.inSurface) {
+          failures.push(
+            `a keyboard parked in the session list is on ${arm.afterEnter.active} ` +
+              `after the enter, not inside the surface ${SURFACE_SELECTOR}. The ` +
+              'mode does not draw the list, so what a person types goes nowhere ' +
+              'and the leave chord is silent'
+          );
+        } else if (
+          arm.afterEnter.focusedLeaf !== null &&
+          arm.afterEnter.leaf !== arm.afterEnter.focusedLeaf
+        ) {
+          failures.push(
+            `a keyboard parked in the session list went to pane ` +
+              `${arm.afterEnter.leaf ?? 'none'}, and the focused pane is ` +
+              `${arm.afterEnter.focusedLeaf}. The keyboard and the outline must ` +
+              'be on the same pane'
+          );
+        }
+        if (shellHasFocusClass(arm.afterLeave)) {
+          failures.push(
+            `after the list arm's leave the shell still reads ` +
+              `"${arm.afterLeave.shellClasses ?? ''}", so the second chord did ` +
+              'not leave the mode'
+          );
+        }
+      }
+    }
+  }
+
   // -- the pass conditions ----------------------------------------------------
 
   if (enter === null) {
@@ -530,9 +997,10 @@ await withElectron(
   console.log('');
   say(
     reduced
-      ? `both readings agree. Every leaf resized inside 32 ms and the copy was ` +
-          `never built, ${loadNote}`
-      : `both readings agree. No leaf resized before ${String(flightMs)} ms, ` +
-          `${loadNote}`
+      ? `every reading agrees. Every leaf resized inside 32 ms and the copy ` +
+          `was never built. Nothing was hidden, so reading three measured no ` +
+          `flight${stayFocused ? '' : ', and a keyboard parked in the session list reached the focused pane'}, ${loadNote}`
+      : `every reading agrees. No leaf resized before ${String(flightMs)} ms, ` +
+          `the keyboard stayed in the session${stayFocused ? '' : ' and one parked in the session list reached the focused pane'}, ${loadNote}`
   );
 });
