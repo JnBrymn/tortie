@@ -2001,6 +2001,19 @@ export function createTabIo(deps: TabIoDeps): TabIo {
    * same files for the same reason; they join the one already waiting. The
    * running walk is forgotten in a `finally`, so a walk that throws never
    * blocks the next one.
+   *
+   * STATED LIMIT (Phase 282.1's reverify, reasoned rather than driven). A walk
+   * that never SETTLES is not a walk that throws. `fs:readFile` has no deadline
+   * on the local channel (the `git:showHead` call beside it does), so a read
+   * that hangs on a stalled network volume holds `refreshRunning` for the life
+   * of the renderer and every later tick of that repository queues behind it:
+   * the editor stops following the agent's edits in that project until the app
+   * is restarted, with nothing said. Before the serializer that read cost one
+   * tick. Not reproducible on a local disk; written down so the failure mode
+   * is known rather than bounded here. A deadline that forgot the running walk
+   * is a design decision for its own entry: the clause above would drop the
+   * late answer when a fresh walk had moved `savedContents` under it, and
+   * apply nothing when it had not, so the road is open.
    */
   const refreshRunning = new Map<string, Promise<void>>();
   const refreshQueued = new Map<string, Promise<void>>();

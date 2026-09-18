@@ -183,7 +183,7 @@ describe('a second chord while a rewind is being written', () => {
     expect(live().baseline?.text).toBe(BASE);
     expect(backwards()).toEqual([]);
     // The redraw that no longer draws X lets it go, and the follower is pressable.
-    releaseHolds(held, picture(), live().savedContents, live().dirty);
+    releaseHolds(held, picture(), live().savedContents);
     expect(held).toEqual([]);
     expect(viewAccept(held, y!)).toBe('accepted');
     expect(backwards()).toEqual([]);
@@ -262,39 +262,85 @@ describe('a second chord while a rewind is being written', () => {
     expect(await rewind).toBe('wrote');
     // The adoption refused, so the picture still draws X byte for byte.
     expect(live().savedContents).toBe(AGENT);
-    releaseHolds(held, picture(), live().savedContents, live().dirty);
+    releaseHolds(held, picture(), live().savedContents);
     expect(viewAccept(held, x!)).toBe('held');
     // A watcher read that opened the file BEFORE the rename answers the bytes
     // the write replaced: X is still drawn, and the hold does not let go.
     useEditor.setState({ tabs: [{ ...live(), savedContents: onDisk }] });
-    releaseHolds(held, picture(), live().savedContents, live().dirty);
+    releaseHolds(held, picture(), live().savedContents);
     expect(viewAccept(held, x!)).toBe('held');
     // The watcher delivers the file as the write left it; the redraw lets X go.
     useEditor.setState({ tabs: [{ ...live(), savedContents: disk.text }] });
-    releaseHolds(held, picture(), live().savedContents, live().dirty);
+    releaseHolds(held, picture(), live().savedContents);
     expect(held).toEqual([]);
     expect(backwards()).toEqual([]);
   });
 
   /**
-   * PHASE 282'S FIX ROUND. THE HOLD THAT COULD NOT DIE.
+   * PHASE 282'S FIX ROUND, AND PHASE 282.1'S CORRECTION OF IT. THE HOLD THAT
+   * COULD NOT DIE, AND WHAT KILLING IT DID.
    *
-   * The verifier drove the shape above one keystroke further. Both of the
+   * The Phase 282 verifier drove the shape above one keystroke further. Both
    * release clauses wait for a READ: `refreshRepo` (./tab-io) skips a dirty
-   * tab by rule, so `savedContents` can never move again, and the picture is
-   * composed from the buffer, which still draws the change the rewind wrote
-   * away. So after a refused adoption — the ordinary state of a file an agent
-   * is writing — one keystroke froze the hold for the life of the mount, and
-   * every accept on that tab answered "A change in notes.txt is still being
-   * rewound, so nothing was accepted" when nothing was. The only ways out were
-   * ⌘S, switching tabs and back, or closing the tab, and the sentence named
-   * none of them.
+   * tab by rule, so `savedContents` cannot move, and the picture is composed
+   * from the buffer, which still draws the change the rewind wrote away. So
+   * after a refused adoption — the ordinary state of a file an agent is
+   * writing — one keystroke froze the hold for the life of the mount, and
+   * every accept on that tab answered "still being rewound" with no way out
+   * named. The fix round answered by releasing every LANDED hold the moment
+   * the tab was dirty, on the premise that "a hold buys nothing on a dirty tab".
    *
-   * A hold buys nothing on a dirty tab either way: `pressRedline` refuses a
-   * rewind there FIRST, and an accept of the bytes in front of the person is
-   * what an accept has always meant.
+   * The Phase 282.1 reverify drove THAT one step further, and the premise was
+   * false. With the hold gone, ⌥↩ on the change the person had just rewound
+   * was ACCEPTED: the baseline moved onto the agent's words while the disk held
+   * the rewind. The moment the tab was clean again — ⌘Z on the keystroke, then
+   * the watcher's read (or the tab closed and reopened, its baseline
+   * persisted) — the change was drawn BACKWARDS, the agent's words struck
+   * through and the person's own rewind as the insertion, and the next ⌥⌫ in
+   * the rhythm wrote the agent's words back into the file. So the hold STAYS on
+   * a dirty tab; the accept is refused with a sentence that names the two ways
+   * out; and once the tab is clean, the read that follows lets the hold go with
+   * nothing drawn backwards. This test is red under the fix round's rule on
+   * its first `held` and on `backwards()`.
    */
-  it('ONE KEYSTROKE AFTER A REFUSED ADOPTION DOES NOT FREEZE THE HOLD, because a dirty tab is never read again', async () => {
+  it('A LANDED HOLD STAYS ON A DIRTY TAB: the rewound change cannot be accepted, and the read that follows the tab going clean draws nothing backwards', async () => {
+    const onDisk = `${AGENT}An agent's next line.\n`;
+    seed(AGENT, onDisk);
+    const held: RewindHold[] = [];
+    const [x, y] = picture();
+    const rewind = viewRewind(held, x!);
+    await release('read#1');
+    await release('write#1');
+    expect(await rewind).toBe('wrote');
+    // The rewind is on disk; the adoption refused, so the picture still draws X.
+    expect(disk.text).toContain('brown fox leaps');
+    expect(live().savedContents).toBe(AGENT);
+    releaseHolds(held, picture(), live().savedContents);
+    expect(held).toHaveLength(1);
+    // The person saw nothing happen, so they type. ./redline-edits marks the
+    // tab dirty synchronously, and every watcher tick from here on is skipped.
+    useEditor.setState({ tabs: [{ ...live(), dirty: true }] });
+    for (let tick = 0; tick < 100; tick += 1) {
+      releaseHolds(held, picture(), live().savedContents);
+    }
+    expect(held).toHaveLength(1);
+    // ⌥↩ on X, on Y, and accept-all: every one is held, and the baseline never moves.
+    expect([viewAccept(held, x!), viewAccept(held, y!), viewAccept(held, null, 'all')]).toEqual(['held', 'held', 'held']);
+    expect(live().baseline?.text).toBe(BASE);
+    // ⌘Z on the keystroke: the tab is clean, the watcher reads the disk, and the
+    // redraw no longer draws X. The hold lets go on that read and nothing is
+    // drawn backwards, because the baseline is where the person left it.
+    useEditor.setState({ tabs: [{ ...live(), dirty: false, savedContents: disk.text }] });
+    releaseHolds(held, picture(), live().savedContents);
+    expect(held).toEqual([]);
+    expect(backwards()).toEqual([]);
+    expect(picture().map((c) => [c.del, c.ins])).toEqual([['jumps', 'leaps'], ['', "An agent's next line.\n"]]);
+    // And the change that came next is the person's to press.
+    expect(viewAccept(held, picture()[0]!)).toBe('accepted');
+    expect(backwards()).toEqual([]);
+  });
+
+  it("MEASURED AT THE PARENT'S RULE: releasing the landed hold on the dirty tab is what draws the rewind backwards", async () => {
     const onDisk = `${AGENT}An agent's next line.\n`;
     seed(AGENT, onDisk);
     const held: RewindHold[] = [];
@@ -303,30 +349,30 @@ describe('a second chord while a rewind is being written', () => {
     await release('read#1');
     await release('write#1');
     expect(await rewind).toBe('wrote');
-    // The adoption refused, so the picture still draws X and the hold stands.
-    expect(live().savedContents).toBe(AGENT);
-    releaseHolds(held, picture(), live().savedContents, live().dirty);
-    expect(held).toHaveLength(1);
-    // The person saw nothing happen, so they type. ./redline-edits marks the
-    // tab dirty synchronously (this phase's own typing rule).
     useEditor.setState({ tabs: [{ ...live(), dirty: true }] });
-    // Every watcher tick from here on is skipped, and every redraw draws X.
-    for (let tick = 0; tick < 100; tick += 1) {
-      releaseHolds(held, picture(), live().savedContents, live().dirty);
-    }
-    expect(held).toEqual([]);
+    // The fix round's third clause, done by hand: a landed hold let go on dirty.
+    held.splice(0, held.length);
+    // The accept the fix round's own test pinned as `accepted`...
     expect(viewAccept(held, x!)).toBe('accepted');
-    expect(toasts).toEqual([]);
+    // ...and the step it stopped short of. The tab goes clean and the watcher reads.
+    useEditor.setState({ tabs: [{ ...live(), dirty: false, savedContents: disk.text }] });
+    expect(backwards().map((c) => [c.del, c.ins])).toEqual([['red', 'brown']]);
+    // The next ⌥⌫ in the rhythm, on that backwards change, writes "red" back.
+    const again = viewRewind(held, picture()[0]!);
+    await release('read#2');
+    await release('write#2');
+    expect(await again).toBe('wrote');
+    expect(disk.text).toContain('red fox leaps');
   });
 
-  it('CONTROL: a hold still IN THE AIR is not let go by a dirty tab, because that is the window ⌥⌫ then ⌥↩ lives in', async () => {
+  it('CONTROL: a hold still IN THE AIR is not let go by a dirty tab either, because that is the window ⌥⌫ then ⌥↩ lives in', async () => {
     seed(AGENT, AGENT);
     const held: RewindHold[] = [];
     const [x] = picture();
     const rewind = viewRewind(held, x!);
     // The person types while the write is on its way to main.
     useEditor.setState({ tabs: [{ ...live(), dirty: true }] });
-    releaseHolds(held, picture(), live().savedContents, live().dirty);
+    releaseHolds(held, picture(), live().savedContents);
     expect(held).toHaveLength(1);
     expect(viewAccept(held, x!)).toBe('held');
     await release('read#1');
@@ -351,7 +397,7 @@ describe('a second chord while a rewind is being written', () => {
     // X is drawn byte for byte, from bytes read AFTER the write: it is the
     // agent's change now, and pressable.
     expect(picture().some((c) => c.off === x!.off && c.del === x!.del && c.ins === x!.ins)).toBe(true);
-    releaseHolds(held, picture(), live().savedContents, live().dirty);
+    releaseHolds(held, picture(), live().savedContents);
     expect(held).toEqual([]);
     expect(viewAccept(held, x!)).toBe('accepted');
   });
@@ -386,6 +432,15 @@ describe('the sentences', () => {
     expect(sentences.redlineHeldSentence('rewind', 'notes.txt')).toBe('That change in notes.txt is already being rewound.');
     expect(sentences.redlineHeldSentence('accept', 'notes.txt')).toBe('A change in notes.txt is still being rewound, so nothing was accepted.');
   });
+
+  it('PHASE 282.1: on a dirty tab the accept sentence names the way out, and the rewind sentence has no dirty form', () => {
+    expect(sentences.redlineHeldSentence('accept', 'notes.txt', true)).toBe(
+      'A change in notes.txt was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your edits first, then accept.'
+    );
+    expect(sentences.redlineHeldSentence('accept', 'notes.txt', false)).toBe(sentences.redlineHeldSentence('accept', 'notes.txt'));
+    // A rewind is refused on a dirty tab before it can be held, so there is nothing to say.
+    expect(sentences.redlineHeldSentence('rewind', 'notes.txt', true)).toBe(sentences.redlineHeldSentence('rewind', 'notes.txt'));
+  });
 });
 
 describe('a key repeat', () => {
@@ -414,6 +469,8 @@ describe("the view's wiring, read as source", () => {
     expect(accept).toMatch(/pressAccept\([\s\S]*holds:/);
     expect(press).toContain('redlineHeldSentence(');
     expect(accept).toContain('redlineHeldSentence(');
+    // PHASE 282.1: the accept's sentence is chosen by the LIVE tab's dirty flag.
+    expect(accept).toMatch(/redlineHeldSentence\('accept', live\.name, live\.dirty\)/);
     const adopt = press.indexOf('adoptWritten(');
     expect(adopt).toBeGreaterThan(-1);
     expect(press.indexOf('landHold(', adopt)).toBeGreaterThan(adopt);

@@ -23,6 +23,7 @@ The operator set the style on 2026-08-23 by rewriting every entry, and it binds 
 - The Claude usage meter no longer says "Sign in with Claude Code to see usage" while you are signed in. Tortie now reads the same keychain item Claude Code itself reads, where before a stray item with the same name could answer first; a keychain that cannot be read keeps the last numbers rather than claiming you are signed out.
 - With the session list on the right and no session in the project, the usage meters sit at the bottom of the list where they sit once a session exists, instead of halfway down it.
 - Entering session focus with ⇧⌘↩ keeps the keyboard in your session, so you can type at once and press the chord again to leave; it used to land on nothing until you clicked. The chord also no longer sends Enter to the session, which could submit whatever you had typed. Keys pressed during the brief animation are dropped, and Escape inside the mode now goes to your agent, so the chord is the way out.
+- Closing the Settings window while the settings file cannot be read no longer drops a shell variable name you confirmed.
 
 ## 0.107.0 (2026-09-16)
 

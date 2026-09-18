@@ -1375,8 +1375,6 @@ function persistSettings(next: GmuxSettings): GmuxSettings {
   // settings, so the dropped names are gone from settings.json. Saying they are
   // still being ignored would be a sentence about a file that no longer says
   // what it said.
-  shapeEnvRejections = { shared: [], sharedOver: 0, unnamed: 0 };
-  sealEnvRejections = noSealEnvRejections();
   // PHASE 278. The candidates go with them, for the same reason and one more:
   // `writeFile` below writes the seal-filtered settings, so the file's own
   // entries are now the settings' own entries and holding the old ones would
@@ -1385,9 +1383,21 @@ function persistSettings(next: GmuxSettings): GmuxSettings {
   // loss permanent — it wrote the settings the cap had already emptied and
   // re-sealed to them. Now the pass has put the confirmed name back before this
   // runs, so the save writes the confirmed name and drops the junk.
-  fileEnvEntries = { perAgent: {}, shared: [] };
+  settingsHalfWritten();
   writeFile(cached);
   return settings;
+}
+
+/**
+ * The settings half of the file is about to be written from `sealChecked`, so
+ * every report about the LOAD is now about a file that no longer says what it
+ * said. Two callers: `persistSettings`, and the one arm of
+ * `saveSettingsWindowBounds` that cannot leave the settings half alone.
+ */
+function settingsHalfWritten(): void {
+  shapeEnvRejections = { shared: [], sharedOver: 0, unnamed: 0 };
+  sealEnvRejections = noSealEnvRejections();
+  fileEnvEntries = { perAgent: {}, shared: [] };
 }
 
 type SettingsListener = (settings: GmuxSettings) => void;
@@ -1593,7 +1603,8 @@ export function saveSettingsWindowBounds(bounds: SettingsWindowBounds): void {
   // Bounds are written WITHOUT re-sealing: this path must not rewrite the
   // settings half of the file, so a window move can neither launder an
   // unsealed danger flag onto disk nor delete a sealed one.
-  cached = { ...loadFile(), settingsWindowBounds: bounds };
+  const held: SettingsFile = { ...loadFile(), settingsWindowBounds: bounds };
+  cached = held;
   // THE PHASE 278 FIX ROUND MADE THE COMMENT ABOVE TRUE. This used to write
   // `cached`, and `cached.settings` is the SANITIZED settings: every list cut
   // at sixteen in file order, and every value this build does not offer
@@ -1606,8 +1617,43 @@ export function saveSettingsWindowBounds(bounds: SettingsWindowBounds): void {
   // So the file is read again and ONE key is replaced. Everything else is
   // written back exactly as the file holds it, including the seal blob. Nothing
   // new can be admitted this way, because nothing is sealed here and the next
-  // load asks the seal about every name, exactly as it asks today. A missing or
-  // unreadable file has no settings half to keep, and gets `cached` as before.
+  // load asks the seal about every name, exactly as it asks today.
   const onDisk = readSettingsObject();
-  writeFile(onDisk !== null ? { ...onDisk, settingsWindowBounds: bounds } : cached);
+  if (onDisk !== null) {
+    writeFile({ ...onDisk, settingsWindowBounds: bounds });
+    return;
+  }
+  // PHASE 282.1. A MISSING OR UNREADABLE FILE HAS NO SETTINGS HALF TO KEEP,
+  // and the fix round's arm for it wrote `cached` — which is the Phase 278
+  // write it had just removed from the readable path, one door over: the
+  // SANITIZED list, cut at sixteen in file order, beside the old seal. The
+  // reverify drove a file truncated at the re-read (a hand edit with a syntax
+  // error, or an editor mid-write, which is the population Phase 278 is
+  // about) and read the confirmed seventeenth name dropped from disk, the
+  // seal left beside a state that no longer held it, and the next launch
+  // reporting it missing on both cards.
+  //
+  // What is in memory is better than the cut list: `sealChecked` is this
+  // load's finished answer, the confirmed names put back and the junk
+  // dropped, and the seal on disk covers exactly those names — it is what
+  // `persistSettings` writes, minus the re-seal, which this door still never
+  // does. So that is what is written, and this arm is the one place besides
+  // `persistSettings` that writes the settings half, so the load's reports
+  // are cleared the same way. When the seal's answer is NOT final — the
+  // keystore not ready, so `getSettings` answered with every danger value
+  // stripped and cached nothing — nothing is written at all: a bounds write
+  // that stripped a confirmed flag from disk would be worse than a window
+  // that opens where it did last time, and the bounds stay in memory for this
+  // run.
+  const settings = getSettings();
+  if (sealChecked === null) {
+    settingsLog.warn(
+      'settings.json could not be read and the seal is not open, so the Settings window bounds were not written'
+    );
+    return;
+  }
+  const healed: SettingsFile = { ...held, settings };
+  cached = healed;
+  settingsHalfWritten();
+  writeFile(healed);
 }

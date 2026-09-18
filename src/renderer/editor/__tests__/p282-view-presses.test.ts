@@ -536,6 +536,58 @@ describe('the presses, through the mounted view', () => {
     expect({ drawn: drawn(), toasts }).toEqual({ drawn: ['"beta"->"BETA"'], toasts: [] });
   });
 
+  /**
+   * PHASE 282.1. THE KEYSTROKE INSIDE THE WRITE, through the view. The
+   * reverify's attack drove this shape and read the fix round's own rule
+   * unimplemented for it: the hold landed on a tab that had gone dirty inside
+   * the write, no dependency of the release effect moved at the landing, and
+   * every ⌥↩ answered "still being rewound" with nothing said about the way out.
+   * Its re-derive then measured that releasing the hold there is the harm: the
+   * accept moves the baseline onto the agent's words and the rewind is drawn
+   * backwards once the tab is clean. So the hold STAYS, the sentence on a dirty
+   * tab names the way out, and once the person undoes the keystroke the
+   * watcher's read lets the hold go and the follower is theirs to accept.
+   */
+  it('A KEYSTROKE INSIDE THE WRITE: the landed hold stays on the dirty tab, ⌥↩ says the way out, and the read after ⌘Z lets it go with nothing drawn backwards', async () => {
+    await mount([tabOf(ID, BASE, AGENT)], AGENT);
+    await next();
+    expect(marked()).toBe('"brown"->"red"');
+    main.hold('write#1');
+    await rewind();
+    // The person types while the write is in the air: the tab is dirty at once.
+    await act(() => {
+      useEditor.getState().markDirty(ID, true);
+    });
+    await release('write#1');
+    // The rewind is on disk; the adoption refused; the picture still draws X.
+    expect({ disk: disk.text, drawn: drawn(), dirty: useEditor.getState().tabs[0]?.dirty }).toEqual({
+      disk: 'The quick brown fox leaps over the lazy dog.\n',
+      drawn: ['"brown"->"red"', '"jumps"->"leaps"'],
+      dirty: true
+    });
+    await accept();
+    await accept();
+    const whileDirty = { drawn: drawn(), toasts: [...toasts] };
+    // ⌘Z on the keystroke, then the watcher reads the file the rewind left.
+    await act(() => {
+      useEditor.getState().markDirty(ID, false);
+    });
+    await watcherReads(ID);
+    const afterRead = { drawn: drawn(), marked: marked() };
+    await accept();
+    expect({ whileDirty, afterRead, then: { drawn: drawn(), toasts: toasts.slice(2) } }).toEqual({
+      whileDirty: {
+        drawn: ['"brown"->"red"', '"jumps"->"leaps"'],
+        toasts: [
+          'A change in notes.txt was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your edits first, then accept.',
+          'A change in notes.txt was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your edits first, then accept.'
+        ]
+      },
+      afterRead: { drawn: ['"jumps"->"leaps"'], marked: '"jumps"->"leaps"' },
+      then: { drawn: [], toasts: [] }
+    });
+  });
+
   it('CONTROL: a hold belongs to the tab it was pressed on, and another tab in the same view accepts', async () => {
     const OTHER = '/repo/other.txt';
     await mount([tabOf(ID, BASE, AGENT), tabOf(OTHER, 'one two\n', 'one TWO\n')], AGENT);

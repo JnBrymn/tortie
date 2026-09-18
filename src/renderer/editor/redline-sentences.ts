@@ -201,15 +201,38 @@ export function redlineUndoRefusalSentence(
  * are refused for the same reason and a per-change accept may name a different
  * change from the one being rewound — so the sentence says "a change", never
  * "that change".
+ *
+ * PHASE 282.1. AND A SECOND ACCEPT SENTENCE FOR A DIRTY TAB, because there the
+ * hold has no end the person can wait for. A rewind that landed while the tab
+ * trailed disk is not adopted, and a tab with unsaved edits is never re-read
+ * (./tab-io `refreshRepo`), so the picture goes on drawing the change the
+ * rewind wrote away until the tab is saved or its edits are undone. The
+ * reverify measured what letting the hold go there does — the person's own
+ * rewind drawn backwards once the tab is clean again — so the hold stays, and
+ * the sentence that refuses the accept names the two ways out in the words the
+ * `dirty` refusals above already use. It is said whenever the tab is dirty at
+ * the press, a hold in the air included: the adoption will refuse a dirty tab
+ * when that write lands, so the way out is the same.
  */
-const HELD_SENTENCES: Record<'rewind' | 'accept', string> = {
+const HELD_SENTENCES: Record<'rewind' | 'accept' | 'acceptDirty', string> = {
   rewind: 'That change in {name} is already being rewound.',
-  accept: 'A change in {name} is still being rewound, so nothing was accepted.'
+  accept: 'A change in {name} is still being rewound, so nothing was accepted.',
+  acceptDirty:
+    'A change in {name} was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your edits first, then accept.'
 };
 
-/** One plain sentence for a press held back by a rewind still in flight. */
-export function redlineHeldSentence(verb: 'rewind' | 'accept', name: string): string {
-  return HELD_SENTENCES[verb].replace('{name}', name);
+/**
+ * One plain sentence for a press held back by a rewind still in flight. For
+ * an accept, `dirty` is whether the tab has unsaved edits at the press, which
+ * chooses the sentence that names the way out.
+ */
+export function redlineHeldSentence(
+  verb: 'rewind' | 'accept',
+  name: string,
+  dirty = false
+): string {
+  const key = verb === 'accept' && dirty ? 'acceptDirty' : verb;
+  return HELD_SENTENCES[key].replace('{name}', name);
 }
 
 /**

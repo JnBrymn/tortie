@@ -57,6 +57,13 @@
  *  26. The model built from a string captured before the await — rule 27b.
  *  27. A text typed on a picture the view has since replaced, applied anyway —
  *     rule 27c.
+ *  28-31. PHASE 282.1. The four shapes that walked past rules 11, 18, 19 and
+ *     20 while each read mention order alone: the auto test kept and its
+ *     return removed (11), a timer mentioned before the queue and then queued
+ *     (18), the model asked but not compared with the slot's (19), and dirty
+ *     read before the close with nothing asked again (20). The reverify
+ *     planted each and read the gate green; the first also left all 99 tests
+ *     of the five save suites green.
  *
  * Then the files are restored and the gate must exit ZERO again.
  */
@@ -532,6 +539,49 @@ try {
     restore();
   }
 
+  // ------------------------------------------------------------ 28 to 31
+  // PHASE 282.1. THE FOUR SHAPES THAT WALKED PAST RULES 11, 18, 19 AND 20 while
+  // each read mention order alone. The reverify planted every one and read the
+  // gate green; W11 also left all 99 tests of the five save suites green, so
+  // nothing in the tree pinned the refusal rule 11's sentence claimed. Each of
+  // the four keeps the mention the old rule looked for and removes the effect.
+  {
+    ablate(TAB_IO, "    if (reason === 'auto' && !guarded) return false;\n", "    if (reason === 'auto' && !guarded) void 0;\n");
+    const { code, failed } = runGate();
+    say(`28 (the auto test kept, its return removed): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('28. an auto test that refuses nothing passed the gate');
+    if (!failed.includes('11')) problems.push('28. rule 11 did not go red');
+    restore();
+  }
+  {
+    ablate(TAB_IO, "    if (reason === 'auto') return false;\n    if (held.next === null) {", "    if (reason === 'auto') void 0;\n    if (held.next === null) {");
+    const { code, failed } = runGate();
+    say(`29 (a timer mentioned before the queue, then queued): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('29. a timer mentioned before the queue and then queued passed the gate');
+    if (!failed.includes('18')) problems.push('29. rule 18 did not go red');
+    restore();
+  }
+  {
+    ablate(TAB_IO, "    if (slots.has(id) || getWorkingModel(id) !== slot.model) {\n", "    if (slots.has(id) || getWorkingModel(id) === undefined) {\n");
+    const { code, failed } = runGate();
+    say(`30 (the model asked but not compared with the slot's): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push("30. a lifetime read but not compared with the slot's model passed the gate");
+    if (!failed.includes('19')) problems.push('30. rule 19 did not go red');
+    restore();
+  }
+  {
+    ablate(
+      EDITOR_STORE,
+      "          if (live.dirty) {\n            promptDirtyClose(live, next);\n            return;\n          }\n          get().forceCloseTab(tab.id);",
+      "          if (live.dirty) {\n            void 0;\n          }\n          get().forceCloseTab(tab.id);"
+    );
+    const { code, failed } = runGate();
+    say(`31 (dirty read before the close, nothing asked again): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('31. a close prompt that reads dirty and asks nothing passed the gate');
+    if (!failed.includes('20')) problems.push('31. rule 20 did not go red');
+    restore();
+  }
+
   // ---------------------------------------------------------------- restored
   {
     const { code } = runGate();
@@ -560,6 +610,6 @@ if (problems.length > 0) {
   process.exit(1);
 }
 say(
-  'PASS: 27 ablations, each red on the rule that owns it, and the tree restored byte for byte by sha256.'
+  'PASS: 31 ablations, each red on the rule that owns it, and the tree restored byte for byte by sha256.'
 );
 process.exit(0);

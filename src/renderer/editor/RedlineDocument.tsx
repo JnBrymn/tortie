@@ -638,8 +638,11 @@ export function RedlineDocument({
       );
       // PHASE 282. Said, and nothing else: no move is armed and the keyboard
       // stays where it is, because nothing was taken out of the picture.
+      // PHASE 282.1: on a dirty tab the sentence names the way out, because a
+      // dirty tab is never re-read and the hold has no end the person can
+      // wait for (./redline-sentences says why the hold is kept there).
       if (result.outcome === 'held') {
-        useApp.getState().toast('info', redlineHeldSentence('accept', live.name));
+        useApp.getState().toast('info', redlineHeldSentence('accept', live.name, live.dirty));
         return;
       }
       // THE KEYBOARD STAYS IN THE VIEW, and this line is a defect the
@@ -875,19 +878,20 @@ export function RedlineDocument({
   // picture: a watcher read can move the bytes without moving the composed
   // picture — a dirty buffer is drawn instead — and the release's second
   // clause, bytes somebody wrote after the rewind, must still be asked.
-  // PHASE 282'S FIX ROUND added `tab.dirty`, which is the rule's third answer
-  // rather than a fourth dependency: a dirty tab is never re-read, so neither
-  // of the other two clauses can ever become true again and a landed hold
-  // would refuse every accept on the tab for the life of the mount.
+  // PHASE 282.1 TOOK `tab.dirty` BACK OUT. The fix round had handed it in so a
+  // landed hold let go the moment the tab was dirty; the reverify drove that
+  // release into an accept of the change the person had just rewound, drawn
+  // backwards once the tab was clean again (./redline-press `releaseHolds`
+  // has the whole account). A dirty tab keeps its holds, and the accept's
+  // sentence names the way out instead.
   useLayoutEffect(() => {
     const host = hostRef.current;
     releaseHolds(
       rewindHolds.current,
       host === null ? [] : changeElements(host).map(identityOf),
-      tab.savedContents,
-      tab.dirty
+      tab.savedContents
     );
-  }, [composed, tab.savedContents, tab.dirty]);
+  }, [composed, tab.savedContents]);
   // PHASE 251. THE ROOM THE PAGE HAS, and the token that re-measures the rail
   // bar when the panel is dragged. It observes the SCROLLER rather than the
   // view, because the scroller is exactly the box the page lives in, so the

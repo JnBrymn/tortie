@@ -807,3 +807,72 @@ one store transition wide and heals, as §3.2 states. `probe:p268`'s arm G is ru
 value of `repoPath`, the project roots, the remote flag or the read-only answer makes `autoSaveSkipReason`
 answer null for a file outside every open root over 20,000 random tabs, and `tab-io.ts`'s `save` carries a
 second independent guard over the same predicate.
+
+## 11. CORRECTIONS AFTER PHASE 282.1 (the reverify of 2026-09-18)
+
+Two independent verifiers per item ran against `ecaa1353`. One ruling in §10 is withdrawn here and one limit is
+added; everything else in §10 stands.
+
+### 11.1 §10.2 IS WITHDRAWN: A DIRTY TAB KEEPS ITS LANDED HOLDS
+
+§10.2 ruled that a landed hold is released at once on a dirty tab, on the premise that "a hold buys nothing on a
+dirty tab either way". The re-derive verifier drove that release one step past the fix round's own test
+(`p282-one-press.test.ts` stopped at the accept answering `accepted`) through the shipping press, accept, write,
+composer and store: with the hold gone, ⌥↩ on the change the person had just rewound was accepted, which moved the
+baseline onto the AGENT's words while the disk held the rewind; the moment the tab was clean again — ⌘Z on the
+keystroke and then the watcher's read, or the tab closed and reopened with its persisted baseline — the change was
+drawn BACKWARDS (`[['red','brown'], ['jumps','leaps']]`, the agent's words struck through and the person's own
+rewind as the insertion), and the next ⌥⌫ in the rhythm wrote the agent's words back into the file
+(`disk.text` contains `red fox leaps`). The control with the hold kept answered `held`, and after the same steps
+drew nothing backwards. So the premise was false: the hold buys exactly the refusal of that accept. The attack
+verifier independently found the ruling's own arm unimplemented for a keystroke INSIDE the write (no dependency of
+the release effect moves at the landing, so the hold was not released "at once" but only at the next keystroke,
+save or tab switch); that arm no longer exists.
+
+**RULED: the parent's two clauses, and nothing else.** `releaseHolds` takes no `dirty` at all, so the clause cannot
+return by an argument; the view's release effect is keyed on `[composed, tab.savedContents]` again;
+`conformance:redline` rule 40 no longer asks for the flag (11 of 11 ablations, the dirty-flag one withdrawn).
+The cost is the one §10.2 was written against, and it is now a refusal with a sentence rather than a silent
+freeze: on a dirty tab whose rewind has not reached the picture, every accept answers `held` with
+`A change in {name} was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your
+edits first, then accept.` (`redlineHeldSentence('accept', name, dirty)`, `acceptDirty` in
+`./redline-sentences`), chosen by the LIVE tab's `dirty` at the press, a hold in the air included, because the
+adoption will refuse a dirty tab when that write lands and the way out is the same. Both ways out are real and
+end the hold: ⌘Z to clean leads to the watcher's read (the picture stops drawing the change, and the bytes are
+neither `landed.saved` nor `landed.was`); ⌘S leads to the stale dialog, whose Overwrite moves `savedContents` to
+bytes that are neither. The bind the person is in there — a buffer whose typing sits on a picture the disk has
+left behind — is §3.2's and the adoption's, not the hold's, and this round does not widen into it.
+
+Refused, by name: the re-derive verifier's narrowing (keep the hold, refuse accept-all and the held change only,
+let a per-change accept of a DIFFERENT change through and shift every held offset by the accept's
+`ins.length - del.length`). It would change §1.2's row for a different change, which no finding proved wrong,
+and it adds a second coordinate to the hold; it is the design a later entry takes if the operator wants accepts
+back on a dirty tab, and it is written here so that entry does not re-derive it.
+
+Red without it: `p282-one-press.test.ts`, "A LANDED HOLD STAYS ON A DIRTY TAB", with "MEASURED AT THE PARENT'S
+RULE" beside it doing the release by hand and reading the backwards draw; `p282-view-presses.test.ts`, "A
+KEYSTROKE INSIDE THE WRITE", through the mounted view.
+
+### 11.2 §10.3 GAINS A STATED LIMIT: A WALK THAT NEVER SETTLES
+
+The serializer holds the running walk's promise until it settles, and `fs:readFile` has no deadline on the local
+channel (`git:showHead` beside it does). A read that hangs — a stalled network volume — now holds `refreshRunning`
+for the life of the renderer and every later tick of that repository queues behind it, so the editor stops
+following the agent's edits in that project until restart, with nothing said; before the serializer that read cost
+one tick. Reasoned, not driven (not reproducible on a local disk); stated in the serializer's own comment in
+`tab-io.ts` and here. A deadline that forgets the running walk is a design decision for its own entry; the W1
+clause would drop the late answer when a fresh walk had moved `savedContents` under it.
+
+### 11.3 What the reverify checked and did not move, re-run by the fix round at `ecaa1353`
+
+The verifiers' own suites, run again by the fixer before the fix: the queue (a walk that throws, a project closed
+mid-walk, two repositories at once, three ticks while one runs with exactly one more run and the newest bytes
+winning, a rename during a walk) neither starved nor deadlocked; no two drawn changes share an offset over 3,000
+generated pictures; item 2's serialized `refreshRepo` on top of Phase 277's live-tab read found no interleaving.
+The re-derive verifier's landing oracle agreed with the shipping landing on every quiet press and on every raced
+press but ONE (seed 352, `n=3`, both verbs): the agent's line merged into the follower's region and re-cut it into
+three pieces, the shipping landing took the piece at the follower's span start (index 0) and the oracle the third
+(index 2). That is §2.2's stated limit — the follower re-cut by a write above in the same redraw — the verifier did
+not file it, and this round does not move it. The fix round's `conformance:save` rules were re-read by a verifier
+who did not write them; rules 11, 18, 19 and 20 pinned mention order alone and are tightened in
+`build/p277/SPEC.md`'s corrections.

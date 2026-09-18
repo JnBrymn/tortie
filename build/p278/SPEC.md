@@ -834,3 +834,27 @@ than what was planned. Where it conflicts with an earlier section, this section 
    probe's lookup, so they were deleted rather than committed.
 8. **The card gives a count for a name the file no longer holds, not the name (§4.2).** A verifier asked for the
    name; §4.2's choice of a count stands. app.log names every missing key.
+
+## Corrections after Phase 282.1 (the reverify of 2026-09-18)
+
+1. **The bounds door's unreadable-file arm wrote the Phase 278 shape one door over (item 2 above).** The fix
+   round's `saveSettingsWindowBounds` re-reads the file and replaces one key, and when the re-read fails — a file
+   truncated by a hand edit or an editor mid-write, a JSON array, a missing file — it fell back to writing
+   `cached`, whose `settings` is the SANITIZED list cut at sixteen in file order, beside the old seal. Two
+   reverifiers reproduced it independently: 16 junk names plus a confirmed `AUTH` on both lists, the file
+   truncated by 20 bytes at the re-read, then `saveSettingsWindowBounds` → the disk held 16 junk names and no
+   `AUTH` on both lists with the seal kept, and the next launch delivered nothing from either list and reported
+   `sharedMissing: 1`, `perAgentMissing: {claude: 1}`. The arm now writes THIS LOAD'S HEALED SETTINGS — `getSettings()`,
+   the confirmed names put back and the junk dropped, which the seal on disk covers exactly, so it is what
+   `persistSettings` writes minus the re-seal this door still never does — and clears the load's reports the same
+   way (`settingsHalfWritten`, shared with `persistSettings`). When the seal's answer is not final (keystore not
+   ready, so `getSettings` answered with every danger value stripped and cached nothing) it writes NOTHING and
+   logs one line, because a bounds write that stripped a confirmed flag would be worse than a window that opens
+   where it did last time; the bounds stay in memory for the run. A fresh install with no file still gets its
+   bounds written beside the defaults. `p278-env-cap.test.ts`, "CLOSING THE SETTINGS WINDOW keeps the repair",
+   gains the three unreadable arms, the seal-not-open arm and the fresh-install control; the four new arms are
+   red at `ecaa1353`.
+2. **A settings write racing a bounds save cannot interleave (item 3 of the Phase 282.1 entry).** Both are
+   synchronous in main — `readFileSync`, `writeFileSync`, `renameSync`, no await between the re-read and the
+   write — so a name confirmed "between" them lands whole before or after. Read, not driven; the attack verifier's
+   arm (c) drives the two orders and reads both files whole.

@@ -989,3 +989,49 @@ describe('fix round: the watcher re-reads the tab after it waits', () => {
     expect(r.tab().savedContents).toBe(AGENT);
   });
 });
+
+/**
+ * PHASE 282.1. THE SECOND GUARD, RUN. `conformance:save` rule 11 says `saveOnce`
+ * refuses the plain door for a timer, and the reverify showed that until this
+ * round nothing in the tree pinned that with anything that runs: replacing the
+ * refusal with `void 0` left the gate green (it read mention order) and every
+ * one of the five save suites green, because ./auto-save's own skip list
+ * answers first for a draft and for a file outside every root. This drives the
+ * ladder DIRECTLY, past that first guard, the way `drainQueue` or any later
+ * caller of `save` could, and reads the plain door's own reads and writes.
+ */
+describe("Phase 282.1: a timer's request never reaches the plain door, whatever asked first", () => {
+  const OUTSIDE = '/elsewhere/notes.md';
+
+  it("a file outside every open project: 'auto' answers false with no read and no write; 'explicit' takes the door", async () => {
+    // The id keys the model and the tab; the PATH is what `fileInRepo` asks.
+    const r = rig({ path: OUTSIDE, relPath: '../elsewhere/notes.md', dirty: true }, FIRST);
+    readFile.mockResolvedValue({ contents: READ, truncated: false });
+
+    const timer = await r.io.save(ID, 'auto');
+    const afterTimer = { answered: timer, reads: readFile.mock.calls.length, plainWrites: writeFile.mock.calls.length, guardedWrites: writeGuarded.mock.calls.length };
+
+    // CONTROL: the same tab, a person's ⌘S. The plain door reads the file
+    // first and, finding it as shown, writes.
+    const person = await r.io.save(ID, 'explicit');
+    expect({
+      afterTimer,
+      person: { answered: person, reads: readFile.mock.calls.length, plainWrites: writeFile.mock.calls.length }
+    }).toEqual({
+      afterTimer: { answered: false, reads: 0, plainWrites: 0, guardedWrites: 0 },
+      person: { answered: true, reads: 1, plainWrites: 1 }
+    });
+  });
+
+  it("a draft that has never been saved: 'auto' answers false with no read and no write", async () => {
+    const r = rig({ draft: 'composed text', savedContents: '', dirty: true }, FIRST);
+    readFile.mockResolvedValue({ contents: '', truncated: false });
+    const timer = await r.io.save(ID, 'auto');
+    expect({ answered: timer, reads: readFile.mock.calls.length, plainWrites: writeFile.mock.calls.length, guardedWrites: writeGuarded.mock.calls.length }).toEqual({
+      answered: false,
+      reads: 0,
+      plainWrites: 0,
+      guardedWrites: 0
+    });
+  });
+});

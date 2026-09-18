@@ -728,3 +728,24 @@ through it.
 10. **Where S6 lives.** The store's settings subscription (S6) is owned by
     `src/renderer/editor/__tests__/p277-store-close-and-policy.test.ts`, and its two tests go red when
     `autoSave.notePolicyChanged()` is removed from store.ts.
+
+## Corrections after Phase 282.1 (the reverify of 2026-09-18)
+
+1. **Rules 11, 18, 19 and 20 of `conformance:save` pinned MENTION ORDER, not the refusal, re-check or comparison
+   their sentences claimed.** The re-derive verifier planted, one at a time, `if (reason === 'auto' && !guarded)
+   void 0;` in `saveOnce`, `if (reason === 'auto') void 0;` in `withSaveSlot`, `getWorkingModel(id) === undefined`
+   in `drainQueue`, and `if (live.dirty) { void 0 }` in `promptDirtyClose`, and read the gate green on every one.
+   The first also left all 99 tests of the five save suites green, because ./auto-save's own skip list answers
+   first for a draft and for a file outside every root, so NOTHING in the tree pinned rule 11's property. Each
+   rule now reads the effect: 11 and 18 read the STATEMENT holding the auto test (`statementHolding`) and require a
+   `return` (18: `return false`); 19 requires the literal `!== slot.model` before `holdSlot(`; 20 requires
+   `promptDirtyClose(` between `live.dirty` and `forceCloseTab(`. `ablation:p268` arms 28 to 31 are those four
+   shapes, each red on its rule (31 of 31). Rule 21's shape (`arm(id)` after the await, made unreachable by
+   `&& trigger !== 'delay'`) is caught by two rows of `p277-timer-policy.test.ts` and the rule's sentence now says
+   it reads a mention; it is not tightened, because pinning reachability by text would pin the condition's
+   spelling.
+2. **Rule 11's property is now held by something that runs.** `p277-save-completion.test.ts`, "a timer's request
+   never reaches the plain door, whatever asked first", drives `io.save(id, 'auto')` past the scheduler's skip
+   list for a file outside every open project and for a never-saved draft: false, no read, no write; the
+   `explicit` control takes the door. Under the planted `void 0` the timer wrote through the plain door
+   (`plainWrites: 1`).

@@ -324,6 +324,27 @@ function orderInTail(tail, _marker, first, second) {
 }
 
 /**
+ * The STATEMENT that holds `needle` inside the body of `name`: from the first
+ * mention of `needle` to the `;` that ends it. Null when either is absent.
+ *
+ * PHASE 282.1. Rules 11 and 18 said "refuses" and read mention ORDER: the
+ * reverify replaced `if (reason === 'auto' && !guarded) return false;` with
+ * `if (reason === 'auto' && !guarded) void 0;` and both the gate and all 99
+ * tests of the five save suites stayed green, so nothing in the tree pinned
+ * the refusal the rules' own sentences claimed. A test that is mentioned
+ * before a door is not a test that answers; the statement holding it has to
+ * RETURN. This reader hands back that statement so a rule can ask.
+ */
+function statementHolding(code, name, needle) {
+  const body = namedFunctions(stripComments(code)).get(name);
+  if (body === undefined) return null;
+  const at = body.indexOf(needle);
+  if (at === -1) return null;
+  const end = body.indexOf(';', at);
+  return end === -1 ? body.slice(at) : body.slice(at, end);
+}
+
+/**
  * The body of the anonymous effect callback that holds `anchor`, braces
  * matched. Null when the anchor is absent or sits outside every effect.
  *
@@ -1342,14 +1363,22 @@ const WRITE_CHANNELS = ['fs:writeFile', 'fs:writeGuarded'];
 {
   const code = source(TAB_IO);
   const ordered = bodyOrder(code, 'saveOnce', "reason === 'auto'", 'saveOutsideProject');
+  // PHASE 282.1. The statement that tests the reason must RETURN, or the
+  // "refusal" is a mention: `void 0` in its place walked past this rule and
+  // every save suite (the product was saved by ./auto-save's own skip list,
+  // which is a different guard). p277-save-completion.test.ts drives the
+  // same question at runtime, "a timer's request never reaches the plain door".
+  const refusal = statementHolding(code, 'saveOnce', "reason === 'auto'");
   if (ordered === null) {
     fail(
       "11. saveOnce in " + TAB_IO + " does not test `reason === 'auto'` before it names saveOutsideProject, so a timer can reach the unguarded door"
     );
   } else if (ordered === false) {
     fail('11. saveOnce tests the auto reason AFTER it names the plain door, which is too late');
+  } else if (refusal === null || !/\breturn\b/.test(refusal)) {
+    fail("11. saveOnce tests `reason === 'auto'` but the statement holding the test does not return, so a timer is mentioned before the plain door rather than refused it");
   } else {
-    say("11. saveOnce refuses the plain, unguarded door for reason 'auto' before the door is named");
+    say("11. saveOnce refuses the plain, unguarded door for reason 'auto' — the test returns — before the door is named");
   }
 }
 
@@ -1631,18 +1660,24 @@ const PROJECT_CLOSED_SENTENCE =
 {
   const code = source(TAB_IO);
   const ordered = bodyOrder(code, 'withSaveSlot', "reason === 'auto'", 'held.next =');
+  // PHASE 282.1. The test must ANSWER `false`, not merely precede the queue:
+  // `void 0` in its place kept this rule green while a timer queued.
+  const refusal = statementHolding(code, 'withSaveSlot', "reason === 'auto'");
   if (ordered === null) {
     fail("18. withSaveSlot does not test `reason === 'auto'` and then create a follow-up, so this rule read nothing");
   } else if (ordered === false) {
     fail('18. withSaveSlot creates a follow-up before it refuses a timer, so a timer can wait in the slot and write later');
+  } else if (refusal === null || !/\breturn false\b/.test(refusal)) {
+    fail("18. withSaveSlot tests `reason === 'auto'` but the statement holding the test does not answer `return false`, so a timer is mentioned before the queue rather than refused it");
   } else {
-    say("18. withSaveSlot refuses a timer's request before it can create a follow-up, so no timer waits in the slot");
+    say("18. withSaveSlot answers a timer's request false before it can create a follow-up, so no timer waits in the slot");
   }
 }
 
 // Rule 19. The drained follow-up checks the LIFETIME before it takes the slot,
-// and runs as a person's save. `getWorkingModel` before `holdSlot`, and the
-// reason passed is the literal 'explicit'.
+// and runs as a person's save. `getWorkingModel` before `holdSlot`, the model
+// COMPARED with the slot's own (`!== slot.model`), and the reason passed is
+// the literal 'explicit'.
 {
   const body = namedFunctions(stripComments(source(TAB_IO))).get('drainQueue');
   if (body === undefined) {
@@ -1650,31 +1685,51 @@ const PROJECT_CLOSED_SENTENCE =
   } else {
     const model = body.indexOf('getWorkingModel(');
     const hold = body.indexOf('holdSlot(');
+    // PHASE 282.1. Asking `getWorkingModel` is not comparing it: a
+    // `getWorkingModel(id) === undefined` in the same place kept this rule
+    // green while a follow-up from a closed tab wrote the reopened one.
+    const compared = body.indexOf('!== slot.model');
     if (model === -1 || hold === -1 || model > hold) {
       fail('19. drainQueue does not ask getWorkingModel before holdSlot, so a follow-up from a closed tab can write the reopened one');
+    } else if (compared === -1 || compared > hold) {
+      fail("19. drainQueue asks getWorkingModel but never compares it with the slot's own model (`!== slot.model`) before holdSlot, so the lifetime is read and not checked");
     } else if (!body.includes("saveOnce(id, 'explicit')")) {
       fail("19. drainQueue does not run saveOnce(id, 'explicit'), so a stored reason can reach a door as a timer");
     } else {
-      say("19. drainQueue asks the tab's lifetime before it takes the slot, and runs the follow-up as saveOnce(id, 'explicit')");
+      say("19. drainQueue compares the tab's model with the slot's before it takes the slot, and runs the follow-up as saveOnce(id, 'explicit')");
     }
   }
 }
 
-// Rule 20. The close prompt's Save re-reads `dirty` before it closes. True
-// means a write landed, not that the tab is clean.
+// Rule 20. The close prompt's Save re-reads `dirty` before it closes, and a
+// dirty answer ASKS AGAIN. True means a write landed, not that the tab is
+// clean.
 {
-  const ordered = bodyOrder(source(EDITOR_STORE), 'promptDirtyClose', 'live.dirty', 'forceCloseTab(');
+  const code = source(EDITOR_STORE);
+  const ordered = bodyOrder(code, 'promptDirtyClose', 'live.dirty', 'forceCloseTab(');
+  // PHASE 282.1. Reading `live.dirty` is not asking again: `if (live.dirty) {
+  // void 0 }` before the close kept this rule green while the typing was
+  // discarded. The re-ask is the prompt calling itself, between the read and
+  // the close.
+  const reasks = tailOrder(code, 'promptDirtyClose', 'live.dirty', 'promptDirtyClose(', 'forceCloseTab(');
   if (ordered === null) {
     fail('20. promptDirtyClose does not read live.dirty and close the tab, so this rule read nothing');
   } else if (ordered === false) {
     fail("20. promptDirtyClose closes the tab before it reads live.dirty, so typing made during the Save is discarded without a question");
+  } else if (reasks !== true) {
+    fail('20. promptDirtyClose reads live.dirty but does not ask itself again before forceCloseTab, so a tab still dirty after its save is closed without a second question');
   } else {
-    say('20. the close prompt re-reads dirty after its save answers and asks again rather than closing unsaved typing');
+    say('20. the close prompt re-reads dirty after its save answers and asks itself again, between that read and the close, rather than closing unsaved typing');
   }
 }
 
 // Rule 21. A timer deferred by a held slot is re-armed after the save it
 // waited on, never dropped: `run` names `arm(id)` AFTER `await deps.save(`.
+//
+// PHASE 282.1. THIS RULE READS A MENTION, and its sentence now says so: an
+// `arm(id)` after the await that is guarded into unreachability keeps it
+// green. The re-arm's EFFECT is pinned by p277-timer-policy.test.ts, whose
+// two rows go red on exactly that shape; this rule is the second guard.
 {
   const body = namedFunctions(stripComments(source(AUTO_SAVE))).get('run');
   const at = body === undefined ? -1 : body.indexOf('await deps.save(');
@@ -1683,7 +1738,7 @@ const PROJECT_CLOSED_SENTENCE =
   } else if (body.indexOf('arm(id)', at) === -1) {
     fail('21. run does not re-arm after deps.save answers, so a timer refused by a held slot is dropped and the newer typing is never written');
   } else {
-    say('21. run re-arms after deps.save answers, so a timer the slot refused is deferred rather than dropped');
+    say('21. run names arm(id) after deps.save answers (a mention; p277-timer-policy.test.ts pins that the re-arm runs), so a timer the slot refused is deferred rather than dropped');
   }
 }
 

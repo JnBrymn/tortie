@@ -634,6 +634,113 @@ describe('CLOSING THE SETTINGS WINDOW keeps the repair', () => {
     expect(s.envPassthroughShared).toEqual([AUTH]);
     expect(next.getSettingsWindowBounds()).toEqual({ x: 10, y: 20, width: 800, height: 600 });
   });
+
+  /**
+   * PHASE 282.1. THE ARM THE FIX ROUND LEFT: a file that fails to parse at the
+   * re-read — a hand edit with a syntax error, or an editor mid-write, which is
+   * the population Phase 278 is about. The fix round's arm for it wrote the
+   * SANITIZED cache, the exact Phase 278 write one door over: the reverify
+   * read the confirmed seventeenth name dropped from disk, the seal left
+   * beside a state that no longer held it, and the next launch reporting it
+   * missing. The arm now writes this load's healed settings, which the seal on
+   * disk covers, so the name survives; and when the seal's answer is not final
+   * it writes nothing rather than strip a confirmed flag.
+   */
+  const BOUNDS = { x: 1, y: 2, width: 300, height: 400 };
+  function seedSeventeen(): Record<string, unknown> {
+    writeSealed(
+      {
+        envPassthrough: { [AGENT]: [...junk(16), AUTH] },
+        envPassthroughShared: [...junk(16), AUTH]
+      },
+      sealOf([`${AGENT} ${AUTH}`], [AUTH])
+    );
+    return readRaw();
+  }
+
+  it.each([
+    ['truncated by twenty bytes', (text: string): string => text.slice(0, -20)],
+    ['a JSON array rather than an object', (): string => '[1, 2, 3]\n'],
+    ['deleted', (): string | null => null]
+  ])('a file %s at the re-read: the confirmed name and the seal survive on disk, the junk does not, and the next launch delivers it', async (_what, mangle) => {
+    const before = seedSeventeen();
+    const store = await freshStore();
+    expect(store.getSettings().envPassthroughShared).toEqual([AUTH]);
+    const mangled = mangle(readFileSync(settingsPath(), 'utf8'));
+    if (mangled === null) rmSync(settingsPath());
+    else writeFileSync(settingsPath(), mangled, 'utf8');
+
+    store.saveSettingsWindowBounds(BOUNDS);
+
+    const after = readRaw();
+    const settings = after['settings'] as Record<string, unknown>;
+    expect({
+      shared: settings['envPassthroughShared'],
+      perAgent: settings['envPassthrough'],
+      seal: after['dangerSeal'] === before['dangerSeal'],
+      bounds: after['settingsWindowBounds'],
+      junkOnDisk: readFileSync(settingsPath(), 'utf8').includes('P278_JUNK_')
+    }).toEqual({
+      shared: [AUTH],
+      perAgent: { [AGENT]: [AUTH] },
+      seal: true,
+      bounds: BOUNDS,
+      junkOnDisk: false
+    });
+    // The load's reports are about a file that no longer says what it said.
+    const r = store.envRejectionsNow();
+    expect({ shared: r.shared, sharedUnread: r.sharedUnread, perAgent: r.perAgent }).toEqual({ shared: [], sharedUnread: [], perAgent: {} });
+
+    // The first load's own line about the junk it ignored is the only one so far.
+    const warnedBefore = warnings.length;
+    const next = await freshStore();
+    const s = next.getSettings();
+    expect({ shared: s.envPassthroughShared, perAgent: s.envPassthrough, bounds: next.getSettingsWindowBounds() }).toEqual({
+      shared: [AUTH],
+      perAgent: { [AGENT]: [AUTH] },
+      bounds: BOUNDS
+    });
+    const nr = next.envRejectionsNow();
+    expect({ sharedMissing: nr.sharedMissing, perAgentMissing: nr.perAgentMissing, warnings: warnings.length - warnedBefore }).toEqual({
+      sharedMissing: 0,
+      perAgentMissing: {},
+      warnings: 0
+    });
+  });
+
+  it('with the seal not open at the re-read, nothing is written and one line says so; the bounds are kept for this run', async () => {
+    seedSeventeen();
+    const store = await freshStore();
+    // The keystore has not answered: every danger value is stripped for now,
+    // and nothing is cached, so a write from here would strip a confirmed flag.
+    keystore.ready = false;
+    expect(store.getSettings().envPassthroughShared).toEqual([]);
+    const mangled = readFileSync(settingsPath(), 'utf8').slice(0, -20);
+    writeFileSync(settingsPath(), mangled, 'utf8');
+
+    store.saveSettingsWindowBounds(BOUNDS);
+
+    expect({
+      onDisk: readFileSync(settingsPath(), 'utf8'),
+      inMemory: store.getSettingsWindowBounds(),
+      warnings: warnings.length,
+      said: warnings.join('\n').includes(
+        'settings.json could not be read and the seal is not open, so the Settings window bounds were not written'
+      )
+    }).toEqual({ onDisk: mangled, inMemory: BOUNDS, warnings: 1, said: true });
+  });
+
+  it('CONTROL: a fresh install with no file yet still gets its bounds written, beside the defaults', async () => {
+    const store = await freshStore();
+    store.saveSettingsWindowBounds(BOUNDS);
+    const after = readRaw();
+    expect({ keys: Object.keys(after).sort(), bounds: after['settingsWindowBounds'] }).toEqual({
+      keys: ['settings', 'settingsWindowBounds', 'version'],
+      bounds: BOUNDS
+    });
+    const next = await freshStore();
+    expect(next.getSettingsWindowBounds()).toEqual(BOUNDS);
+  });
 });
 
 describe('THE FIRST SAVE heals the file and launders nothing', () => {

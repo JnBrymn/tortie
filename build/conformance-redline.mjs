@@ -5296,15 +5296,14 @@ function gridOf(css, cls) {
         if (!deps.includes('savedContents')) {
           out.push('the release effect does not watch savedContents, so a watcher read that moves the bytes under a dirty tab never asks whether the hold may go');
         }
-        // PHASE 282'S FIX ROUND. AND THE DIRTY FLAG, which is the release's
-        // third answer: a dirty tab is never re-read, so neither other clause
-        // can become true again. The typing path marks the tab dirty BEFORE
-        // its text reaches the buffer, so there is a render where the flag
-        // moved and the picture did not, and a release that does not watch the
-        // flag never runs for it.
-        if (!deps.includes('dirty')) {
-          out.push('the release effect does not watch the dirty flag, so a keystroke that marks the tab before its text lands never asks whether the hold may go, and a landed rewind refuses every accept on that tab for the life of the mount');
-        }
+        // PHASE 282'S FIX ROUND asked for `dirty` in these dependencies too,
+        // because it had made a dirty tab release every landed hold. PHASE
+        // 282.1 withdrew that release — the reverify measured it letting ⌥↩
+        // accept the change the person had just rewound, drawn backwards once
+        // the tab was clean again — so the effect no longer takes the flag,
+        // and this rule no longer asks for it. The rule that a dirty tab KEEPS
+        // its holds is pinned where it can run: p282-one-press.test.ts, "A
+        // LANDED HOLD STAYS ON A DIRTY TAB".
       }
     }
     // 6. A KEY REPEAT IS NOT A PRESS, and the `preventDefault()` stays in
@@ -5468,8 +5467,8 @@ function gridOf(css, cls) {
   const RELEASE_EFFECT =
     'useLayoutEffect(() => {\n' +
     '  const host = hostRef.current;\n' +
-    '  releaseHolds(rewindHolds.current, host === null ? [] : changeElements(host).map(identityOf), tab.savedContents, tab.dirty);\n' +
-    '}, [composed, tab.savedContents, tab.dirty]);';
+    '  releaseHolds(rewindHolds.current, host === null ? [] : changeElements(host).map(identityOf), tab.savedContents);\n' +
+    '}, [composed, tab.savedContents]);';
   const KEY_HANDLER =
     'const scroller = { onKeyDown: (event) => {\n' +
     '  const command = redlineCommandOf(event);\n' +
@@ -5741,19 +5740,9 @@ function gridOf(css, cls) {
     {
       name: 'the release effect stops watching savedContents',
       source: viewSource({
-        release: RELEASE_EFFECT.replace('}, [composed, tab.savedContents, tab.dirty]);', '}, [composed]);')
+        release: RELEASE_EFFECT.replace('}, [composed, tab.savedContents]);', '}, [composed]);')
       }),
       want: 'does not watch savedContents'
-    },
-    {
-      name: 'the release effect stops watching the dirty flag, so the hold outlives the press',
-      source: viewSource({
-        release: RELEASE_EFFECT.replace(
-          '}, [composed, tab.savedContents, tab.dirty]);',
-          '}, [composed, tab.savedContents]);'
-        )
-      }),
-      want: 'does not watch the dirty flag'
     },
     {
       name: 'the repeat test deleted, so a held chord rewinds the whole file',
@@ -5952,16 +5941,9 @@ function gridOf(css, cls) {
     {
       name: 'the release effect stops watching savedContents',
       file: VIEW,
-      find: '  }, [composed, tab.savedContents, tab.dirty]);',
+      find: '  }, [composed, tab.savedContents]);',
       to: '  }, [composed]);',
       want: 'does not watch savedContents'
-    },
-    {
-      name: 'the release effect stops watching the dirty flag',
-      file: VIEW,
-      find: '  }, [composed, tab.savedContents, tab.dirty]);',
-      to: '  }, [composed, tab.savedContents]);',
-      want: 'does not watch the dirty flag'
     },
     {
       name: 'the repeat test removed, so a held ⌥⌫ rewinds every change in the file',
@@ -6025,7 +6007,7 @@ function gridOf(css, cls) {
   }
 
   say(
-    `40. the press that moves on: the follower is carried by IDENTITY and the index is only landingAfterPress's fallback, one press at a time (the holds passed to both verbs, answered with a sentence, landed after the adoption and released in a layout effect that watches savedContents and the dirty flag), the host takes the keyboard BEFORE the adoption, a key repeat runs only next and prev after the preventDefault, and live-text.ts reads no working model on the render path (${String(plantsOk)} of ${String(plantsTotal)} scanner fixtures behaved, ${String(plantsCaught)} of them must fail)`
+    `40. the press that moves on: the follower is carried by IDENTITY and the index is only landingAfterPress's fallback, one press at a time (the holds passed to both verbs, answered with a sentence, landed after the adoption and released in a layout effect that watches savedContents), the host takes the keyboard BEFORE the adoption, a key repeat runs only next and prev after the preventDefault, and live-text.ts reads no working model on the render path (${String(plantsOk)} of ${String(plantsTotal)} scanner fixtures behaved, ${String(plantsCaught)} of them must fail)`
   );
   say(
     `40. ${String(ablationsRed)} of ${String(ABLATIONS.length)} ablations of the SHIPPING source turned this rule red on their own clause, made on the strings in memory with the three files' sha256 compared in a finally`

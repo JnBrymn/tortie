@@ -143,20 +143,29 @@ export function landHold(
  * - A hold still in the air is NEVER let go by a draw: the picture cannot have
  *   caught up with a write that has not happened. Only the press itself ends
  *   it, on a refusal or a throw.
- * - A landed hold goes AT ONCE ON A DIRTY TAB, and this is Phase 282's fix
- *   round. Both clauses below wait for a READ: `refreshRepo` (./tab-io) skips
- *   a dirty tab by rule, so `saved` can never move again, and the picture is
- *   composed from the buffer, which still draws the change the rewind wrote
- *   away. So on a dirty tab the hold was waiting for an event that cannot
- *   happen, and it outlived the press for as long as the view was mounted: the
- *   verifier drove a rewind whose adoption refused (the tab trailed disk, which
- *   is the ordinary state of a file an agent is writing), one keystroke, then
- *   100 watcher ticks, and read every accept on that tab answered `held` with
- *   "a change is still being rewound" when nothing was. A hold buys nothing on
- *   a dirty tab either way: `pressRedline` refuses a rewind there FIRST, and
- *   an accept of the bytes in front of the person is what an accept has always
- *   meant. A hold still IN THE AIR is not released by this, because the write
- *   really is landing and RACE A is exactly a chord made inside that window.
+ * - A DIRTY TAB DOES NOT LET A LANDED HOLD GO, AND PHASE 282.1 IS WHY THIS IS
+ *   SAID RATHER THAN LEFT UNSAID. Phase 282's fix round added a third clause
+ *   here — a landed hold released at once when the tab is dirty — because both
+ *   clauses below wait for a READ, `refreshRepo` (./tab-io) skips a dirty tab
+ *   by rule, and so a rewind whose adoption refused followed by one keystroke
+ *   left every accept on the tab answering `held` for the life of the mount.
+ *   The reverify drove that clause one step further, through these modules
+ *   and the shipping store: the released hold let ⌥↩ ACCEPT the change the
+ *   person had just rewound (the picture still drew it from the buffer), which
+ *   moved the baseline onto the agent's words while the disk held the
+ *   rewind; the moment the tab was clean again — ⌘Z on the keystroke, then the
+ *   watcher's read; or the tab closed and reopened with its persisted baseline
+ *   — the change was drawn BACKWARDS, the agent's words struck through and the
+ *   person's own rewind as the insertion, and the next ⌥⌫ in the rhythm wrote
+ *   the agent's words back into the file. With the hold kept, the same steps
+ *   end with the change gone and nothing drawn backwards. So the premise
+ *   "a hold buys nothing on a dirty tab" was false: it buys exactly the
+ *   refusal of that accept. The cost is the one the fix round objected to —
+ *   an accept on a dirty tab whose rewind has not reached the picture is
+ *   refused until the tab is saved or its edits undone — and the view's
+ *   sentence for that case now names both ways out (./redline-sentences
+ *   `acceptDirty`). The clause the fix round added is gone, and this function
+ *   takes no `dirty` at all so it cannot come back by an argument.
  * - A landed hold goes when no drawn change equals it on all three fields —
  *   the redraw the rewind was waiting for.
  * - OR when the tab has read bytes that are neither what it held right after
@@ -173,17 +182,11 @@ export function landHold(
 export function releaseHolds(
   holds: RewindHold[],
   drawn: readonly (PressedChange | null)[],
-  saved: string,
-  /** Unsaved edits in the buffer NOW: a tab nothing will read again. */
-  dirty: boolean
+  saved: string
 ): void {
   for (let at = holds.length - 1; at >= 0; at -= 1) {
     const hold = holds[at] as RewindHold;
     if (hold.landed === null) continue;
-    if (dirty) {
-      holds.splice(at, 1);
-      continue;
-    }
     const stillDrawn = drawn.some((id) => id !== null && samePress(id, hold.pressed));
     const newer = saved !== hold.landed.saved && saved !== hold.landed.was;
     if (!stillDrawn || newer) holds.splice(at, 1);
