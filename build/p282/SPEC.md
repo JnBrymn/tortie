@@ -829,19 +829,31 @@ verifier independently found the ruling's own arm unimplemented for a keystroke 
 the release effect moves at the landing, so the hold was not released "at once" but only at the next keystroke,
 save or tab switch); that arm no longer exists.
 
-**RULED: the parent's two clauses, and nothing else.** `releaseHolds` takes no `dirty` at all, so the clause cannot
-return by an argument; the view's release effect is keyed on `[composed, tab.savedContents]` again;
+**RULED: the parent's two clauses, and nothing else** (nothing else that RELEASES: Phase 282.2's fix round narrowed
+the first clause so a dirty buffer's picture cannot let a refused adoption's hold go, §12.1, and it still takes no
+`dirty`). `releaseHolds` takes no `dirty` at all, so the clause cannot return by an argument; the view's release effect is keyed on `[composed, tab.savedContents]` again;
 `conformance:redline` rule 40 no longer asks for the flag (11 of 11 ablations, the dirty-flag one withdrawn).
 The cost is the one §10.2 was written against, and it is now a refusal with a sentence rather than a silent
 freeze: on a dirty tab whose rewind has not reached the picture, every accept answers `held` with
 `A change in {name} was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your
 edits first, then accept.` (`redlineHeldSentence('accept', name, dirty)`, `acceptDirty` in
 `./redline-sentences`), chosen by the LIVE tab's `dirty` at the press, a hold in the air included, because the
-adoption will refuse a dirty tab when that write lands and the way out is the same. Both ways out are real and
-end the hold: ⌘Z to clean leads to the watcher's read (the picture stops drawing the change, and the bytes are
-neither `landed.saved` nor `landed.was`); ⌘S leads to the stale dialog, whose Overwrite moves `savedContents` to
-bytes that are neither. The bind the person is in there — a buffer whose typing sits on a picture the disk has
-left behind — is §3.2's and the adoption's, not the hold's, and this round does not widen into it.
+adoption will refuse a dirty tab when that write lands and the way out is the same. Both ways out end the hold:
+⌘Z to clean leads to a read THE VIEW ITSELF MAKES on that transition (Phase 282.2, §12: the effect keyed on
+`tab.dirty` in `RedlineDocument.tsx` calls `./store`'s `rereadRepo`, which is `tab-io`'s serialized `refreshRepo`;
+the picture stops drawing the change, and the bytes are neither `landed.saved` nor `landed.was`); ⌘S leads to the
+stale dialog, whose Overwrite moves `savedContents` to bytes that are neither. This paragraph said the undo "leads
+to the watcher's read" until Phase 282.2, and that read did not exist: `refreshRepo` had one caller, the watcher's
+debounced tick, the rewind's own tick had been spent while the tab was dirty, and on a paused agent no other tick
+comes, so the undo road was real only once something else in the repository changed. The Save road has a cost the
+person is told nowhere: ON THE SAVE ROAD, OVERWRITE IN THE STALE DIALOG PUTS THE AGENT'S CHANGE BACK OVER THE
+REWIND (driven by 282.1's re-derive reverifier through the shipping `save()` and `confirm.onAlt()`: `disk.text`
+contains `red fox leaps` and not `brown fox` after it), because the buffer being saved is the agent's text plus
+the keystroke; Compare is the dialog's default, and the dialog, its default and its body are not changed by either
+round. The same dialog can also rise on a CLEAN tab: a ⌘S still in the air when the undo lands has `savedContents`
+moved under it by the read that undo pulls, answers stale, and its Overwrite writes the keystroke the person undid
+(§12.1, item 4; the unit lane only). The bind the person is in there — a buffer whose typing sits on a picture the disk has left behind — is
+§3.2's and the adoption's, not the hold's, and this round does not widen into it.
 
 Refused, by name: the re-derive verifier's narrowing (keep the hold, refuse accept-all and the held change only,
 let a per-change accept of a DIFFERENT change through and shift every held offset by the accept's
@@ -876,3 +888,213 @@ three pieces, the shipping landing took the piece at the follower's span start (
 not file it, and this round does not move it. The fix round's `conformance:save` rules were re-read by a verifier
 who did not write them; rules 11, 18, 19 and 20 pinned mention order alone and are tightened in
 `build/p277/SPEC.md`'s corrections.
+
+## 12. PHASE 282.2: THE WAY OUT THE SENTENCE PROMISES (2026-09-18)
+
+Phase 282.1's two reverifiers, independently, found §11.1's undo road missing a step. The attack lens graded it
+major ("F1 NOT FIXED — the linger moved one step") and the re-derive lens minor ("N1 the undo way out needs a repo
+event"); the operator chose to make the read happen rather than reword the sentence. Everything in §11 stands
+except the clause §11.1 now carries in its corrected form.
+
+**What was measured.** `refreshRepo` had ONE caller, `onRepoChanged` in `store.ts`'s `init`, the watcher's
+debounced tick. Monaco's undo reaches `markDirty(tabId, text !== live.savedContents)` in `redline-edits.ts` and
+nothing else; `markDirty` patches the flag and calls `autoSave.noteChanged`. The rewind's guarded write raises its
+tick about 150 ms later, a keystroke inside the write had already made the tab dirty, the walk skips a dirty tab by
+rule, and no tick comes again until some file in that repository changes. Driven through the mounted view: mount
+BASE/AGENT, ⌥↓, hold the write, ⌥⌫, a keystroke inside the write, the landing, ⌥↩ answers `acceptDirty`; then
+`markDirty(ID, false)` and no read: ⌥↩ twice answers `{dirty: false, savedContents: AGENT, disk: REWOUND,
+reads: 1, toasts: ['A change in notes.txt is still being rewound, so nothing was accepted.' ×2]}` with the rewound
+change still drawn. The 282.1 round's own view test hid it by calling `watcherReads(ID)` by hand after the undo.
+
+**RULED: ONE READ ON THE DIRTY→CLEAN TRANSITION, WHEN A LANDED HOLD EXISTS.**
+
+- `src/renderer/editor/store.ts` gains `rereadRepo(repoPath): void`, which is `void io.refreshRepo(repoPath)` and
+  nothing else — the call `init`'s tick makes. `io.refreshRepo` is §10.3's serializer, so a second call joins the
+  one queued walk rather than racing the first.
+- `src/renderer/editor/RedlineDocument.tsx` gains one effect whose dependency array is exactly `[tab.dirty]`: when
+  `tab.dirty` is false and `rewindHolds.current.some((h) => h.landed !== null)`, it calls
+  `useEditor.getState().rereadRepo(tab.repoPath)`. It is declared after the `[tab.id]` effect that empties the
+  holds, so a switch from a dirty tab to a clean one, which moves the flag too, finds no hold.
+- After the read `savedContents` is the disk's bytes, §1.4's release (either clause) lets the hold go, the armed
+  move lands on the follower, and the next ⌥↩ accepts.
+
+**A READ, NOT AN ADOPTION OF THE BYTES THE HOLD REMEMBERS.** The hold knows what the rewind wrote, and adopting
+that would be one call with no round trip. Refused: a read asks the disk what is there NOW, so a write that landed
+between the rewind and the undo is what the picture shows, and rules 22 (the live tab still clean, the same model)
+and 26 (`savedContents` unmoved since the read began) already guard exactly this read. An adoption would need its
+own copies of both, and would be wrong the first time an agent wrote in between.
+
+**What is NOT read.** Nothing when no hold is landed, so an ordinary undo on an ordinary tab pulls no read; nothing
+for a hold still in the air, because the write has not happened and its own landing adopts on a tab that is clean
+by then; nothing on the way INTO dirty; nothing on a redraw. A save's completion pulls none either: its bytes are
+neither `landed.saved` nor `landed.was`, so the release's second clause runs in the layout effect before this
+effect asks whether a landed hold exists.
+
+**What does not change.** The `acceptDirty` sentence and the held sentences, byte for byte: the words stay and the
+road they name becomes real. `releaseHolds`, `refreshRepo`, the serializer, the stale dialog. The Save road's cost
+is stated in §11.1 and not changed. (The phase's fix round then gave `releaseHolds` one clause, because its verifier
+drove a road round §11.1 through it: §12.1. The other three are as they were.)
+
+Red without it: `p2822-after-undo.test.ts` — the attack reverifier's test, adopted; run unchanged at the 282.1
+bytes it read the linger (3 of 3, the held sentence twice on a clean tab), and with its expectations rewritten to
+the fixed behaviour it was 4 red of 8 before the two shipping edits and 8 of 8 after — "THE WAY OUT", with
+"CONTROL: it is the READ that lets go, never the undo" beside it holding the view's read in the air and reading the
+linger for as long as the disk has not answered, "A READ ASKS THE DISK WHAT IS THERE NOW" with an agent's write
+between the rewind and the undo, and "MEASURED AT THE 282.1 BYTES" with the store action made a no-op.
+`p282-view-presses.test.ts`, "A KEYSTROKE INSIDE THE WRITE", no longer makes a read by hand and asserts the
+between-step: the undo alone takes `main.reads` from 1 to 2. The refusals are pinned by "NO LANDED HOLD, NO READ",
+"NO READ ON THE WAY INTO DIRTY" (counted as WALKS at `git.showHead`, because a walk skips a dirty tab's file read
+and `main.reads` would not move) and "UNDO, REDO, UNDO, REDO, UNDO" (one read in the air, one walk queued, two
+walks for three undos). Five ablations, each red and each restored by sha256: the effect calling nothing, the
+landed-hold test removed, the dirty test removed, any hold counting, and `rereadRepo` reaching nothing.
+
+**THE WIRING IS PINNED BY `conformance:redline` RULE 40, CLAUSE 7** (the integrator's round, reconciling the gate
+with the shape above). The effect is found by its DEPENDENCIES, the last argument compared whole with
+`[tab.dirty]`, so the same call keyed on `[composed, tab.dirty]` is not this effect and the clause is red. Up to
+the `rereadRepo(` call it must ask `rewindHolds.current` for a `landed` hold and must ask `tab.dirty`; anywhere in
+it, `adoptWritten(` is red. A fourth scanner reads `./store` for `rereadRepo` alone, passes over the interface
+line, and requires `refreshRepo(` in the action's body. 56 of 56 scanner fixtures, 50 of which must fail, and 13
+of 13 ablations of the shipping source (62 of 62, 55 and 15 of 15 since the fix round, §12.1): the two this round
+adds cut the real bytes at a span the reader finds, the effect removed and the landed-hold test replaced with
+`true`. Over the 282.1 bytes (that round's view and the
+store at `4d89dde0`, in a scratch copy, run by the gate's builder and again by the integrator) rule 40 is red four
+times: no such effect, no such action, and both new ablations finding nothing to edit. As first written the clause
+read TEXT: it asked that the flag is tested before the call and not which way, so `if (!tab.dirty) return;` passed
+it, and only "THE WAY OUT" with "NO READ ON THE WAY INTO DIRTY" went red there. Both of the phase's verifiers drove
+that rather than took it (the gate exit 0 with 13 of 13, vitest 5 red of 8), and §12.1 has the clause reading the
+direction.
+
+**STATED LIMITS.** The rigs hear the undo as `markDirty(id, false)`, which is all the store hears of it; Monaco's
+own undo stack is not in the unit lane and `probe:redlinemoveon`'s new arm is where ⌘Z itself is pressed. The read
+is fire and forget, so between the undo and the disk's answer — the walk's directory read and file read, behind
+whatever walk of that repository is already running — ⌥↩ still answers "still being rewound", which is true for
+that long. §11.2's never-settling walk applies to this read as to any
+other: behind a read that hangs, this one queues and the hold stands.
+
+A TAB SWITCH FORGETS THE HOLD, AND WITH IT THE READ THIS ROUND OWES (measured by the integrator on the
+`p2822-after-undo` rig, two tabs mounted). The holds are the mount's, and Phase 282's `[tab.id]` effect empties
+them, so: a keystroke inside the write, the landing, ⌥↩ answering `acceptDirty`, a switch to another tab and back,
+then the undo. The effect finds no hold and asks for nothing (`reads: 1, walks: 0`), `savedContents` stays the
+agent's `red fox leaps` over a disk holding `brown fox leaps`, and with no hold left to refuse it the next ⌥↩
+ACCEPTS `"brown"->"red"` with no sentence: the baseline reads `red fox jumps` while the disk holds the rewind,
+which is §11.1's precondition for the backwards draw. This round's code made no call in that sequence, so the
+282.1 bytes answer the same; it is Phase 282's rule that a hold belongs to the mount it was pressed on, not this
+round's read, and the phase's own refusal ("no read when no landed hold exists") is why the read does not reach
+it. Written down so the verifiers drive it rather than rediscover it; closing it means a hold that outlives the
+switch, which is its own entry. THE VERIFIERS DROVE IT TO ITS END AND WIDENED IT, and §12.1 has what they read: it
+is not a display limit, it loses the rewind, and a tab switch is the least likely of the four ways into it.
+
+### 12.1 THE FIX ROUND (the phase's own two verifiers, 2026-09-18)
+
+An attack verifier (needs_work) and a re-derive verifier (pass) ran against these bytes; each wrote its own rig
+that mocks neither `./redline-edits` nor `./live-text`, so a keystroke was a real `beforeinput`, ⌘Z a real keydown
+answered by `model.undo()`, and a dirty tab drew its BUFFER; the attack verifier also drove six arms of its own in
+the app over a scratch copy of the move-on probe. Both confirmed the way out (their rigs red at the 282.1 bytes on
+exactly the cases that need the pulled read, arm U 9 ms and 12 ms at HEAD against 1,521 ms and the held sentence at
+the parent). What follows is what they found beyond it.
+
+**FIXED: A DIRTY BUFFER'S PICTURE LET A HOLD GO, which is the one road round §11.1's ruling.** Two ⌘Z in a row, the
+second inside the read the first had pulled, on a tab whose model had followed the agent's write as an undoable
+reload (any tab ever shown in File view): the second undo un-applied that reload, the buffer held the text from
+BEFORE the agent wrote, and its picture drew no change at all. §1.4's first release clause read that as "the redraw
+the rewind was waiting for"; the read answered a dirty tab and was dropped; one ⌘⇧Z later the tab was clean over the
+agent's bytes with the rewound change drawn, no hold, and therefore no read owed by this section's own refusal.
+⌥↩ accepted the change the person had rewound with nothing said, the next read of the repository drew it backwards,
+and the next ⌥⌫ in the rhythm wrote the agent's word back over the rewind. In the app (the attack verifier's arm
+X, two CDP keydowns 9 ms apart): `{dirty: false, savedContents: AGENT, disk: REWOUND}`, `acceptToasts: []`, 3 -> 2
+changes, then the backwards draw and the agent's word on disk at the end — at HEAD and at the 282.1 bytes line for
+line, so this phase narrowed it to the read's flight and did not close it. How long that flight is was measured too:
+7.5 ms with `notes.txt` the only tab and 183.6 ms with ten tabs of the repository open, because `rereadRepo` is one
+SERIAL walk of every open worktree tab (a directory read, a file read and a `git show` each: 3, 15 and 60 bridge
+calls at 1, 5 and 20 tabs), which a quick double tap fits inside on a crowded panel.
+
+**RULED: A HOLD WHOSE ADOPTION REFUSED GOES ON BYTES, NEVER ON A PICTURE ALONE.** `landHold` records what the write
+WROTE beside `saved` and `was` (a fifth parameter, required, so an older caller does not compile), and
+`releaseHolds` does not let the first clause fire while `landed.saved !== landed.wrote && saved === landed.saved`:
+the tab still holds exactly the bytes the refused adoption left it with, no read has reached it, and whatever is
+drawn is a buffer's picture and says nothing about the file. It takes no `dirty`, as §11.1 requires; the bytes
+already say it, and a refused adoption on a CLEAN trailing tab is waiting for the same read. An adoption that took
+(`saved === wrote`) is let go by the redraw exactly as before. With the hold kept, the ⌘⇧Z that takes the press too
+many back is a clean transition under a landed hold, so this section's effect reads again, `savedContents` moves to
+the disk's bytes and the second clause lets go. None of the phase's four refusals moves: no sentence changes, nothing
+is read without a landed hold, nothing on the way into dirty, nothing is adopted from memory. THE COST: a hold of
+this kind now stands until `savedContents` moves, so on a dirty tab every ⌥↩ answers the `acceptDirty` sentence
+even after typing has changed the rewound change's own words, where it used to let go; that is §11.1's ruling as
+written ("a dirty tab keeps its landed holds"). One corner is new and is stated rather than bounded: a refused
+adoption, then the disk returned to exactly the bytes the tab still holds before any read (⌥⇧⌫ inside the rewind's
+own watcher window, or an agent rewriting its own text), then the change leaving the picture because the BASELINE
+moved — the hold stands on a clean tab until the tab is switched. While the change is still drawn that hold already
+stood under the parent's rule, for the same reason.
+
+Red without it: `p282-one-press.test.ts`, "A DIRTY BUFFER'S PICTURE LETS NOTHING GO" (1 red of 21 with the clause
+taken out, restored by sha256), with "MEASURED AT THE RULE BEFORE IT" beside it landing the hold as an adoption that
+took and reading the unsaid accept and the backwards draw; `p2822-second-undo.test.ts`, the attack verifier's rig
+adopted, "A SECOND ⌘Z INSIDE THE READ" (the read held at main's door) and "BOTH ⌘Z IN ONE TASK" — 2 red of 7 with
+the clause taken out, 5 red of 7 at the 282.1 bytes; and `probe:redlinemoveon` arm Z in the app, red on the build
+made before the fix and at the 282.1 bytes alike ("the picture let yankee go never within 1500 ms … ⌥↩ pressed on
+yankee, toasts [], 3 -> 2 changes, drawn backwards after the outside write true") and green after it ("let go 0 ms
+after the tab went clean … pressed on xray, 2 -> 1, drawn backwards false"). Its self-test grew from 59 of 59 to 68 of 68.
+
+**RULE 40 CLAUSE 7 READS THE DIRECTION.** `flagPolarityOf` follows the two spellings the clause accepts — the early
+return on the UN-negated flag joined by `||` only, the guard round the call on the NEGATED flag joined by `&&` only —
+and answers `clean`, `dirty` or `unread`; a test after the call decides nothing and a comparison with a literal is
+refused by name rather than evaluated. Six fixtures (the inverted return both verifiers planted, the inverted guard,
+the `&&` return, the literal, the test after the call, and an `||` return that must pass) and two ablations of the
+shipping source, the flag test inverted inside the effect the reader finds and ./store's `rereadRepo` body reaching
+nothing, which the fourth scanner had fixtures for and no shipping arm: 62 of 62, 55 of which must fail, and 15 of
+15. Over a scratch copy of the tree with `if (!tab.dirty) return;` planted the gate now exits 1 on that clause, where
+both verifiers read exit 0.
+
+**NOT FIXED, AND WHY: FOUR FINDINGS THAT ARE THE OPERATOR'S RULINGS.** Nothing was built for them. Each is pinned as
+it stands in `p2822-second-undo.test.ts` under "STATED LIMITS, MEASURED", as a seed: the entry that closes one
+rewrites its expectations.
+
+1. **THE HOLD IS THE MOUNT'S, SO WHATEVER ENDS THE MOUNT ENDS THE REFUSAL AND THE READ, AND THE CHAIN ENDS WITH THE
+   REWIND OVERWRITTEN** (attack: major; re-derive: major, not introduced here; identical at the 282.1 bytes). Four
+   ways in, not one: a tab switch and back; THE MODE CHIP to File and back, which is where a person goes to look at
+   the unsaved edit the sentence told them about; an undo made IN the File view (MonacoHost's ⌘Z reaches the same
+   `markDirty(id, false)` and no Redline view is mounted to hear it); and the DIRTY VARIANT, which needs no undo at
+   all — File and back on the dirty tab, and ⌥↩ on the rewound change is accepted from the buffer (4 -> 3 changes,
+   no sentence, in the app). After any of them: a clean tab with no banner that still draws the change the person
+   rewound, `savedContents` the agent's text over a disk that holds the rewind; ⌥⌫ on it answers "That change is
+   already back to what it was." and redraws nothing; ⌘S raises the stale dialog and writes nothing unless
+   Overwrite is pressed; ⌥↩ ACCEPTS with nothing said; the next read draws `"red"->"brown"` backwards; and ⌥⌫ on
+   that writes `The quick red fox…` back (`writes: [REWOUND, AGENT]`). The rewind is lost by ⌥↩ then ⌥⌫, never by a
+   save. THE OPTIONS: (a) the TAB owes the read, not the mount — a per-tab mark in `./tab-io` set where
+   `adoptWritten` refuses and cleared where a read or a save moves that tab, `markDirty`'s dirty-to-clean edge and a
+   Redline mount of a clean marked tab pull `refreshRepo`, and ⌥↩ answers the held sentence while the mark stands;
+   it closes all four and the File view's undo, and it LIFTS this section's refusal "no read when no landed hold
+   exists", puts a read behind `markDirty` (whose order `conformance:save` rule 14 pins) and gives the accept a
+   second thing to ask. (b) the HOLD outlives the mount — holds keyed by tab id outside the component and handed to
+   whichever mount draws that tab, released on mount by the same two clauses, emptied when the tab closes; the
+   clean-transition effect already runs at mount, so a return to Redline under a landed hold reads; it REVERSES
+   §1.4's "the holds are the view's, one array per mount" and the reason written beside `rewindHolds`, and an undo in
+   the File view is answered only when the person comes back. (c) leave it stated, which is what this round does.
+2. **ONE ⌘Z TOO MANY, AFTER THE READ HAS LANDED** (both: minor; new with this phase as an entry point, not as a
+   class). The pulled read is an undoable edit (Phase 237 made every reload one) and lands a few milliseconds after
+   the ⌘Z that made the tab clean, on top of the undo stack of a person who was just told to press ⌘Z. One more ⌘Z
+   un-applies it: the buffer is the agent's text, the tab is dirty, the rewound change is drawn again with no hold
+   (it was let go rightly, on the disk's bytes), and ⌥↩ accepts it; ⌘⇧Z then draws it backwards and ⌥⌫ writes the
+   agent's word back, or ⌘S there writes the agent's text over the rewind with NO stale dialog, because
+   `savedContents` is the disk's. Every step is visible — the change is drawn again and the banner says unsaved —
+   and the re-derive verifier reached the same backwards draw at the PARENT build with a plain adopted ⌥⌫, then ⌘Z,
+   ⌥↩, ⌘⇧Z and no keystroke inside any write. THE OPTIONS: make a rewind's adoption and this read non-undoable
+   (reverses Phase 237 for those two reloads and costs the person their undo history at every rewind); refuse ⌥↩ on
+   a dirty tab for a change whose triple the tab's rewind journal holds (a new refusal on the accept, and an agent
+   that writes the same phrase again is refused until the journal forgets); or leave it stated. Not driven: a key
+   held down long enough to repeat, and the auto-save variant, which the attack verifier reasoned from the same
+   guard.
+3. **THE UNDO IS NOT TEMPORARY** (both: minor). The read is a `pushEditOperations` edit, so it empties monaco's redo
+   stack 3 to 12 ms after the undo: a person who reads "undo your edits first, then accept" as ⌘Z, ⌥↩, ⌘⇧Z gets no
+   typing back (`{undo: 1, redo: 0}` in the rigs; in the app ⌘⇧Z left the buffer on the rewound text). At the 282.1
+   bytes redo survived until some later watcher read. It is the same ruling as 2: whether this reload is an edit.
+4. **A ⌘S IN THE AIR WHEN THE UNDO LANDS** (attack: nit, unit rig only). The pulled read moves `savedContents` and the
+   buffer to the rewound text under the save; the save then answers stale and raises "'notes.txt' changed on disk"
+   on a CLEAN tab whose buffer is the disk, and Overwrite writes the captured agent-text-plus-keystroke, the
+   keystroke the person undid included, leaving the tab dirty over a rewound buffer. Dialog-gated with Compare the
+   default, so it is §11.1's Save-road cost in a worse costume, and rule 26 held in the old-inode variant.
+
+Driven and found consistent, so nothing moved: the pulled read against the rewind's own tick in both orders (two
+ticks join one queued walk; the second read patches nothing); a second ⌥⌫ while the read is in the air (the same
+change answers "already being rewound", the next change writes and ends on the base text with nothing drawn); a
+save's Overwrite in flight in both orders.

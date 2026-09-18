@@ -88,7 +88,10 @@
  *      is read BEFORE the door name appears in its body. The plain door is
  *      unguarded and a timer does not get an unguarded write. It read `save`
  *      until Phase 277 moved the door choice into `saveOnce`; rule 1c is what
- *      keeps `save` from growing a second route round it.
+ *      keeps `save` from growing a second route round it. The statement that
+ *      tests the reason must RETURN (Phase 282.1) and may not name the door it
+ *      refuses (Phase 282.2: `return saveOutsideProject(…)` there returned,
+ *      and was green).
  *  11b. `saveInProject`'s `unguarded` ARM REFUSES IT TOO. That arm is the
  *      symbolic link, and the shape at this phase's parent — a bare
  *      `return saveOutsideProject(…)` — is the hole a later round reopens,
@@ -1377,8 +1380,17 @@ const WRITE_CHANNELS = ['fs:writeFile', 'fs:writeGuarded'];
     fail('11. saveOnce tests the auto reason AFTER it names the plain door, which is too late');
   } else if (refusal === null || !/\breturn\b/.test(refusal)) {
     fail("11. saveOnce tests `reason === 'auto'` but the statement holding the test does not return, so a timer is mentioned before the plain door rather than refused it");
+  } else if (refusal.includes('saveOutsideProject')) {
+    // PHASE 282.2. A return is not a refusal when what it returns IS the door.
+    // The 282.1 reverifier planted `if (reason === 'auto' && !guarded) return
+    // saveOutsideProject(…)` and this gate stayed green on it: the test is
+    // mentioned before the door, the statement returns, and a timer walks
+    // straight through. Only the vitest "a timer's request never reaches the
+    // plain door" went red. So the statement that tests the reason may not
+    // name the door at all. build/p268/ablation.mjs arm 32 plants that shape.
+    fail('11. the statement that tests the auto reason returns through the plain door');
   } else {
-    say("11. saveOnce refuses the plain, unguarded door for reason 'auto' — the test returns — before the door is named");
+    say("11. saveOnce refuses the plain, unguarded door for reason 'auto' — the test returns, and not through the door — before the door is named");
   }
 }
 

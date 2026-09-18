@@ -142,7 +142,7 @@ async function viewRewind(held: RewindHold[], pressed: PressedChange | null, kin
   );
   if (result.outcome === 'wrote') {
     useEditor.getState().adoptWritten(t.id, result.contents, result.was);
-    if (kind === 'rewind') landHold(held, result.entry, live().savedContents, result.was);
+    if (kind === 'rewind') landHold(held, result.entry, live().savedContents, result.was, result.contents);
   }
   return result.outcome;
 }
@@ -363,6 +363,94 @@ describe('a second chord while a rewind is being written', () => {
     await release('write#2');
     expect(await again).toBe('wrote');
     expect(disk.text).toContain('red fox leaps');
+  });
+
+  /**
+   * PHASE 282.2's FIX ROUND. THE ONE ROAD ROUND "A DIRTY TAB KEEPS ITS HOLDS".
+   *
+   * The test above holds the picture still while the tab is dirty, because this
+   * rig draws `savedContents`. The view does not: a dirty tab's picture is its
+   * BUFFER, and the attack verifier moved the buffer instead of the bytes. Two
+   * ⌘Z in a row, the second inside the read the first had pulled: monaco
+   * un-applied the reload that had brought the agent's write in, the buffer
+   * held the text from before the agent wrote, and the picture drew no change
+   * at all. `releaseHolds`' first clause read that as "the redraw the rewind
+   * was waiting for" and let the hold go; the read answered a dirty tab and
+   * was dropped; one ⌘⇧Z later the tab was clean over the agent's bytes with
+   * the rewound change drawn, no hold, and therefore no read owed. ⌥↩ accepted
+   * it with nothing said (in the app: `acceptToasts: []`, 3 -> 2 changes, at
+   * HEAD and at the 282.1 bytes alike), the next read drew it backwards and
+   * the next ⌥⌫ wrote the agent's word back.
+   *
+   * So a hold whose ADOPTION REFUSED goes on bytes and never on a picture
+   * alone. The pictures below are handed in by hand, which is all this lane
+   * can do; p2822-second-undo.test.ts drives the same thing through the
+   * mounted view with a real ⌘Z, and `probe:redlinemoveon` arm X in the app.
+   */
+  it("A DIRTY BUFFER'S PICTURE LETS NOTHING GO: after a refused adoption the hold waits for BYTES, whatever the buffer draws", async () => {
+    seed(AGENT, AGENT);
+    const held: RewindHold[] = [];
+    const [x, y] = picture();
+    const rewind = viewRewind(held, x!);
+    await release('read#1');
+    // The keystroke inside the write: the adoption will refuse a dirty tab.
+    useEditor.setState({ tabs: [{ ...live(), dirty: true }] });
+    await release('write#1');
+    expect(await rewind).toBe('wrote');
+    expect(held.map((h) => h.landed)).toEqual([{ saved: AGENT, was: AGENT, wrote: disk.text }]);
+    expect(disk.text).toContain('brown fox leaps');
+    // The buffer after the second ⌘Z draws NO change; a buffer typed into the
+    // change's own span draws it under another triple. Neither is the file.
+    releaseHolds(held, [], live().savedContents);
+    releaseHolds(held, [{ ...x!, ins: 'redd' }, y!], live().savedContents);
+    expect(held).toHaveLength(1);
+    // ⌘⇧Z: the buffer is the agent's bytes again, the tab is clean and X is drawn.
+    useEditor.setState({ tabs: [{ ...live(), dirty: false }] });
+    releaseHolds(held, picture(), live().savedContents);
+    expect([viewAccept(held, x!), viewAccept(held, y!), viewAccept(held, null, 'all')]).toEqual(['held', 'held', 'held']);
+    expect(live().baseline?.text).toBe(BASE);
+    // The read the clean transition pulls under that hold: bytes, and it goes.
+    useEditor.setState({ tabs: [{ ...live(), savedContents: disk.text }] });
+    releaseHolds(held, picture(), live().savedContents);
+    expect(held).toEqual([]);
+    expect(viewAccept(held, picture()[0]!)).toBe('accepted');
+    expect(backwards()).toEqual([]);
+  });
+
+  it('MEASURED AT THE RULE BEFORE IT: the same picture lets an adopted hold go, which is right, and let the refused one go, which drew the rewind backwards', async () => {
+    seed(AGENT, AGENT);
+    const held: RewindHold[] = [];
+    const [x] = picture();
+    const rewind = viewRewind(held, x!);
+    await release('read#1');
+    useEditor.setState({ tabs: [{ ...live(), dirty: true }] });
+    await release('write#1');
+    expect(await rewind).toBe('wrote');
+    // The rule before this round knew no `wrote`: every landed hold was judged
+    // as an adoption that took. Said by hand, and the empty picture lets go.
+    held[0]!.landed = { saved: AGENT, was: AGENT, wrote: AGENT };
+    releaseHolds(held, [], live().savedContents);
+    expect(held).toEqual([]);
+    // ⌘⇧Z back to clean, ⌥↩ on the change the person rewound: accepted, unsaid.
+    useEditor.setState({ tabs: [{ ...live(), dirty: false }] });
+    expect(viewAccept(held, x!)).toBe('accepted');
+    expect(toasts).toEqual([]);
+    // Any read, and it is drawn backwards.
+    useEditor.setState({ tabs: [{ ...live(), savedContents: disk.text }] });
+    expect(backwards().map((c) => [c.del, c.ins])).toEqual([['red', 'brown']]);
+  });
+
+  it('CONTROL: an adoption that TOOK is let go by the redraw alone, with `savedContents` exactly where the adoption left it', async () => {
+    seed(AGENT, AGENT);
+    const held: RewindHold[] = [];
+    const [x] = picture();
+    const rewind = viewRewind(held, x!);
+    await release('read#1');
+    await release('write#1');
+    expect(await rewind).toBe('wrote');
+    expect(held.map((h) => h.landed)).toEqual([{ saved: disk.text, was: AGENT, wrote: disk.text }]);
+    releaseHolds(held, picture(), live().savedContents);
+    expect(held).toEqual([]);
   });
 
   it('CONTROL: a hold still IN THE AIR is not let go by a dirty tab either, because that is the window ⌥⌫ then ⌥↩ lives in', async () => {

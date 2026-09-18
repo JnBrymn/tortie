@@ -534,6 +534,24 @@
  *      `preventDefault()`, which is not optional, because an unprevented ⌥⌫
  *      in the `plaintext-only` document is Chromium's `deleteWordBackward`.
  *
+ *      THE CLEAN TRANSITION NAMES THE RE-READ (Phase 282.2). A landed hold on
+ *      a dirty tab answers every accept with "Save or undo your edits first,
+ *      then accept", and Phase 282.1's reverify measured the undo leading
+ *      nowhere: ⌘Z takes the tab back to clean and NO READ FOLLOWS, because
+ *      `refreshRepo` had one caller, the watcher's tick, and the rewind's own
+ *      tick was spent while the tab was dirty — so the hold stood on a clean
+ *      tab and every ⌥↩ said "still being rewound" while nothing was. So the
+ *      view holds an effect keyed on `[tab.dirty]` ALONE that, with a landed
+ *      hold, calls the store's `rereadRepo`, and `rereadRepo` reaches
+ *      `refreshRepo`. The refusals are read with it: no read without a landed
+ *      hold, none on the way INTO dirty, and no adoption of the bytes the
+ *      hold remembers, because a read asks the disk what is there NOW. THE
+ *      DIRECTION IS READ TOO, since the phase's fix round: both verifiers
+ *      planted `if (!tab.dirty) return;` in a scratch copy and this rule
+ *      exited 0, so the two spellings it accepts (the early return on the
+ *      un-negated flag, the guard round the call on the negated one) are read
+ *      for which way they test, and any other spelling is refused by name.
+ *
  *      AND live-text.ts READS NO WORKING MODEL ON THE RENDER PATH. PR 28
  *      added one line there that read the model at every render; it made the
  *      Redline view draw text one keystroke ahead of the typing hook's own
@@ -544,18 +562,21 @@
  *
  *      IT IS A SCAN BECAUSE THE SUITE CANNOT SEE IT: this tree carries no
  *      jsdom, so nothing in vitest focuses an element, and the move is read
- *      off one picture and spent on the next. Three scanners, over
- *      RedlineDocument.tsx, redline-current.ts and live-text.ts, reading the
- *      callbacks and the effects by MATCHING PARENTHESES so that one
- *      callback's references are never mistaken for another's. Each is proved
- *      on planted shapes this file writes, one per clause that must fail, and
- *      then on ABLATIONS OF THE SHIPPING SOURCE — the identity lookup removed
- *      so only the index is left, the holds dropped from each verb, the host
- *      focus dropped, the repeat test dropped, PR 28's live-text line put
- *      back, and six more — each of which must turn this rule red on its own
- *      clause. The ablations are made on the strings in memory and never on
- *      the tree, because this gate runs in the commit battery; the three
- *      files' sha256 are compared in a `finally` to prove it.
+ *      off one picture and spent on the next. Four scanners, over
+ *      RedlineDocument.tsx, redline-current.ts, live-text.ts and (since Phase
+ *      282.2, for `rereadRepo` alone) store.ts, reading the callbacks and the
+ *      effects by MATCHING PARENTHESES so that one callback's references are
+ *      never mistaken for another's. Each is proved on planted shapes this
+ *      file writes, one per clause that must fail, and then on ABLATIONS OF
+ *      THE SHIPPING SOURCE — the identity lookup removed so only the index is
+ *      left, the holds dropped from each verb, the host focus dropped, the
+ *      repeat test dropped, PR 28's live-text line put back, the clean
+ *      transition's effect removed, its landed-hold test removed, its flag
+ *      test inverted, the store's `rereadRepo` reaching nothing, and five
+ *      more — each of which must turn this rule red on its own clause. The
+ *      ablations are made on the strings in memory and never on the tree,
+ *      because this gate runs in the commit battery; the four files' sha256
+ *      are compared in a `finally` to prove it.
  *
  * Exit 0 when every rule passes, 1 otherwise with each failure named.
  */
@@ -5072,6 +5093,26 @@ function gridOf(css, cls) {
 // not optional, because an unprevented ⌥⌫ in the `plaintext-only` document is
 // Chromium's `deleteWordBackward`.
 //
+// THE CLEAN TRANSITION NAMES THE RE-READ, Phase 282.2. Phase 282.1 kept a
+// landed hold on a dirty tab and gave the accept a sentence that names two
+// ways out, "Save or undo your edits first, then accept". Both of its
+// reverifiers then drove the undo and read it leading nowhere: ⌘Z takes the
+// tab back to clean (./redline-edits marks it from the buffer) and NO READ
+// FOLLOWS, because `refreshRepo` had ONE caller, the watcher's debounced tick
+// in ./store `init`, and the rewind's own tick was spent while the tab was
+// dirty. On a paused agent nothing else in that repository changes, so the
+// hold stood on a CLEAN tab and every ⌥↩ answered "still being rewound" while
+// nothing was. So the view makes the read that tick would have made: an
+// effect keyed on `[tab.dirty]` ALONE that, when a hold has LANDED, calls the
+// store's `rereadRepo`, which reaches ./tab-io's queued `refreshRepo`. What
+// the phase refuses is read here with it — no read without a landed hold, so
+// an ordinary undo on an ordinary tab reads nothing; none on the way INTO
+// dirty; and no adoption of the bytes the hold remembers, because a read asks
+// the disk what is there NOW and rules 22 and 26 of `conformance:save` already
+// guard that read. The BEHAVIOUR is pinned where it can run,
+// p2822-after-undo.test.ts and p282-view-presses.test.ts with no hand-made
+// read; this clause pins the wiring a later round would drop.
+//
 // AND ./live-text READS NO WORKING MODEL ON THE RENDER PATH. PR 28 added one
 // line there that read the model at every render; it made this view draw text
 // one keystroke ahead of the typing hook's own last picture, which is the
@@ -5084,17 +5125,18 @@ function gridOf(css, cls) {
 // and none can read the state a recompose leaves behind;
 // `p282-move-on.test.ts` and `p282-one-press.test.ts` pin the ARITHMETIC and
 // the ANSWERS, and this rule pins the WIRING, which is where a later round
-// would drop it. It is the same instrument rule 20 uses: three scanners over
-// the shipping source, each reading callbacks and effects by MATCHING
-// PARENTHESES so one callback's references cannot be mistaken for another's,
-// each proved on planted shapes this file writes, and then on ABLATIONS OF THE
-// SHIPPING SOURCE ITSELF.
+// would drop it. It is the same instrument rule 20 uses: four scanners over
+// the shipping source (the fourth, Phase 282.2's, reads ./store for
+// `rereadRepo` and nothing else), each reading callbacks and effects by
+// MATCHING PARENTHESES so one callback's references cannot be mistaken for
+// another's, each proved on planted shapes this file writes, and then on
+// ABLATIONS OF THE SHIPPING SOURCE ITSELF.
 //
 // THE ABLATIONS ARE MADE ON STRINGS AND NEVER ON THE TREE. This gate runs in
 // the commit battery, so a rule that edited the operator's own source and
 // crashed between the edit and the restore would leave him an ablated file.
 // Each ablation reads the shipping bytes, mutates the COPY and asks the same
-// scanner; the three files' sha256 are taken before and compared in a
+// scanner; the four files' sha256 are taken before and compared in a
 // `finally` after, so a later round that reaches for the disk instead is
 // caught here rather than by him.
 // ---------------------------------------------------------------------------
@@ -5102,6 +5144,7 @@ function gridOf(css, cls) {
   const VIEW = 'src/renderer/editor/RedlineDocument.tsx';
   const CURRENT = 'src/renderer/editor/redline-current.ts';
   const LIVE = 'src/renderer/editor/live-text.ts';
+  const STORE = 'src/renderer/editor/store.ts';
   const REF = 'advanceAfterPress';
   const PENDING = `const pending = ${REF}.current;`;
   const ACCEPTED_GUARD = "result.outcome === 'accepted'";
@@ -5131,6 +5174,92 @@ function gridOf(css, cls) {
       if (body !== null && body.includes('redlineCommandOf(')) return body;
       from = at + 1;
     }
+  };
+
+  /**
+   * PHASE 282.2. The effect whose dependency array is EXACTLY `[tab.dirty]`:
+   * where its call starts and closes in `code`, and its callback as text. Null
+   * when the view holds none.
+   *
+   * It is found by its DEPENDENCIES rather than by the call it holds, because
+   * the dependencies are the ruling. The release effect above it watches the
+   * picture and `savedContents` and is asked on every redraw and every read;
+   * this one may run on a move of the flag and on nothing else, so an effect
+   * that calls `rereadRepo` from `[composed, tab.dirty]` is not this effect
+   * and is not found. Every `useEffect(` and `useLayoutEffect(` is read by
+   * matching parentheses and its LAST argument compared whole.
+   *
+   * `stripComments` blanks a comment character for character, so an offset in
+   * the stripped text is the same offset in the file, which is how the two
+   * ablations below cut the shipping bytes at a span found here.
+   */
+  const cleanEffectOf = (code) => {
+    const opener = /\buse(?:Layout)?Effect\(/g;
+    let m;
+    while ((m = opener.exec(code)) !== null) {
+      const open = m.index + m[0].length - 1;
+      const close = closeOf(code, open);
+      if (close === -1) continue;
+      const args = callArguments(code, open);
+      if (args.length < 2) continue;
+      if (args[args.length - 1].replace(/\s+/g, '') !== '[tab.dirty]') continue;
+      return { start: m.index, open, close, body: args.slice(0, -1).join(', ') };
+    }
+    return null;
+  };
+
+  /**
+   * PHASE 282.2's FIX ROUND. WHICH WAY the clean transition reads the flag:
+   * 'clean' when the re-read is reached only on a tab that is NOT dirty,
+   * 'dirty' when it is reached only on one that is, 'unread' when the flag is
+   * named but in no test this reader can follow.
+   *
+   * THE CLAUSE READ TEXT AND NOT POLARITY, and both of the phase's verifiers
+   * drove it rather than took the SPEC's word: with `if (!tab.dirty) return;`
+   * in a scratch copy of the view this gate exited 0 with every ablation red,
+   * while p2822-after-undo.test.ts went 5 red of 8. Its sentence said "the
+   * effect never asks which way the flag moved", which claimed a direction it
+   * could not see. So the two spellings the clause accepts are read for their
+   * direction, and anything else is refused by name rather than passed:
+   *
+   *   if (tab.dirty ...) return;          the early return, flag UN-negated,
+   *                                       joined to other reasons by `||` only
+   *   if (!tab.dirty && ...) { CALL }     the guard round the call, flag
+   *                                       NEGATED, joined by `&&` only
+   *
+   * A comparison with a literal (`tab.dirty === false`) is `unread`: it can be
+   * right, and this reader would have to evaluate it to know, so the clause
+   * asks for one of the two spellings it can read instead. Only a test BEFORE
+   * the call is looked at, because a test after it decides nothing.
+   */
+  const flagPolarityOf = (body, call) => {
+    const tests = /\bif\s*\(/g;
+    let answer = 'unread';
+    let m;
+    while ((m = tests.exec(body)) !== null) {
+      const open = m.index + m[0].length - 1;
+      if (call !== -1 && open > call) break;
+      const close = closeOf(body, open);
+      if (close === -1) continue;
+      const cond = body.slice(open + 1, close).replace(/\s+/g, '');
+      if (!cond.includes('tab.dirty')) continue;
+      if (/tab\.dirty(?:===?|!==?)|(?:===?|!==?)tab\.dirty/.test(cond)) return 'unread';
+      const negated = cond.includes('!tab.dirty');
+      const after = body.slice(close + 1);
+      if (/^\s*(?:\{\s*)?return\b/.test(after)) {
+        // The early return: the call is reached when this test is FALSE.
+        if (cond.includes('&&')) return 'unread';
+        answer = negated ? 'dirty' : 'clean';
+        continue;
+      }
+      // The guard: the call must sit inside the statement this test governs.
+      const brace = /^\s*\{/.exec(after);
+      const end = brace === null ? body.indexOf(';', close) : closeOf(body, close + brace[0].length);
+      if (call === -1 || call < close || call > end) continue;
+      if (cond.includes('||')) return 'unread';
+      answer = negated ? 'clean' : 'dirty';
+    }
+    return answer;
   };
 
   /**
@@ -5327,6 +5456,57 @@ function gridOf(css, cls) {
         out.push('the repeat is consumed before the preventDefault, so the repeat that fell through deletes a word through ./redline-edits');
       }
     }
+    // 7. PHASE 282.2. THE CLEAN TRANSITION NAMES THE RE-READ. The accept's
+    //    sentence on a dirty tab names undo as a way out, and an undo moves
+    //    nothing the release effect watches until somebody READS: the flag
+    //    goes clean, `savedContents` stays the agent's words, and the
+    //    watcher's tick for the rewind was spent while the tab was dirty. So
+    //    the view asks for that read itself — with a landed hold, on the way
+    //    OUT of dirty, and by reading rather than by adopting what the hold
+    //    remembers. Everything up to the call is what decides whether it is
+    //    made, so the two tests are looked for there.
+    const clean = cleanEffectOf(code);
+    if (clean === null) {
+      out.push(
+        'no effect is keyed on [tab.dirty] alone, so ⌘Z back to clean pulls no read and a landed hold answers "still being rewound" until the agent next writes to that repository'
+      );
+    } else {
+      const call = clean.body.indexOf('rereadRepo(');
+      const asked = call === -1 ? clean.body : clean.body.slice(0, call);
+      if (call === -1) {
+        out.push(
+          'the effect keyed on tab.dirty never calls rereadRepo, so the undo the acceptDirty sentence names leads to no read'
+        );
+      }
+      if (!asked.includes('rewindHolds.current') || !/landed/i.test(asked)) {
+        out.push(
+          'the re-read is pulled on every clean transition whether a hold has landed or not, so an ordinary undo on an ordinary tab reads the disk'
+        );
+      }
+      if (!asked.includes('tab.dirty')) {
+        out.push(
+          'the effect never asks which way the flag moved, so the read is pulled on the way INTO dirty as well as out of it'
+        );
+      } else {
+        // PHASE 282.2's FIX ROUND. And WHICH WAY it asks, read and not assumed
+        // (`flagPolarityOf` says what the verifiers measured).
+        const way = flagPolarityOf(clean.body, call);
+        if (way === 'dirty') {
+          out.push(
+            'the effect tests the flag the wrong way round, so the read is pulled on the way INTO dirty and never on the way out of it, and ⌘Z back to clean leaves the hold standing'
+          );
+        } else if (way === 'unread') {
+          out.push(
+            'the effect names tab.dirty in no test this rule can read the direction of; write `if (tab.dirty) return;` before the call, or `if (!tab.dirty && …) {` round it'
+          );
+        }
+      }
+      if (clean.body.includes('adoptWritten(')) {
+        out.push(
+          'the clean transition adopts the bytes the hold remembers instead of asking the disk what is there now, so a write that landed between the rewind and the undo is drawn over'
+        );
+      }
+    }
     return out;
   };
 
@@ -5401,16 +5581,61 @@ function gridOf(css, cls) {
     return out;
   };
 
+  /**
+   * PHASE 282.2. What is wrong with the store's `rereadRepo`, or an empty
+   * list. The view's clean transition calls it by name, and a name that
+   * reaches nothing is the same lingering hold with one more hop in it.
+   *
+   * A store action is a shorthand METHOD on the object the factory returns,
+   * which `functionBodyOf` does not read, and the name stands in the file
+   * twice: once in the state's interface, where the parameter list is followed
+   * by a type and a `;`, and once as the action, where it is followed by a
+   * body. So every `rereadRepo(` is visited, a declaration with no body is
+   * passed over, and an arrow bound to the name is read too, so a later
+   * refactor from one spelling to the other cannot make this read nothing.
+   */
+  const rereadFindings = (source) => {
+    const code = stripComments(source);
+    const out = [];
+    const bodies = [];
+    const named = /\brereadRepo\s*(?::\s*(?:async\s*)?)?\(/g;
+    let m;
+    while ((m = named.exec(code)) !== null) {
+      const params = closeOf(code, m.index + m[0].length - 1);
+      if (params === -1) continue;
+      const rest = code.slice(params + 1);
+      const method = /^\s*(?::[^;{=]*)?\{/.exec(rest);
+      const arrow = /^\s*(?::[^;{=]*)?=>\s*/.exec(rest);
+      if (method !== null) {
+        const body = blockAt(code, params + method[0].length);
+        if (body !== null) bodies.push(body);
+      } else if (arrow !== null) {
+        const from = params + 1 + arrow[0].length;
+        const body = code[from] === '{' ? blockAt(code, from) : code.slice(from, code.indexOf('\n', from));
+        if (body !== null) bodies.push(body);
+      }
+    }
+    if (bodies.length === 0) {
+      out.push('the editor store has no rereadRepo action, so the view’s clean transition has nothing to call');
+    } else if (!bodies.some((body) => body.includes('refreshRepo('))) {
+      out.push(
+        'rereadRepo does not reach refreshRepo, so the read the clean transition asks for is never made and the hold lingers as it did'
+      );
+    }
+    return out;
+  };
+
   // ---- The shipping sources, read once and judged. -------------------------
   const SOURCES = new Map();
-  for (const file of [VIEW, CURRENT, LIVE]) {
+  for (const file of [VIEW, CURRENT, LIVE, STORE]) {
     if (!existsSync(file)) fail(`40. ${file} is not there, so rule 40 proves nothing`);
     else SOURCES.set(file, readFileSync(file, 'utf8'));
   }
   const SCANNERS = new Map([
     [VIEW, advanceFindings],
     [CURRENT, landingFindings],
-    [LIVE, liveTextFindings]
+    [LIVE, liveTextFindings],
+    [STORE, rereadFindings]
   ]);
   const scanOf = (file) => SCANNERS.get(file) ?? (() => []);
   for (const [file, source] of SOURCES) {
@@ -5469,6 +5694,13 @@ function gridOf(css, cls) {
     '  const host = hostRef.current;\n' +
     '  releaseHolds(rewindHolds.current, host === null ? [] : changeElements(host).map(identityOf), tab.savedContents);\n' +
     '}, [composed, tab.savedContents]);';
+  // PHASE 282.2. The clean transition, in the shape the view ships it in.
+  const CLEAN_EFFECT =
+    'useEffect(() => {\n' +
+    '  if (tab.dirty) return;\n' +
+    '  if (!rewindHolds.current.some((h) => h.landed !== null)) return;\n' +
+    '  useEditor.getState().rereadRepo(tab.repoPath);\n' +
+    '}, [tab.dirty]);';
   const KEY_HANDLER =
     'const scroller = { onKeyDown: (event) => {\n' +
     '  const command = redlineCommandOf(event);\n' +
@@ -5483,6 +5715,7 @@ function gridOf(css, cls) {
       press: PRESS_BODY,
       effect: MOVE_EFFECT,
       release: RELEASE_EFFECT,
+      clean: CLEAN_EFFECT,
       keydown: KEY_HANDLER,
       ...over
     };
@@ -5492,7 +5725,7 @@ function gridOf(css, cls) {
       `const accept = useCallback((kind, host) => {\n${p.accept}\n}, [tab.id]);\n` +
       `const press = useCallback(async (kind, host) => {\n${p.press}\n}, [tab.id]);\n` +
       `useLayoutEffect(() => {\n${p.effect}\n}, [composed, generation, makeCurrent]);\n` +
-      `${p.release}\n${p.keydown}\n`
+      `${p.release}\n${p.clean}\n${p.keydown}\n`
     );
   };
   const NO_ACCEPT_MOVE =
@@ -5744,6 +5977,137 @@ function gridOf(css, cls) {
       }),
       want: 'does not watch savedContents'
     },
+    // PHASE 282.2. The clean transition, one clause each, and first a second
+    // spelling that must PASS, so the scanner is shown not to pin the first.
+    {
+      name: 'the clean transition written as one test around the call, in a layout effect',
+      source: viewSource({
+        clean:
+          'useLayoutEffect(() => {\n' +
+          '  if (!tab.dirty && rewindHolds.current.some((h) => h.landed !== null)) {\n' +
+          '    useEditor.getState().rereadRepo(tab.repoPath);\n' +
+          '  }\n' +
+          '}, [tab.dirty]);'
+      }),
+      want: null
+    },
+    {
+      name: 'the clean transition deleted, so ⌘Z back to clean pulls no read',
+      source: viewSource({ clean: '' }),
+      want: 'no effect is keyed on [tab.dirty] alone'
+    },
+    {
+      name: 'the clean transition keyed on the picture as well, so every redraw of a clean tab reads the disk',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace('}, [tab.dirty]);', '}, [composed, tab.dirty]);')
+      }),
+      want: 'no effect is keyed on [tab.dirty] alone'
+    },
+    {
+      name: 'the re-read deleted from the clean transition',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace('  useEditor.getState().rereadRepo(tab.repoPath);\n', '')
+      }),
+      want: 'never calls rereadRepo'
+    },
+    {
+      name: 'the landed-hold test deleted, so an ordinary undo reads the disk',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace(
+          '  if (!rewindHolds.current.some((h) => h.landed !== null)) return;\n',
+          ''
+        )
+      }),
+      want: 'on every clean transition'
+    },
+    {
+      name: 'any hold asked for, landed or still in the air',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace(
+          '!rewindHolds.current.some((h) => h.landed !== null)',
+          'rewindHolds.current.length === 0'
+        )
+      }),
+      want: 'on every clean transition'
+    },
+    {
+      name: 'the landed-hold test made after the re-read it was to decide',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace(
+          '  if (!rewindHolds.current.some((h) => h.landed !== null)) return;\n  useEditor.getState().rereadRepo(tab.repoPath);\n',
+          '  useEditor.getState().rereadRepo(tab.repoPath);\n  if (!rewindHolds.current.some((h) => h.landed !== null)) return;\n'
+        )
+      }),
+      want: 'on every clean transition'
+    },
+    {
+      name: 'the flag never asked, so the way INTO dirty reads too',
+      source: viewSource({ clean: CLEAN_EFFECT.replace('  if (tab.dirty) return;\n', '') }),
+      want: 'never asks which way the flag moved'
+    },
+    // PHASE 282.2's FIX ROUND. THE DIRECTION, which both verifiers drove past
+    // this clause: every shape below named the flag before the call and was
+    // green until the clause read which way.
+    {
+      name: 'the early return INVERTED, so the read is pulled on the way into dirty (the shape both verifiers planted)',
+      source: viewSource({ clean: CLEAN_EFFECT.replace('  if (tab.dirty) return;\n', '  if (!tab.dirty) return;\n') }),
+      want: 'the wrong way round'
+    },
+    {
+      name: 'the guard round the call INVERTED',
+      source: viewSource({
+        clean:
+          'useEffect(() => {\n' +
+          '  if (tab.dirty && rewindHolds.current.some((h) => h.landed !== null)) {\n' +
+          '    useEditor.getState().rereadRepo(tab.repoPath);\n' +
+          '  }\n' +
+          '}, [tab.dirty]);'
+      }),
+      want: 'the wrong way round'
+    },
+    {
+      name: 'the early return joined with &&, so a dirty tab with a landed hold reads',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace('  if (tab.dirty) return;\n', '  if (tab.dirty && rewindHolds.current.length === 0) return;\n')
+      }),
+      want: 'in no test this rule can read the direction of'
+    },
+    {
+      name: 'the flag compared with a literal, which this clause refuses to evaluate',
+      source: viewSource({ clean: CLEAN_EFFECT.replace('  if (tab.dirty) return;\n', '  if (tab.dirty !== false) return;\n') }),
+      want: 'in no test this rule can read the direction of'
+    },
+    {
+      name: 'the flag tested only AFTER the call it was to decide',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace(
+          '  if (tab.dirty) return;\n  if (!rewindHolds.current.some((h) => h.landed !== null)) return;\n  useEditor.getState().rereadRepo(tab.repoPath);\n',
+          '  if (!rewindHolds.current.some((h) => h.landed !== null)) return;\n  useEditor.getState().rereadRepo(tab.repoPath);\n  if (tab.dirty) return;\n'
+        )
+      }),
+      want: 'never asks which way the flag moved'
+    },
+    {
+      name: 'the early return with a second reason joined by ||, which must PASS',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace(
+          '  if (tab.dirty) return;\n  if (!rewindHolds.current.some((h) => h.landed !== null)) return;\n',
+          '  if (tab.dirty || !rewindHolds.current.some((h) => h.landed !== null)) return;\n'
+        )
+      }),
+      want: null
+    },
+    {
+      name: 'the bytes the hold remembers adopted instead of read',
+      source: viewSource({
+        clean: CLEAN_EFFECT.replace(
+          '  useEditor.getState().rereadRepo(tab.repoPath);\n',
+          '  const hold = rewindHolds.current.find((h) => h.landed !== null);\n' +
+            '  if (hold !== undefined) useEditor.getState().adoptWritten(tab.id, hold.landed.saved, tab.savedContents);\n'
+        )
+      }),
+      want: 'adopts the bytes the hold remembers'
+    },
     {
       name: 'the repeat test deleted, so a held chord rewinds the whole file',
       source: viewSource({
@@ -5858,13 +6222,41 @@ function gridOf(css, cls) {
     }
   ];
 
+  // ---- ./store's scanner, proved on planted actions (Phase 282.2). ---------
+  // The interface line is planted with every one of them, because it is what
+  // a reader that took the FIRST `rereadRepo(` would judge instead of the
+  // action, and it has no body to judge.
+  const STORE_INTERFACE = 'export interface EditorState {\n  rereadRepo(repoPath: string): void;\n}\n';
+  const STORE_ACTION = '  rereadRepo(repoPath) {\n    void io.refreshRepo(repoPath);\n  },\n';
+  const storeSource = (action) =>
+    `${STORE_INTERFACE}const actions = {\n  adoptWritten(id, contents, was) {\n    io.adoptWritten(id, contents, was);\n  },\n${action}};\n`;
+  const STORE_PLANTS = [
+    { name: 'the shipping shape', source: storeSource(STORE_ACTION), want: null },
+    {
+      name: 'the same action bound as an arrow',
+      source: storeSource('  rereadRepo: (repoPath) => void io.refreshRepo(repoPath),\n'),
+      want: null
+    },
+    {
+      name: 'the action reaching nothing, so the view calls a name and no read is made',
+      source: storeSource('  rereadRepo(repoPath) {\n    void repoPath;\n  },\n'),
+      want: 'does not reach refreshRepo'
+    },
+    {
+      name: 'the action deleted and the interface line left behind',
+      source: storeSource(''),
+      want: 'has no rereadRepo action'
+    }
+  ];
+
   let plantsOk = 0;
   let plantsTotal = 0;
   let plantsCaught = 0;
   for (const [label, plants, scan] of [
     ['view', VIEW_PLANTS, advanceFindings],
     ['landingAfterPress', LANDING_PLANTS, landingFindings],
-    ['live-text', LIVE_PLANTS, liveTextFindings]
+    ['live-text', LIVE_PLANTS, liveTextFindings],
+    ['store', STORE_PLANTS, rereadFindings]
   ]) {
     for (const plant of plants) {
       plantsTotal += 1;
@@ -5965,6 +6357,64 @@ function gridOf(css, cls) {
       find: '  return modelText ?? savedContents;\n',
       to: PR28_LIVE_READ,
       want: 'reads the working model on the render path'
+    },
+    // PHASE 282.2. THE TWO BELOW ARE CUT AT A SPAN THE READER FINDS rather than
+    // at a string, because what they remove has no spelling of its own to
+    // anchor on: the effect is known by its dependencies and the hold test by
+    // the holds it asks. `cleanEffectOf` reads the comment-stripped text, whose
+    // offsets are the file's own, and the cut is made in the shipping bytes at
+    // those offsets. An effect or a test that is no longer there returns the
+    // source unchanged, which the loop below fails as an ablation that found
+    // nothing to edit.
+    {
+      name: 'the clean transition’s effect removed, so ⌘Z back to clean pulls no read and the hold lingers',
+      file: VIEW,
+      edit: (source) => {
+        const clean = cleanEffectOf(stripComments(source));
+        return clean === null ? source : source.slice(0, clean.start) + source.slice(clean.close + 1);
+      },
+      want: 'no effect is keyed on [tab.dirty] alone'
+    },
+    {
+      name: 'the landed-hold test removed, so the read is pulled on every clean transition',
+      file: VIEW,
+      edit: (source) => {
+        const code = stripComments(source);
+        const clean = cleanEffectOf(code);
+        if (clean === null) return source;
+        const asks = /rewindHolds\.current\.\w+\(/.exec(code.slice(clean.open, clean.close));
+        if (asks === null) return source;
+        const at = clean.open + asks.index;
+        const close = closeOf(code, at + asks[0].length - 1);
+        return close === -1 ? source : `${source.slice(0, at)}true${source.slice(close + 1)}`;
+      },
+      want: 'on every clean transition'
+    },
+    // PHASE 282.2's FIX ROUND. The two the verifiers made by hand in scratch
+    // copies and found this rule had no arm for. The first is cut inside the
+    // effect the reader finds, so another `if (tab.dirty) return;` elsewhere in
+    // the view is never the one inverted; the second is this rule's only
+    // ablation of ./store, whose scanner had fixtures and no shipping arm.
+    {
+      name: 'the clean transition’s flag test inverted, so the read is pulled on the way INTO dirty',
+      file: VIEW,
+      edit: (source) => {
+        const code = stripComments(source);
+        const clean = cleanEffectOf(code);
+        if (clean === null) return source;
+        const test = /if\s*\(\s*tab\.dirty\s*\)/.exec(code.slice(clean.open, clean.close));
+        if (test === null) return source;
+        const at = clean.open + test.index;
+        return `${source.slice(0, at)}if (!tab.dirty)${source.slice(at + test[0].length)}`;
+      },
+      want: 'the wrong way round'
+    },
+    {
+      name: 'the store’s rereadRepo reaching nothing, so the view calls a name and no read is made',
+      file: STORE,
+      find: /(\n\s*rereadRepo\(repoPath\) \{\n\s*)void io\.refreshRepo\(repoPath\);/,
+      to: '$1void repoPath;',
+      want: 'does not reach refreshRepo'
     }
   ];
   let ablationsRed = 0;
@@ -5973,7 +6423,9 @@ function gridOf(css, cls) {
       const source = SOURCES.get(arm.file);
       if (source === undefined) continue;
       let ablated = source;
-      if (typeof arm.find === 'string') {
+      if (typeof arm.edit === 'function') {
+        ablated = arm.edit(source);
+      } else if (typeof arm.find === 'string') {
         let at = -1;
         for (let i = 0; i < (arm.nth ?? 1); i += 1) at = source.indexOf(arm.find, at + 1);
         if (at !== -1) {
@@ -6007,10 +6459,10 @@ function gridOf(css, cls) {
   }
 
   say(
-    `40. the press that moves on: the follower is carried by IDENTITY and the index is only landingAfterPress's fallback, one press at a time (the holds passed to both verbs, answered with a sentence, landed after the adoption and released in a layout effect that watches savedContents), the host takes the keyboard BEFORE the adoption, a key repeat runs only next and prev after the preventDefault, and live-text.ts reads no working model on the render path (${String(plantsOk)} of ${String(plantsTotal)} scanner fixtures behaved, ${String(plantsCaught)} of them must fail)`
+    `40. the press that moves on: the follower is carried by IDENTITY and the index is only landingAfterPress's fallback, one press at a time (the holds passed to both verbs, answered with a sentence, landed after the adoption and released in a layout effect that watches savedContents), the clean transition names the re-read (an effect keyed on [tab.dirty] alone that tests a landed hold before it calls rereadRepo, which reaches refreshRepo, and adopts nothing), the host takes the keyboard BEFORE the adoption, a key repeat runs only next and prev after the preventDefault, and live-text.ts reads no working model on the render path (${String(plantsOk)} of ${String(plantsTotal)} scanner fixtures behaved, ${String(plantsCaught)} of them must fail)`
   );
   say(
-    `40. ${String(ablationsRed)} of ${String(ABLATIONS.length)} ablations of the SHIPPING source turned this rule red on their own clause, made on the strings in memory with the three files' sha256 compared in a finally`
+    `40. ${String(ablationsRed)} of ${String(ABLATIONS.length)} ablations of the SHIPPING source turned this rule red on their own clause, made on the strings in memory with the four files' sha256 compared in a finally`
   );
 }
 

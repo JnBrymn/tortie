@@ -64,6 +64,11 @@
  *     read before the close with nothing asked again (20). The reverify
  *     planted each and read the gate green; the first also left all 99 tests
  *     of the five save suites green.
+ *  32. PHASE 282.2. The auto test kept, its return kept, and the return made
+ *     THROUGH the plain door: `if (reason === 'auto' && !guarded) return
+ *     saveOutsideProject(…)` — rule 11. The 282.1 reverifier planted it and
+ *     read the gate green; only the vitest "a timer's request never reaches
+ *     the plain door" (p277-save-completion.test.ts) went red.
  *
  * Then the files are restored and the gate must exit ZERO again.
  */
@@ -75,7 +80,35 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TAG = '[p268-ablation]';
-const say = (l) => console.log(`${TAG} ${l}`);
+
+/**
+ * What a gate run printed when it exited non-zero and NAMED NO RULE, held
+ * until the arm's own line is out so that it lands under it.
+ *
+ * PHASE 282.2. The 282.1 reverify saw 2 of 18 runs of this script report
+ * "22. rule 26 did not go red / 23. rule 26 did not go red / 28. rule 11 did
+ * not go red" with no companion "passed the gate" line, at a load of 4.9, and
+ * could not diagnose it: the exit was non-zero, no rule was named, and the
+ * gate's own text was thrown away. A red with no rule is a gate that did not
+ * answer — it crashed, it was killed, or it never started — and the only
+ * account of which is what it printed. So the next flake names its cause.
+ */
+let unexplained = null;
+function explain() {
+  if (unexplained === null) return;
+  const { signal, text } = unexplained;
+  unexplained = null;
+  console.log(
+    `${TAG}   the gate exited non-zero and named no rule${signal ? ` (signal ${signal})` : ''}; everything it printed:`
+  );
+  const lines = text.split('\n').filter((line) => line !== '');
+  if (lines.length === 0) console.log(`${TAG}   | (nothing on stdout or stderr)`);
+  for (const line of lines) console.log(`${TAG}   | ${line}`);
+}
+const say = (l) => {
+  console.log(`${TAG} ${l}`);
+  explain();
+};
 
 const AUTO_SAVE = join(REPO, 'src/renderer/editor/auto-save.ts');
 const TAB_IO = join(REPO, 'src/renderer/editor/tab-io.ts');
@@ -88,6 +121,13 @@ const AUDIT_TEST = join(REPO, 'src/renderer/editor/__tests__/audit-0914-auto-sav
 /** Run the gate and answer its exit code and the rule numbers it named. */
 function runGate() {
   const r = spawnSync(process.execPath, [GATE], { cwd: REPO, encoding: 'utf8' });
+  // PHASE 282.2. A spawn that FAILED is not a gate that answered red. Until
+  // now `r.error` was never read, so a node that could not be started came
+  // back as `status: null`, was read as exit 1 with no rule named, and every
+  // arm it happened under reported "did not go red" — the 282.1 reverify's 2
+  // of 18, which nobody could diagnose. It is thrown, the `finally` below
+  // still restores the tree, and the run ends naming its own cause.
+  if (r.error) throw r.error;
   // A rule that PASSED prints to stdout and a rule that FAILED prints to
   // stderr, so the failing rules are read off stderr alone rather than
   // guessed from the whole output.
@@ -96,7 +136,12 @@ function runGate() {
       [...(r.stderr ?? '').matchAll(/^\[conformance:save\] (\d+[a-z]?)\./gm)].map((m) => m[1])
     )
   ];
-  return { code: r.status ?? 1, failed, text: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  const code = r.status ?? 1;
+  const text = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  // Non-zero with NO rule named: the gate's text is the only account there
+  // is, and `say` prints it under the line of the arm it happened in.
+  if (code !== 0 && failed.length === 0) unexplained = { signal: r.signal, text };
+  return { code, failed, text };
 }
 
 const originals = new Map([
@@ -147,9 +192,13 @@ const problems = [];
 try {
   // ------------------------------------------------------------------ base
   {
-    const { code } = runGate();
-    if (code !== 0) problems.push(`the gate is not green before any ablation (exit ${String(code)})`);
-    else say('base: the gate is green');
+    const { code, failed } = runGate();
+    if (code !== 0) {
+      problems.push(`the gate is not green before any ablation (exit ${String(code)})`);
+      // PHASE 282.2. Said as a line too, so a red that names no rule has a
+      // line for the gate's own text to land under.
+      say(`base: the gate is NOT green: exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    } else say('base: the gate is green');
   }
 
   // ------------------------------------------------------------------- 1
@@ -582,11 +631,35 @@ try {
     restore();
   }
 
+  // ------------------------------------------------------------------ 32
+  // PHASE 282.2. THE SHAPE THAT WALKED PAST ARM 28'S RULE. Rule 11 asked since
+  // Phase 282.1 that the statement testing the reason RETURN, and the 282.1
+  // reverifier planted a return THROUGH the plain door: the test is there, it
+  // is mentioned before the door, the statement returns, and a timer takes the
+  // unguarded write issue 16 measured at 173 bytes of an agent's paragraph.
+  // The gate read green; only p277-save-completion.test.ts, "a timer's request
+  // never reaches the plain door", went red. The statement may not name the
+  // door at all now.
+  {
+    ablate(
+      TAB_IO,
+      "    if (reason === 'auto' && !guarded) return false;\n",
+      "    if (reason === 'auto' && !guarded) return saveOutsideProject(id, tab, model, value, tab.savedContents);\n"
+    );
+    const { code, failed } = runGate();
+    say(`32 (the auto test returning through the plain door): exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    if (code === 0) problems.push('32. an auto test that returns through the plain door passed the gate');
+    if (!failed.includes('11')) problems.push('32. rule 11 did not go red');
+    restore();
+  }
+
   // ---------------------------------------------------------------- restored
   {
-    const { code } = runGate();
-    if (code !== 0) problems.push(`the gate is not green after the restore (exit ${String(code)})`);
-    else say('restored: the gate is green again');
+    const { code, failed } = runGate();
+    if (code !== 0) {
+      problems.push(`the gate is not green after the restore (exit ${String(code)})`);
+      say(`restored: the gate is NOT green: exit ${String(code)}, rules ${failed.join(', ') || 'none'}`);
+    } else say('restored: the gate is green again');
   }
 } finally {
   restore();
@@ -610,6 +683,6 @@ if (problems.length > 0) {
   process.exit(1);
 }
 say(
-  'PASS: 31 ablations, each red on the rule that owns it, and the tree restored byte for byte by sha256.'
+  'PASS: 32 ablations, each red on the rule that owns it, and the tree restored byte for byte by sha256.'
 );
 process.exit(0);

@@ -32,6 +32,13 @@
  * is a string on "disk" with a sha256 compare-and-swap in one synchronous step,
  * whose reads and writes can each be held at a named gate. The watcher's
  * delivery is a store patch of `savedContents`, which is the read it makes.
+ *
+ * PHASE 282.2. ONE READ IN HERE IS NOT HAND MADE ANY MORE. The view now asks
+ * for a read itself when a tab goes clean under a landed hold, so the 282.1
+ * case below runs ../tab-io's real walk against this main: the file read is
+ * counted at `main.reads`, and because that walk asks git for the HEAD version
+ * afterwards, `git.showHead` answers the HEAD each tab was mounted with rather
+ * than the bridge's empty string.
  */
 
 import { createHash } from 'node:crypto';
@@ -299,6 +306,8 @@ const sha = (s: string): string => createHash('sha256').update(s, 'utf8').digest
 /** Only the steps a test names are held, so a whole mount drives itself. */
 const main = gatedFs(sha);
 const disk = main.disk;
+/** PHASE 282.2. Each mounted file's HEAD version, by the path the walk asks git with. */
+const heads = new Map<string, string>();
 
 vi.mock('../MonacoHost', () => ({ OpeningSkeleton: () => null }));
 vi.mock('../live-text', () => ({ useLiveTabText: (_id: string, saved: string) => saved }));
@@ -315,7 +324,10 @@ vi.stubGlobal('window', {
   removeEventListener() {},
   dispatchEvent: () => true,
   HTMLIFrameElement: class {},
-  gmux: gmuxBridge(main, { fs: { readImage: vi.fn(), writeFile: vi.fn(), readDir: vi.fn() } })
+  gmux: gmuxBridge(main, {
+    fs: { readImage: vi.fn(), writeFile: vi.fn(), readDir: vi.fn() },
+    git: { showHead: async (input: { path: string }) => heads.get(input.path) ?? '' }
+  })
 });
 vi.stubGlobal('document', doc);
 vi.stubGlobal('HTMLElement', FakeElement);
@@ -366,6 +378,8 @@ let container: FakeElement | null = null;
 async function mount(tabs: EditorTab[], onDisk: string): Promise<void> {
   main.reset(onDisk);
   toasts.length = 0;
+  heads.clear();
+  for (const t of tabs) heads.set(t.relPath, t.headContents ?? '');
   for (const t of tabs) forgetRewindJournal(t.id);
   useApp.setState({ toast: (_kind: string, text: string) => void toasts.push(text) } as never);
   useEditor.setState({ projectId: 'p', tabs, activeId: tabs[0]?.id ?? null, panelOpen: true } as never);
@@ -545,10 +559,21 @@ describe('the presses, through the mounted view', () => {
    * Its re-derive then measured that releasing the hold there is the harm: the
    * accept moves the baseline onto the agent's words and the rewind is drawn
    * backwards once the tab is clean. So the hold STAYS, the sentence on a dirty
-   * tab names the way out, and once the person undoes the keystroke the
-   * watcher's read lets the hold go and the follower is theirs to accept.
+   * tab names the way out, and once the person undoes the keystroke a read
+   * lets the hold go and the follower is theirs to accept.
+   *
+   * PHASE 282.2. THAT READ IS THE VIEW'S OWN NOW, and this case no longer makes
+   * one by hand. The 282.1 round called `watcherReads(ID)` right after the
+   * undo, which is why it was green over a gap both reverifiers measured: the
+   * app made no read on a tab going clean, the rewind's own tick had been
+   * spent while the tab was dirty, and between the undo and some later change
+   * in the repository every ⌥↩ said "still being rewound". The between-step is
+   * asserted here instead: the undo ALONE takes `main.reads` from 1 to 2, the
+   * picture is the disk's, and the very next ⌥↩ accepts.
+   * `p2822-after-undo.test.ts` holds that read in the air and reads the linger
+   * for as long as the disk has not answered.
    */
-  it('A KEYSTROKE INSIDE THE WRITE: the landed hold stays on the dirty tab, ⌥↩ says the way out, and the read after ⌘Z lets it go with nothing drawn backwards', async () => {
+  it('A KEYSTROKE INSIDE THE WRITE: the landed hold stays on the dirty tab, ⌥↩ says the way out, and ⌘Z alone pulls the read that lets it go with nothing drawn backwards', async () => {
     await mount([tabOf(ID, BASE, AGENT)], AGENT);
     await next();
     expect(marked()).toBe('"brown"->"red"');
@@ -567,24 +592,35 @@ describe('the presses, through the mounted view', () => {
     });
     await accept();
     await accept();
-    const whileDirty = { drawn: drawn(), toasts: [...toasts] };
-    // ⌘Z on the keystroke, then the watcher reads the file the rewind left.
+    const whileDirty = { drawn: drawn(), toasts: [...toasts], reads: main.reads };
+    // ⌘Z on the keystroke, and NOTHING ELSE: no watcher tick is delivered and
+    // no store patch stands in for one. The read below is the view's.
     await act(() => {
       useEditor.getState().markDirty(ID, false);
     });
-    await watcherReads(ID);
-    const afterRead = { drawn: drawn(), marked: marked() };
+    const afterUndo = {
+      reads: main.reads,
+      savedContents: useEditor.getState().tabs[0]?.savedContents,
+      drawn: drawn(),
+      marked: marked()
+    };
     await accept();
-    expect({ whileDirty, afterRead, then: { drawn: drawn(), toasts: toasts.slice(2) } }).toEqual({
+    expect({ whileDirty, afterUndo, then: { drawn: drawn(), toasts: toasts.slice(2), reads: main.reads } }).toEqual({
       whileDirty: {
         drawn: ['"brown"->"red"', '"jumps"->"leaps"'],
         toasts: [
           'A change in notes.txt was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your edits first, then accept.',
           'A change in notes.txt was rewound, but your unsaved edits still show it, so nothing was accepted. Save or undo your edits first, then accept.'
-        ]
+        ],
+        reads: 1
       },
-      afterRead: { drawn: ['"jumps"->"leaps"'], marked: '"jumps"->"leaps"' },
-      then: { drawn: [], toasts: [] }
+      afterUndo: {
+        reads: 2,
+        savedContents: 'The quick brown fox leaps over the lazy dog.\n',
+        drawn: ['"jumps"->"leaps"'],
+        marked: '"jumps"->"leaps"'
+      },
+      then: { drawn: [], toasts: [], reads: 2 }
     });
   });
 

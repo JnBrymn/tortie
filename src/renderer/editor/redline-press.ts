@@ -93,10 +93,13 @@ export interface RewindHold {
   readonly pressed: PressedChange;
   /**
    * Null while the write is in the air. Once it has landed: the tab's
-   * `savedContents` right after the adoption, and the bytes the write
-   * replaced.
+   * `savedContents` right after the adoption, the bytes the write replaced,
+   * and the bytes it WROTE. `saved !== wrote` is an adoption that refused: the
+   * tab went on holding bytes the write had already left behind, and
+   * {@link releaseHolds} lets such a hold go on bytes alone (Phase 282.2's fix
+   * round).
    */
-  landed: { saved: string; was: string } | null;
+  landed: { saved: string; was: string; wrote: string } | null;
 }
 
 /** The whole triple, which is what a press resolves by (./rewind `resolvePress`). */
@@ -120,20 +123,25 @@ export function pressIsHeld(
 }
 
 /**
- * The write landed: record what the tab holds now and what the write replaced,
- * which is what {@link releaseHolds} compares a later read against. The hold is
- * found by REFERENCE, because `pressed` is the object {@link pressRedline}
- * pushed and handed back as `entry`, so two presses that happen to carry equal
- * identities can never land each other's hold.
+ * The write landed: record what the tab holds now, what the write replaced and
+ * what it wrote, which is what {@link releaseHolds} compares a later read
+ * against. The hold is found by REFERENCE, because `pressed` is the object
+ * {@link pressRedline} pushed and handed back as `entry`, so two presses that
+ * happen to carry equal identities can never land each other's hold.
+ *
+ * `wrote` is REQUIRED and last, so a caller written before Phase 282.2's fix
+ * round does not compile rather than landing a hold that a dirty buffer's
+ * picture can let go.
  */
 export function landHold(
   holds: readonly RewindHold[],
   pressed: PressedChange,
   saved: string,
-  was: string
+  was: string,
+  wrote: string
 ): void {
   const hold = holds.find((h) => h.pressed === pressed);
-  if (hold !== undefined) hold.landed = { saved, was };
+  if (hold !== undefined) hold.landed = { saved, was, wrote };
 }
 
 /**
@@ -168,6 +176,29 @@ export function landHold(
  *   takes no `dirty` at all so it cannot come back by an argument.
  * - A landed hold goes when no drawn change equals it on all three fields —
  *   the redraw the rewind was waiting for.
+ * - BUT NOT WHILE THE TAB STILL HOLDS THE BYTES A REFUSED ADOPTION LEFT IT
+ *   WITH, and Phase 282.2's attack verifier is why. When the adoption refused
+ *   (`landed.saved !== landed.wrote`: the tab was dirty, or trailed the disk),
+ *   the redraw the rewind is waiting for can only follow a READ, and a read
+ *   moves `savedContents`. A picture that stops drawing the change while
+ *   `savedContents` has not moved is a DIRTY BUFFER's picture, and it says
+ *   nothing about the file: the verifier pressed ⌘Z twice in a row, the second
+ *   inside the read the first had pulled, and monaco un-applied the reload
+ *   that had brought the agent's write in (./monaco-loader makes a reload
+ *   undoable). The buffer held the text from before the agent wrote, the
+ *   picture drew no change at all, this function let the hold go, the read
+ *   came back to a dirty tab and was dropped, and one ⌘⇧Z later the tab was
+ *   CLEAN over the agent's bytes with the rewound change drawn, no hold, and
+ *   so no read owed (./RedlineDocument's clean transition asks for one only
+ *   under a landed hold): ⌥↩ accepted the change the person had rewound with
+ *   nothing said, the next read drew it backwards and the next ⌥⌫ in the
+ *   rhythm wrote the agent's word back over the rewind — in the app, at HEAD
+ *   and at the 282.1 bytes alike. It is §11.1's ruling, "a dirty tab keeps its
+ *   landed holds", held against the one road round it; it takes no `dirty`
+ *   because the bytes already say it, and because a refused adoption on a
+ *   CLEAN trailing tab is waiting for the same read. With the hold kept, that
+ *   ⌘⇧Z finds a landed hold, the clean transition reads, and the hold goes on
+ *   the disk's bytes by the clause below.
  * - OR when the tab has read bytes that are neither what it held right after
  *   the adoption nor the bytes the write replaced. That is a file somebody
  *   wrote after the rewind, so a change drawn with the same words is theirs;
@@ -189,7 +220,10 @@ export function releaseHolds(
     if (hold.landed === null) continue;
     const stillDrawn = drawn.some((id) => id !== null && samePress(id, hold.pressed));
     const newer = saved !== hold.landed.saved && saved !== hold.landed.was;
-    if (!stillDrawn || newer) holds.splice(at, 1);
+    // The adoption refused and nothing has been read since: whatever the
+    // picture draws, it is not the file the rewind wrote.
+    const unread = hold.landed.saved !== hold.landed.wrote && saved === hold.landed.saved;
+    if ((!stillDrawn && !unread) || newer) holds.splice(at, 1);
   }
 }
 

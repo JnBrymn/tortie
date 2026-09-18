@@ -338,6 +338,18 @@ interface EditorState {
    */
   adoptWritten(id: string, contents: string, was: string): void;
   /**
+   * PHASE 282.2. READ THIS REPOSITORY'S OPEN TABS AGAIN, NOW. It is the walk
+   * the watcher's tick makes (`init` below), asked for by the one caller that
+   * knows a tick is owed and will not come: ./RedlineDocument, when a tab goes
+   * clean under a landed rewind hold. That rewind's own tick was spent while
+   * the tab was dirty, the walk skips a dirty tab by rule, and on a paused
+   * agent nothing else in the repository changes, so the hold stood and every
+   * ⌥↩ said "still being rewound" while nothing was. It hands over no bytes
+   * and takes no tab id: it is ./tab-io's `refreshRepo`, serializer, clean
+   * test, rules 22 and 26 and all, and a second call joins the queued walk.
+   */
+  rereadRepo(repoPath: string): void;
+  /**
    * MonacoHost calls this after it has revealed, selected and flashed the
    * range — a landing happens once per request, never again on the next
    * re-render or mode toggle.
@@ -1426,6 +1438,12 @@ export const useEditor = create<EditorState>((set, get) => {
 
     adoptWritten(id, contents, was) {
       io.adoptWritten(id, contents, was);
+    },
+
+    // PHASE 282.2. The same call `init`'s watcher tick makes, fire and forget
+    // for the same reason: the walk patches the tabs itself.
+    rereadRepo(repoPath) {
+      void io.refreshRepo(repoPath);
     },
 
     clearPendingSelection(id) {

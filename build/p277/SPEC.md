@@ -749,3 +749,18 @@ through it.
    list for a file outside every open project and for a never-saved draft: false, no read, no write; the
    `explicit` control takes the door. Under the planted `void 0` the timer wrote through the plain door
    (`plainWrites: 1`).
+
+## Corrections after Phase 282.2 (Phase 282.1's reverify, 2026-09-18)
+
+1. **`conformance:save` READS TEXT, and the vitest is the runtime pin.** Item 1 above says rule 11 "now reads the
+   effect". It reads a statement's TEXT, which is a narrower thing: Phase 282.1's reverifier planted
+   `if (reason === 'auto' && !guarded) return saveOutsideProject(…)` in `saveOnce` — the test kept, mentioned
+   before the door, and the statement returning, THROUGH the door — and the gate stayed green while a timer took
+   the plain door. What went red was `p277-save-completion.test.ts`, "a timer's request never reaches the plain
+   door, whatever asked first", which drives `io.save(id, 'auto')` and counts the writes. So the division is
+   stated rather than implied: that vitest is what holds rule 11's PROPERTY, because it runs the door; the gate
+   holds the SHAPE a later round would edit, and can only ever refuse the spellings somebody has thought of.
+   Rule 11 gains the one this round was shown — the statement that tests the auto reason may not name
+   `saveOutsideProject` at all ("11. the statement that tests the auto reason returns through the plain door") —
+   and `ablation:p268` arm 32 plants it, red on rule 11 (32 of 32). A helper that reaches the door under another
+   name would still read green here, and still go red in the vitest.

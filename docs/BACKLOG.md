@@ -30143,6 +30143,50 @@ under its own label and this phase second.
 - The battery on the committed bytes: typecheck, build, npm test, smoke:t1, gate:checks, conformance:save,
   ablation:p268, conformance:redline, conformance:redline-write, probe:p277, probe:p268, probe:redlinemoveon.
 
+### The fix round (the phase's own two verifiers, 2026-09-18; the whole account is `build/p282/SPEC.md` §12.1)
+
+The attack verifier said needs_work and the re-derive verifier said pass; both confirmed the way out with rigs
+of their own that mock neither `redline-edits.ts` nor `live-text.ts`, and both went past it.
+
+- **FIXED, a dirty buffer's picture let a hold go.** Two ⌘Z in a row, the second inside the read the first had
+  pulled, on a tab whose model had followed the agent's write as an undoable reload: the buffer held the text
+  from before the agent wrote, the picture drew no change, `releaseHolds` (`src/renderer/editor/redline-press.ts`)
+  took that for the redraw the rewind was waiting for, the read came back to a dirty tab and was dropped, and
+  one ⌘⇧Z later ⌥↩ accepted the change the person had rewound with nothing said; the next read drew it
+  backwards and the next ⌥⌫ wrote the agent's word back. In the app, at HEAD and at the 282.1 bytes alike. A
+  hold whose ADOPTION REFUSED now goes on bytes and never on a picture alone: `landHold` records what the write
+  wrote (a fifth parameter, required), and the first release clause does not fire while
+  `landed.saved !== landed.wrote && saved === landed.saved`. No `dirty` argument, no sentence changed, nothing
+  read without a landed hold. Red without it: `p282-one-press.test.ts` "A DIRTY BUFFER'S PICTURE LETS NOTHING
+  GO" (1 of 21), `src/renderer/editor/__tests__/p2822-second-undo.test.ts` (the attack verifier's rig, adopted:
+  2 red of 7 with the clause out, 5 red of 7 at the 282.1 bytes), and `probe:redlinemoveon` ARM Z, red on the
+  build made before the fix and at the 282.1 bytes ("never within 1500 ms … ⌥↩ pressed on yankee, toasts [],
+  3 -> 2 … drawn backwards true") and green after it (exit 0; the whole probe 27 passed, 0 failed, in 41 s and again in 46 s on the final build).
+- **FIXED, rule 40 clause 7 read text and not direction.** Both verifiers planted `if (!tab.dirty) return;` and
+  read the gate exit 0. `flagPolarityOf` in `build/conformance-redline.mjs` reads which way the two accepted
+  spellings test the flag and refuses any other by name: six fixtures, and two ablations of the shipping source
+  (the flag test inverted; `store.ts`'s `rereadRepo` reaching nothing, which had fixtures and no shipping arm).
+  62 of 62 fixtures, 55 of which must fail, 15 of 15 ablations; over a scratch tree with the inversion planted
+  the gate exits 1.
+
+### What is still not true after this phase (each is HIS ruling, so nothing was built; SPEC §12.1 has the options)
+
+- **A look at the File view can lose a rewind** (attack: major; identical at the 282.1 bytes, so not this phase's).
+  The hold is the mount's, and the read this phase adds is owed by the hold. A tab switch, the mode chip to File
+  and back, or an undo made in the File view ends both: the tab is clean over the agent's text while the disk
+  holds the rewind, ⌥↩ accepts the rewound change with nothing said, the next read draws it backwards and ⌥⌫ on
+  that writes the agent's words back. On a still-dirty tab it needs no undo at all. **It is not queued anywhere
+  yet, and a line here is a mention, not a queue**: it needs its own entry once he has chosen between a read the
+  TAB owes (lifts this phase's "no read without a landed hold"), a hold that outlives the mount (reverses Phase
+  282's "one array per mount"), or leaving it stated.
+- **One ⌘Z too many un-applies the read**, because a reload is an undoable edit since Phase 237: the rewound change
+  is drawn again from a dirty buffer with no hold, ⌥↩ accepts it, ⌘⇧Z draws it backwards, and ⌘S there writes the
+  agent's text over the rewind with no stale dialog. Visible at every step, and reachable at the parent with a
+  plain ⌥⌫ then ⌘Z. **And the undo is not temporary**: the read empties redo, so ⌘Z, ⌥↩, ⌘⇧Z brings no typing back.
+  Both turn on one ruling, whether a rewind's reload should be an edit.
+- "One read" is a serial walk of every open tab of the repository: 7.5 ms with one tab, 183.6 ms with ten.
+- Between the undo and the disk's answer ⌥↩ still says "still being rewound", which is true for that long.
+
 ### What is NOT in this phase
 
 - No change to the `acceptDirty` sentence or the held sentences: the words stay, the road they name

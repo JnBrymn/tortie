@@ -74,6 +74,91 @@
  * scramble and R's runaway repeat do not exist before PR 28, so grading them
  * there would assert a shape nobody measured.
  *
+ * PHASE 282.2's ARM runs last, over changes it writes itself (docs/BACKLOG.md
+ * `## Phase 282.2`, build/p282/SPEC.md §11.1):
+ *
+ *   U. UNDO IS A WAY OUT. ⌥⌫ with a keystroke typed INSIDE the rewind's write,
+ *      so the write lands on a dirty tab, the adoption refuses and the hold
+ *      lands on a picture that still draws the change. The arm then waits out
+ *      the rewind's own watcher tick on the clock, which a dirty tab spends on
+ *      nothing; ⌥↩ says the sentence that names the way out ("Save or undo
+ *      your edits first, then accept."); ⌘Z until the tab is clean; and ⌥↩
+ *      again. At HEAD the clean transition reads the file, the picture lets
+ *      the rewound change go and the accept lands: no held sentence, the file
+ *      is the rewound text and the tab's `savedContents` is the disk's. Every
+ *      reading is printed whatever the outcome.
+ *
+ *      U's EXPECTATIONS NEVER FLIP, so its findings ARE the parent reading
+ *      (build/p276/probe-p276.mjs has the same shape). Against the Phase 282.1
+ *      bytes, where nothing reads on the clean transition, it FAILS with the
+ *      accept after the undo answering "A change in notes.txt is still being
+ *      rewound, so nothing was accepted." and the run says so in those words.
+ *      It is not run under `ACCEPT_ADVANCE_PARENT=282`: PR 28's head has no
+ *      hold to linger, so there is no shape there for it to show.
+ *
+ *      THE KEYSTROKE INSIDE THE WRITE IS REAL TIMING AND NOT A SEAM. There is
+ *      no way in this product to hold a guarded write open, and adding one
+ *      would mean the arm proved the seam. It does not need one, for the
+ *      reason src/renderer/editor/p277-save-drive.ts gives for `saveThenType`:
+ *      the press runs synchronously as far as its first await, which is the
+ *      re-read, so a keystroke delivered in the SAME TASK as the chord lands
+ *      strictly inside the two IPC round trips of the write. The chord is a
+ *      real ⌥⌫ through CDP; the keystroke is one `beforeinput` dispatched at
+ *      the document by a one-shot listener on `window`, which the keydown
+ *      reaches after React's own handler has started the press. Two CDP keys
+ *      sent back to back race that window instead (arm C allows for both
+ *      orders for exactly that reason), and this arm has only one order to
+ *      measure.
+ *
+ * PHASE 282.2's FIX ROUND added one more, which also runs over changes it
+ * writes itself (build/p282/SPEC.md §12, "THE FIX ROUND"):
+ *
+ *   Z. A PRESS TOO MANY, TAKEN BACK. Arm U's first half, then a HELD ⌘Z: the
+ *      keydown and its first repeat sent without waiting for the first to be
+ *      answered, which is how the phase's attack verifier put the second undo
+ *      INSIDE the read the first had pulled. That second undo un-applies the
+ *      reload that brought the agent's write into the model (a reload is an
+ *      edit, ./monaco-loader), so the tab is dirty again over the text from
+ *      BEFORE the agent wrote and its picture draws no change at all; the read
+ *      answers a dirty tab and is dropped. Then ⌘⇧Z until the tab is clean, and
+ *      ⌥↩. Before the fix round the dirty buffer's empty picture had let the
+ *      hold go, so that clean transition read nothing, the rewound change was
+ *      drawn again over `savedContents` the disk had left behind, and ⌥↩
+ *      ACCEPTED it with nothing said; an outside write then drew it backwards
+ *      and the next ⌥⌫ wrote the agent's word back (the verifier's arm X, the
+ *      same at HEAD and at the 282.1 bytes). With the hold kept, ⌘⇧Z back to
+ *      clean reads the file, the picture lets the rewound change go, ⌥↩ takes
+ *      the change that followed it, and an outside write afterwards draws
+ *      nothing backwards. WHICH SIDE OF THE READ the repeat landed on is real
+ *      timing and is printed, not assumed (`savedContents` still the agent's
+ *      text after the two keys is a read that had not answered; against a
+ *      build that pulls no read it reads the same, because there the hold is
+ *      lost to the same empty picture): when it lands AFTER the read, ⌘Z
+ *      un-applies the read itself, which is a stated limit and not this arm's
+ *      (SPEC §12), and the arm's expectations hold there too because ⌘⇧Z puts
+ *      the read back. Like U its expectations never flip, and it is not run
+ *      under `ACCEPT_ADVANCE_PARENT=282`.
+ *
+ * ## ENVIRONMENT
+ *
+ *   ACCEPT_ADVANCE_PARENT   The grading mode above: unset, `1` or `282`.
+ *   REDLINEMOVEON_CHECKOUT  A BUILT checkout to launch instead of this one:
+ *                           its `out/` and its cwd, in the shape
+ *                           build/p276/probe-p276.mjs takes its parent. The
+ *                           probe, the helper and the scratch socket stay this
+ *                           checkout's. This is how arm U is read against the
+ *                           Phase 282.1 bytes. One Electron either way.
+ *   REDLINEMOVEON_ARMS      A subset of `H,O,L,C,R,T,U,Z`, commas between. Unset
+ *                           is every arm the mode has. R, T, U and Z stand alone;
+ *                           O and C need H, and L needs O, because they are
+ *                           written against the picture the arm before them
+ *                           left, and a subset that breaks that is refused by
+ *                           name rather than run into a fixture finding.
+ *                           `REDLINEMOVEON_ARMS=U` is arm U alone, which is
+ *                           the run that fits under a short ceiling. It is
+ *                           refused under `ACCEPT_ADVANCE_PARENT=1`, which is
+ *                           one drive and has no arms.
+ *
  * ## SAFETY
  *
  * One Electron, through build/electron-run.mjs, which ends the tree it started
@@ -86,7 +171,11 @@
  * cat, exactly as an agent's write looks here, with ONE exception: arm O's
  * outside write is this node process's own synchronous `writeFileSync`,
  * because that arm measures the gap between the write and the key, and a
- * process start would sit inside it.
+ * process start would sit inside it. Arms U and Z each put one keydown
+ * listener on the page's `window` and take it off again whether it fired or
+ * not, and read the tab through `window.__gmuxP277`, the Phase 277 drive every
+ * harness launch already registers; they add nothing to the app. Arm Z writes
+ * one more file, `elsewhere.txt`, beside the fixture in the scratch project.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -114,6 +203,68 @@ if (PARENT_MODE !== '' && PARENT_MODE !== '1' && PARENT_MODE !== '282') {
 }
 const PARENT = PARENT_MODE === '1';
 const PR28_HEAD = PARENT_MODE === '282';
+
+/**
+ * PHASE 282.2. WHICH ARMS RUN, as a pure function of the knob and the mode so
+ * `--self-test` can ask it. H is the head drive and the letters after it are
+ * the arms in the order they run, which is the order answered whatever order
+ * the knob named them in.
+ *
+ * `NEEDS` is what an arm is written against. O counts exactly four changes, so
+ * it needs the picture H emptied; L accepts down to the last change O left;
+ * and C compares the file with the word that stood there before its own write,
+ * which is the baseline's only once H has accepted the draft. R and U accept
+ * everything first and T asks only for a clean tab, so those three stand alone.
+ */
+const ALL_ARMS = ['H', 'O', 'L', 'C', 'R', 'T', 'U', 'Z'];
+/** Phase 282.2's arms: PR 28's head has no hold to linger, so neither has a shape to show there. */
+const HOLD_ARMS = ['U', 'Z'];
+const NEEDS = { O: ['H'], L: ['H', 'O'], C: ['H'] };
+function armsFrom(raw, parentMode) {
+  const named = raw
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter((s) => s !== '');
+  if (named.length === 0) {
+    return { arms: ALL_ARMS.filter((a) => !(HOLD_ARMS.includes(a) && parentMode === '282')), refusal: null };
+  }
+  if (parentMode === '1') {
+    return { arms: [], refusal: 'ACCEPT_ADVANCE_PARENT=1 is the parent drive alone and has no arms to choose from' };
+  }
+  const unknown = named.filter((a) => !ALL_ARMS.includes(a));
+  if (unknown.length > 0) {
+    return { arms: [], refusal: `${unknown.join(', ')} is not an arm; the arms are ${ALL_ARMS.join(', ')}` };
+  }
+  const heldHere = named.filter((a) => HOLD_ARMS.includes(a));
+  if (parentMode === '282' && heldHere.length > 0) {
+    return { arms: [], refusal: `arm ${heldHere[0]} is not graded at PR 28’s head, which has no hold to linger` };
+  }
+  const arms = ALL_ARMS.filter((a) => named.includes(a));
+  for (const arm of arms) {
+    const missing = (NEEDS[arm] ?? []).filter((n) => !arms.includes(n));
+    if (missing.length > 0) {
+      return { arms: [], refusal: `arm ${arm} is written against the picture ${missing.join(' and ')} left, so it does not run without ${missing.length === 1 ? 'it' : 'them'}` };
+    }
+  }
+  return { arms, refusal: null };
+}
+const ARMS_RAW = (process.env['REDLINEMOVEON_ARMS'] ?? '').trim();
+const CHOSEN = armsFrom(ARMS_RAW, PARENT_MODE);
+if (CHOSEN.refusal !== null) {
+  console.error(`${TAG} REDLINEMOVEON_ARMS is ${JSON.stringify(ARMS_RAW)}: ${CHOSEN.refusal}`);
+  process.exit(2);
+}
+const runs = (arm) => CHOSEN.arms.includes(arm);
+
+/**
+ * PHASE 282.2. THE BUILD UNDER TEST. Unset is this checkout. Set, it is a
+ * BUILT checkout somewhere else — its `out/` and its cwd — which is how arm U
+ * is read against the Phase 282.1 bytes (build/p276/probe-p276.mjs takes its
+ * parent the same way). Everything else stays this checkout's: the probe, the
+ * launch helper, the scratch socket and the scratch project.
+ */
+const CHECKOUT = (process.env['REDLINEMOVEON_CHECKOUT'] ?? '').trim();
+const APP_ROOT = CHECKOUT === '' ? REPO : resolve(CHECKOUT);
 
 const failures = [];
 const rows = [];
@@ -226,6 +377,13 @@ function grade(reading, mode) {
  */
 const NOTES = 'notes.txt';
 const HELD_ACCEPT = `A change in ${NOTES} is still being rewound, so nothing was accepted.`;
+/**
+ * PHASE 282.2. The way out `acceptDirty` names (./redline-sentences), held as
+ * the clause arm U is about rather than as the whole sentence: the arm asks
+ * whether the road those words name is real, and the words before them are
+ * Phase 282.1's to change.
+ */
+const WAY_OUT = 'Save or undo your edits first';
 
 const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'];
 /** Eight paragraphs, each with one marker word that differs between versions. */
@@ -259,7 +417,7 @@ function paragraphsMoved(a, b) {
  * arm whose own fixture did not draw measured nothing either way.
  */
 function gradeArms(reading, mode) {
-  const out = { o: [], l: [], c: [], r: [], t: [] };
+  const out = { o: [], l: [], c: [], r: [], t: [], u: [], z: [] };
   const head = mode === 'head';
 
   const o = reading.o;
@@ -369,9 +527,116 @@ function gradeArms(reading, mode) {
       out.t.push('THE SCRAMBLE DID NOT REPRODUCE: the burst reached the file in order');
     }
   }
+
+  // PHASE 282.2. U IS GRADED ONE WAY ROUND, at HEAD, and not at all at PR 28's
+  // head, which has no hold to linger. Its findings against the Phase 282.1
+  // bytes are the parent reading, so the first claim is worded as that reading
+  // and carries the sentence the app said. The fixture findings come first for
+  // the reason they do above: a keystroke that reached the page after the
+  // write, or a first ⌥↩ pressed before the rewind's own watcher tick had been
+  // spent, leaves nothing lingering to measure on either build.
+  const u = reading.u;
+  if (head) {
+    if (u === undefined) out.u.push('arm U did not run');
+    else {
+      if (u.seam !== true) {
+        out.u.push('window.__gmuxP277 is not on this page, so the tab’s dirty flag and its savedContents were not read');
+      }
+      if (u.drawn !== true) out.u.push('the U fixture did not draw its three changes');
+      if (u.marked !== true) out.u.push('arm U could not mark the change it presses with the caret in the document');
+      if (u.cleanAtPress !== true) out.u.push('the tab was not clean at the press, so the rewind was refused rather than raced');
+      if (u.typedInside !== true) {
+        out.u.push('the keystroke was not delivered in the chord’s own task, so nothing was typed inside the write');
+      }
+      if (u.landedDirty !== true) {
+        out.u.push(
+          `the write did not land on a dirty tab that still draws the change (dirty ${String(u.dirtyAtLanding)}, file holds the rewind ${String(u.fileAtLanding)}, still drawn ${String(u.drawnAtLanding)}), so no hold was left to linger`
+        );
+      }
+      if (typeof u.waitedMs !== 'number' || typeof u.debounceMs !== 'number' || u.waitedMs < 3 * u.debounceMs) {
+        out.u.push(
+          `the first ⌥↩ came ${String(u.waitedMs)} ms after the write, inside three debounce windows of ${String(u.debounceMs)} ms, so the rewind’s own tick may not have been spent`
+        );
+      }
+      if (u.dirtySentence !== true) {
+        out.u.push(`⌥↩ on the dirty tab did not name the way out, "${WAY_OUT}" (toasts ${JSON.stringify(u.toastsWhileDirty ?? [])})`);
+      }
+      if (u.cleanAfterUndo !== true) out.u.push(`⌘Z did not bring the tab back to clean in ${String(u.undoPresses)} presses`);
+      if (u.heldAfterUndo === true) {
+        out.u.push(
+          `UNDO IS NOT A WAY OUT: ${String(u.undoToAcceptMs)} ms after ⌘Z made the tab clean, ⌥↩ answered "${HELD_ACCEPT}"`
+        );
+      } else if (u.accepted !== true) {
+        out.u.push(
+          `the accept after the undo neither landed nor said why: ${String(u.before)} -> ${String(u.after)} changes, toasts ${JSON.stringify(u.toastsAfterUndo ?? [])}`
+        );
+      }
+      if (u.rewoundStillDrawn !== false) out.u.push('the picture still draws the rewound change after the undo');
+      if (u.diskIsRewind !== true) out.u.push('the file on disk is not the rewound text');
+      if (u.savedIsDisk !== true) {
+        out.u.push('the tab’s savedContents is not what the disk holds, so no read followed the undo');
+      }
+    }
+  }
+
+  // PHASE 282.2's FIX ROUND. Z IS GRADED LIKE U: one way round, at HEAD, and
+  // its findings against a build without the fix ARE the parent reading. The
+  // fixture findings come first, and one of them is the arm's own: two ⌘Z that
+  // did not leave the tab dirty un-applied nothing, so there was no press too
+  // many to take back.
+  const z = reading.z;
+  if (head) {
+    if (z === undefined) out.z.push('arm Z did not run');
+    else {
+      if (z.seam !== true) {
+        out.z.push('window.__gmuxP277 is not on this page, so the tab’s dirty flag and its savedContents were not read');
+      }
+      if (z.drawn !== true) out.z.push('the Z fixture did not draw its three changes');
+      if (z.marked !== true) out.z.push('arm Z could not mark the change it presses with the caret in the document');
+      if (z.cleanAtPress !== true) out.z.push('the tab was not clean at the press, so the rewind was refused rather than raced');
+      if (z.typedInside !== true) {
+        out.z.push('the keystroke was not delivered in the chord’s own task, so nothing was typed inside the write');
+      }
+      if (z.landedDirty !== true) {
+        out.z.push(
+          `the write did not land on a dirty tab that still draws the change (dirty ${String(z.dirtyAtLanding)}, file holds the rewind ${String(z.fileAtLanding)}, still drawn ${String(z.drawnAtLanding)}), so no hold was left to lose`
+        );
+      }
+      if (typeof z.waitedMs !== 'number' || typeof z.debounceMs !== 'number' || z.waitedMs < 3 * z.debounceMs) {
+        out.z.push(
+          `the held ⌘Z came ${String(z.waitedMs)} ms after the write, inside three debounce windows of ${String(z.debounceMs)} ms, so the rewind’s own tick may not have been spent`
+        );
+      }
+      if (z.dirtyAfterHeld !== true) {
+        out.z.push('the held ⌘Z did not leave the tab dirty, so the second undo un-applied nothing and there was no press too many to take back');
+      }
+      if (z.cleanAfterRedo !== true) out.z.push(`⌘⇧Z did not bring the tab back to clean in ${String(z.redoPresses)} presses`);
+      if (z.rewoundDrawnAfterRedo !== false) {
+        out.z.push(
+          `A PRESS TOO MANY LOSES THE WAY OUT: ${String(z.letGoCapMs)} ms after ⌘⇧Z made the tab clean the picture still draws the rewound change, and savedContents is the disk’s ${String(z.savedIsDiskAfterRedo)}`
+        );
+      }
+      if (z.acceptedRewound === true) {
+        out.z.push(
+          `⌥↩ ACCEPTED THE CHANGE THE PERSON HAD REWOUND, with toasts ${JSON.stringify(z.toastsAtAccept ?? [])}: ${String(z.before)} -> ${String(z.after)} changes while the disk held the rewind`
+        );
+      } else if (z.accepted !== true) {
+        out.z.push(
+          `the accept after ⌘⇧Z neither landed nor said why: ${String(z.before)} -> ${String(z.after)} changes, toasts ${JSON.stringify(z.toastsAtAccept ?? [])}`
+        );
+      }
+      if (z.backwardsAfterOutsideWrite !== false) {
+        out.z.push('THE REWIND WAS DRAWN BACKWARDS once the repository was read again: the agent’s word struck through and the person’s own rewind as the insertion');
+      }
+      if (z.diskIsRewind !== true) out.z.push('the file on disk is not the rewound text');
+      if (z.savedIsDisk !== true) out.z.push('the tab’s savedContents is not what the disk holds at the end');
+    }
+  }
   return out;
 }
-const armFindings = (graded) => [...graded.o, ...graded.l, ...graded.c, ...graded.r, ...graded.t];
+/** Every finding of the arms named, or of all seven when none is. */
+const armFindings = (graded, arms = ['O', 'L', 'C', 'R', 'T', 'U', 'Z']) =>
+  arms.flatMap((a) => graded[a.toLowerCase()] ?? []);
 
 if (process.argv.includes('--self-test')) {
   const head = {
@@ -444,7 +709,92 @@ if (process.argv.includes('--self-test')) {
     l: { remaining: 1, keyboardOnChange: true, pressedIns: 'kilo', rewound: true, activeInView: true, activeClass: 'ed-redline-scroll', undoChanges: 1, undoIns: 'kilo', digestBack: true },
     c: { drawn: true, marked: true, gapMs: 6, before: 4, after: 3, backwards: false, heldSentence: true, fileHoldsRewind: true },
     r: { drawn: true, marked: true, repeats: 6, firstNotRepeat: true, repeatsSeen: 6, before: 3, after: 2, paragraphsMoved: 1, oneRewind: true, unsaved: false },
-    t: { precondition: true, typedCurrent: true, caret: true, insertion: true, savedExact: true }
+    t: { precondition: true, typedCurrent: true, caret: true, insertion: true, savedExact: true },
+    u: {
+      seam: true,
+      drawn: true,
+      marked: true,
+      cleanAtPress: true,
+      typedInside: true,
+      landedDirty: true,
+      dirtyAtLanding: true,
+      fileAtLanding: true,
+      drawnAtLanding: true,
+      debounceMs: 150,
+      waitedMs: 2600,
+      dirtySentence: true,
+      toastsWhileDirty: [`A change in ${NOTES} was rewound, but your unsaved edits still show it, so nothing was accepted. ${WAY_OUT}, then accept.`],
+      undoPresses: 1,
+      cleanAfterUndo: true,
+      undoToAcceptMs: 420,
+      heldAfterUndo: false,
+      toastsAfterUndo: [],
+      before: 2,
+      after: 1,
+      accepted: true,
+      rewoundStillDrawn: false,
+      diskIsRewind: true,
+      savedIsDisk: true
+    },
+    z: {
+      seam: true,
+      drawn: true,
+      marked: true,
+      cleanAtPress: true,
+      typedInside: true,
+      landedDirty: true,
+      dirtyAtLanding: true,
+      fileAtLanding: true,
+      drawnAtLanding: true,
+      debounceMs: 150,
+      waitedMs: 2600,
+      dirtyAfterHeld: true,
+      secondUndoInsideTheRead: true,
+      redoPresses: 1,
+      cleanAfterRedo: true,
+      letGoCapMs: 1500,
+      letGoMs: 14,
+      rewoundDrawnAfterRedo: false,
+      savedIsDiskAfterRedo: true,
+      toastsAtAccept: [],
+      before: 2,
+      after: 1,
+      accepted: true,
+      acceptedRewound: false,
+      backwardsAfterOutsideWrite: false,
+      diskIsRewind: true,
+      savedIsDisk: true
+    }
+  };
+  // PHASE 282.2's FIX ROUND. What the build before it read, from the attack
+  // verifier's own arm X at HEAD and at the 282.1 bytes alike: after ⌘⇧Z the
+  // tab is clean over the agent's bytes, nothing reads, the rewound change is
+  // the current change, ⌥↩ takes it with no sentence (3 -> 2), and an outside
+  // write draws it backwards.
+  const zBeforeTheFix = {
+    ...armsHead.z,
+    letGoMs: -1,
+    rewoundDrawnAfterRedo: true,
+    savedIsDiskAfterRedo: false,
+    before: 3,
+    after: 2,
+    accepted: true,
+    acceptedRewound: true,
+    backwardsAfterOutsideWrite: true
+  };
+  // What the Phase 282.1 bytes read, from the reverify's own drive of this
+  // shape (docs/BACKLOG.md `## Phase 282.2`): clean after ⌘Z, the held sentence
+  // on the next ⌥↩, the rewound change still drawn from the trailing buffer,
+  // and `savedContents` still the agent's text while the disk holds the rewind.
+  const u2821 = {
+    ...armsHead.u,
+    heldAfterUndo: true,
+    toastsAfterUndo: [HELD_ACCEPT],
+    before: 3,
+    after: 3,
+    accepted: false,
+    rewoundStillDrawn: true,
+    savedIsDisk: false
   };
   const armsPr28 = {
     o: { ...armsHead.o, landedOn: 'kilo' },
@@ -453,13 +803,49 @@ if (process.argv.includes('--self-test')) {
     r: { ...armsHead.r, after: 0, paragraphsMoved: 3, oneRewind: false },
     t: { ...armsHead.t, typedCurrent: false, caret: false, savedExact: false }
   };
-  const arm = (fixture, mode) => armFindings(gradeArms(fixture, mode));
+  const arm = (fixture, mode, arms) => armFindings(gradeArms(fixture, mode), arms);
+  const FIVE = ['O', 'L', 'C', 'R', 'T'];
+  const refusals = (raw, parentMode) => {
+    const chosen = armsFrom(raw, parentMode);
+    return chosen.refusal === null ? [] : [chosen.refusal];
+  };
   cases.push(
-    ['PHASE 282: the five arms at HEAD, graded as HEAD', arm(armsHead, 'head'), 0],
+    ['PHASE 282: the arms at HEAD, graded as HEAD', arm(armsHead, 'head'), 0],
     ['PHASE 282: the five arms at PR 28’s head, graded as PR 28’s head', arm(armsPr28, 'pr28'), 0],
-    ['PHASE 282: HEAD graded as PR 28’s head, so no defect reproduced', arm(armsHead, 'pr28'), 5],
-    ['PHASE 282: PR 28’s head graded as HEAD, which is every defect', arm(armsPr28, 'head'), 11],
-    ['PHASE 282: no arm ran', arm({}, 'head'), 5],
+    ['PHASE 282: HEAD graded as PR 28’s head, so no defect reproduced, and U is not graded there', arm(armsHead, 'pr28'), 5],
+    ['PHASE 282: PR 28’s head graded as HEAD, which is every defect', arm(armsPr28, 'head', FIVE), 11],
+    ['PHASE 282: no arm ran', arm({}, 'head'), 7],
+    ['U: the Phase 282.1 bytes, where the hold lingers: held, still drawn, and no read', arm({ ...armsHead, u: u2821 }, 'head', ['U']), 3],
+    ['U: and the first of those findings is the sentence the app said', [arm({ ...armsHead, u: u2821 }, 'head', ['U'])[0]?.includes(`⌥↩ answered "${HELD_ACCEPT}"`) === true ? null : 'it is not'].filter((x) => x !== null), 0],
+    ['U: the keystroke reached the page after the write, so nothing lingered', arm({ ...armsHead, u: { ...armsHead.u, landedDirty: false, drawnAtLanding: false } }, 'head', ['U']), 1],
+    ['U: the keystroke was never delivered in the chord’s task', arm({ ...armsHead, u: { ...armsHead.u, typedInside: false } }, 'head', ['U']), 1],
+    ['U: the first ⌥↩ came inside three debounce windows', arm({ ...armsHead, u: { ...armsHead.u, waitedMs: 300 } }, 'head', ['U']), 1],
+    ['U: the dirty tab’s ⌥↩ did not name the way out', arm({ ...armsHead, u: { ...armsHead.u, dirtySentence: false, toastsWhileDirty: [HELD_ACCEPT] } }, 'head', ['U']), 1],
+    ['U: ⌘Z never made the tab clean', arm({ ...armsHead, u: { ...armsHead.u, cleanAfterUndo: false, undoPresses: 5 } }, 'head', ['U']), 1],
+    ['U: the accept after the undo took nothing and said nothing', arm({ ...armsHead, u: { ...armsHead.u, accepted: false, before: 2, after: 2 } }, 'head', ['U']), 1],
+    ['U: the accept landed but the tab never read the disk', arm({ ...armsHead, u: { ...armsHead.u, savedIsDisk: false } }, 'head', ['U']), 1],
+    ['U: the Phase 277 drive is not on the page', arm({ ...armsHead, u: { ...armsHead.u, seam: false } }, 'head', ['U']), 1],
+    ['U alone: the five arms that did not run are not findings', arm({ u: armsHead.u }, 'head', ['U']), 0],
+    ['Z: the build before the fix round: still drawn, accepted unsaid, and drawn backwards', arm({ ...armsHead, z: zBeforeTheFix }, 'head', ['Z']), 3],
+    ['Z: and the first of those findings is the lost way out', [arm({ ...armsHead, z: zBeforeTheFix }, 'head', ['Z'])[0]?.includes('A PRESS TOO MANY LOSES THE WAY OUT') === true ? null : 'it is not'].filter((x) => x !== null), 0],
+    ['Z: the held ⌘Z left the tab clean, so there was no press too many', arm({ ...armsHead, z: { ...armsHead.z, dirtyAfterHeld: false } }, 'head', ['Z']), 1],
+    ['Z: ⌘⇧Z never made the tab clean', arm({ ...armsHead, z: { ...armsHead.z, cleanAfterRedo: false, redoPresses: 3 } }, 'head', ['Z']), 1],
+    ['Z: the accept after ⌘⇧Z took nothing and said nothing', arm({ ...armsHead, z: { ...armsHead.z, accepted: false, before: 2, after: 2 } }, 'head', ['Z']), 1],
+    ['Z: the repeat landed AFTER the read, which the arm prints and does not grade', arm({ ...armsHead, z: { ...armsHead.z, secondUndoInsideTheRead: false } }, 'head', ['Z']), 0],
+    ['Z: the keystroke reached the page after the write, so no hold was left to lose', arm({ ...armsHead, z: { ...armsHead.z, landedDirty: false, drawnAtLanding: false } }, 'head', ['Z']), 1],
+    ['Z is not graded at PR 28’s head', arm({ z: zBeforeTheFix }, 'pr28', ['Z']), 0],
+    ['THE KNOB: unset is every arm', [armsFrom('', '').arms.join('') === 'HOLCRTUZ' ? null : 'it is not'].filter((x) => x !== null), 0],
+    ['THE KNOB: unset at PR 28’s head leaves U and Z out', [armsFrom('', '282').arms.join('') === 'HOLCRT' ? null : 'it does not'].filter((x) => x !== null), 0],
+    ['THE KNOB: Z alone stands, and Z at PR 28’s head is refused', [...refusals('z', ''), ...(refusals('Z', '282').length === 1 ? [] : ['it is not refused'])], 0],
+    ['THE KNOB: U alone, in any case and with spaces', [armsFrom(' u ', '').arms.join('') === 'U' ? null : 'it is not'].filter((x) => x !== null), 0],
+    ['THE KNOB: the arms run in their own order whatever order names them', [armsFrom('U,T,R', '').arms.join('') === 'RTU' ? null : 'they do not'].filter((x) => x !== null), 0],
+    ['THE KNOB: O without H is refused', refusals('O,U', ''), 1],
+    ['THE KNOB: L without O is refused', refusals('H,L', ''), 1],
+    ['THE KNOB: C without H is refused', refusals('C', ''), 1],
+    ['THE KNOB: a letter that is no arm is refused', refusals('U,X', ''), 1],
+    ['THE KNOB: U at PR 28’s head is refused', refusals('U', '282'), 1],
+    ['THE KNOB: any subset under the parent drive is refused', refusals('H', '1'), 1],
+    ['THE KNOB: H, O and L together are allowed', refusals('L,O,H', ''), 0],
     ['O: the move landed on the change before, which is the index rule', arm({ ...armsHead, o: armsPr28.o }, 'head'), 1],
     ['O: the watcher had drawn the write before the key, so the arm measured nothing', arm({ ...armsHead, o: { ...armsHead.o, agentDrawnAtPress: true } }, 'head'), 1],
     ['O: the keyboard did not follow the move', arm({ ...armsHead, o: { ...armsHead.o, activeOnCurrent: false } }, 'head'), 1],
@@ -501,6 +887,16 @@ if (process.argv.includes('--self-test')) {
   process.exit(bad === 0 ? 0 : 1);
 }
 
+// PHASE 282.2 moved this above the socket wrapper, so a checkout with no build
+// is refused before a scratch tmux server is started for it.
+if (!existsSync(join(APP_ROOT, 'out', 'main', 'index.js'))) {
+  console.error(
+    CHECKOUT === ''
+      ? `${TAG} out/main/index.js is missing. Run npm run build.`
+      : `${TAG} REDLINEMOVEON_CHECKOUT ${APP_ROOT} holds no build under out/. Build it first.`
+  );
+  process.exit(2);
+}
 const socket = process.env['GMUX_TMUX_SOCKET'] ?? '';
 if (socket === '') {
   say('no GMUX_TMUX_SOCKET; wrapping in build/harness-socket.mjs');
@@ -520,10 +916,9 @@ if (harnessDir === '') {
   console.error(`${TAG} no GMUX_HARNESS_DIR`);
   process.exit(2);
 }
-if (!existsSync(join(REPO, 'out', 'main', 'index.js'))) {
-  console.error(`${TAG} out/main/index.js is missing. Run npm run build.`);
-  process.exit(2);
-}
+say(
+  `the build under test: ${APP_ROOT}${CHECKOUT === '' ? '' : ' (REDLINEMOVEON_CHECKOUT)'}, ${PARENT ? 'the parent drive' : `arms ${CHOSEN.arms.join(',')}`}`
+);
 
 /**
  * The -L gmux sessions of the machine that runs this probe, read only. It is
@@ -723,7 +1118,12 @@ const CHORD = {
   // `beforeinput` (build/probe-p237-typing.mjs measured it).
   undo: { key: 'Backspace', code: 'Backspace', vk: 8, modifiers: 1 | 8 },
   save: { key: 's', code: 'KeyS', vk: 83, modifiers: 4 },
-  enter: { key: 'Enter', code: 'Enter', vk: 13, modifiers: 0, text: '\r' }
+  enter: { key: 'Enter', code: 'Enter', vk: 13, modifiers: 0, text: '\r' },
+  // PHASE 282.2's arm. ⌘Z is the buffer's own undo, which ./redline-edits takes
+  // in the capture phase while the caret is in the document; it is NOT `undo`
+  // above, which is the journal's undo of a rewind (build/probe-p237-typing.mjs
+  // drives both and spells this one the same way).
+  undoTyping: { key: 'z', code: 'KeyZ', vk: 90, modifiers: 4 }
 };
 async function press(cdp, { key, code, vk, modifiers }) {
   const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers };
@@ -742,7 +1142,13 @@ async function openRedline(cdp, rel) {
   return face(cdp);
 }
 
-const readings = { mode: PARENT ? 'parent' : PR28_HEAD ? 'pr28' : 'head' };
+const readings = {
+  mode: PARENT ? 'parent' : PR28_HEAD ? 'pr28' : 'head',
+  // PHASE 282.2. Which build answered and which arms were asked, so a readings
+  // file from a parent run cannot be mistaken for one from HEAD.
+  appRoot: APP_ROOT,
+  arms: PARENT ? [] : CHOSEN.arms
+};
 
 /**
  * THE HEAD DRIVE: what this round ships, claim by claim. Every arm reads the
@@ -1074,7 +1480,10 @@ function armCheck(step, key, claimHead, claimPr28, detail) {
   check(step, PR28_HEAD ? claimPr28 : claimHead, found.length === 0, found.length === 0 ? detail : `${found.join('; ')} (${detail})`);
 }
 
-async function driveArms(cdp) {
+// PHASE 282.2 made each arm its own function, bodies untouched, so
+// `REDLINEMOVEON_ARMS` can run a subset; `driveArms` below runs the ones chosen
+// in the order they always ran.
+async function armO(cdp) {
   // O. AN OUTSIDE WRITE ABOVE THE CURRENT CHANGE, the moment before ⌥⌫. The
   // four changes sit in paragraphs 2, 4, 6 and 8; ⌥⌫ is pressed on paragraph
   // 4's, and the outside write adds a change in paragraph 1, above both it and
@@ -1122,7 +1531,9 @@ async function driveArms(cdp) {
     'O at PR 28’s head: after an outside write above, the move lands on the change BEFORE the one that followed',
     `pressed "lima", follower ${JSON.stringify(readings.o.followerIns)}, before ${JSON.stringify(readings.o.beforeIns)}, landed ${JSON.stringify(readings.o.landedOn)}, write to key ${String(readings.o.writeToKeyMs)} ms`
   );
+}
 
+async function armL(cdp) {
   // L. ⌥⌫ ON THE ONLY REMAINING CHANGE. The accepts write nothing, so the file
   // still holds every word O left. One ⌥↓ with a single change comes round to
   // it and puts the keyboard ON its wrapper, which is the element the rewind
@@ -1157,7 +1568,9 @@ async function driveArms(cdp) {
     'L at PR 28’s head: the keyboard drops with the last change, and ⌥⇧⌫ does nothing',
     `keyboard on ${JSON.stringify(readings.l.activeClass)}, ${String(readings.l.undoChanges)} change(s) after ⌥⇧⌫, digest back ${String(readings.l.digestBack)}`
   );
+}
 
+async function armC(cdp) {
   // C. ⌥⌫ AND ⌥↩ BACK TO BACK on paragraph 5's change, with no redraw awaited.
   // Paragraphs 3, 5 and 7 are ones no arm before this touched, so the file's
   // words there are the baseline's. A change drawn with `papa` DELETED is the
@@ -1199,7 +1612,9 @@ async function driveArms(cdp) {
     'C at PR 28’s head: ⌥↩ accepts the change ⌥⌫ is rewinding, and it is drawn backwards',
     `${String(readings.c.before)} -> ${String(readings.c.after)} changes, chords ${String(readings.c.gapMs)} ms apart, held sentence ${String(readings.c.heldSentence)}, toasts ${JSON.stringify(readings.c.toasts)}`
   );
+}
 
+async function armR(cdp) {
   // R. A HELD ⌥⌫. Everything is accepted first so the three new changes are
   // the whole picture, and the file after is compared with the one rewind of
   // paragraph 2 that a single press makes, paragraph by paragraph.
@@ -1253,7 +1668,9 @@ async function driveArms(cdp) {
     'R at PR 28’s head: a held ⌥⌫ rewinds more than one change',
     `${String(readings.r.before)} -> ${String(readings.r.after)} changes, ${String(readings.r.paragraphsMoved)} paragraph(s) moved, ${String(REPEATS)} repeats`
   );
+}
 
+async function armT(cdp) {
   // T. A TYPING BURST in paragraph 7, which R left unchanged, at 30 ms a key,
   // Enter included, then ⌘S. The expected file is computed here from the bytes
   // on disk before the first key, never read back from the app.
@@ -1296,12 +1713,509 @@ async function driveArms(cdp) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// PHASE 282.2's ARM, U. The header has the claim; what follows is the four
+// things it needs that no arm before it did.
+// ---------------------------------------------------------------------------
+
+/**
+ * THE TAB, read through the Phase 277 drive every harness launch registers
+ * (src/renderer/editor/p277-save-drive.ts `read`): the store's own `dirty`,
+ * its `savedContents`, the working model's text and the toasts. The banner's
+ * "unsaved" that `FACE` reads is the same flag drawn, and U prints both, but
+ * `savedContents` is drawn nowhere and is the reading that says whether a read
+ * followed the undo. Nothing counts `fs:readFile` calls from the page
+ * (`window.gmux` is a frozen bridge), so that move IS the read's trace.
+ */
+const TAB_STATE = `(() => {
+  const p = window.__gmuxP277;
+  if (p === null || typeof p !== 'object' || typeof p.read !== 'function') return { seam: false, toasts: [] };
+  const r = p.read();
+  const t = r.tabs.find((x) => x.name === ${JSON.stringify(NOTES)}) ?? null;
+  return {
+    seam: true,
+    dirty: t === null ? null : t.dirty,
+    savedContents: t === null ? null : t.savedContents,
+    value: t === null ? null : t.value,
+    toasts: r.toasts
+  };
+})()`;
+const tabState = (cdp) => cdpEval(cdp, TAB_STATE, 10000);
+/** Every toast off the screen, so the next press's sentences are its own. */
+const CLEAR_TOASTS = `(() => { const p = window.__gmuxP277; if (p !== null && typeof p === 'object' && typeof p.clearToasts === 'function') p.clearToasts(); return true; })()`;
+
+/**
+ * THE KEYSTROKE INSIDE THE WRITE. One keydown listener on `window`, bubble
+ * phase, which the ⌥⌫ keydown reaches AFTER React's handler at the root has
+ * run the press as far as its first await. It answers that one keydown by
+ * dispatching a cancelable `insertText` `beforeinput` at the document, which
+ * is the event ./redline-edits listens for and the only thing a typed
+ * character is to it; a synthetic one carries no target range, so the span is
+ * the selection `__moveOn.put` left, exactly as `spanOfInput` falls back. The
+ * update it schedules is a discrete one, so React renders it and runs the
+ * effect that marks the tab dirty in the microtask after this listener
+ * returns: before the re-read's reply can be a task at all.
+ *
+ * `taken` is the document's handler having cancelled the event, which is how
+ * the arm knows the keystroke reached the typing path and not only the page.
+ */
+const typeInsideThePress = (ch) => `(() => {
+  const state = { fired: false, taken: false };
+  const once = (e) => {
+    if (e.key !== 'Backspace' || !e.altKey || e.shiftKey || e.repeat) return;
+    window.removeEventListener('keydown', once);
+    const doc = document.querySelector('.ed-redline-doc');
+    if (doc === null) return;
+    const typed = new InputEvent('beforeinput', { inputType: 'insertText', data: ${JSON.stringify(ch)}, bubbles: true, cancelable: true });
+    doc.dispatchEvent(typed);
+    state.fired = true;
+    state.taken = typed.defaultPrevented;
+  };
+  window.addEventListener('keydown', once);
+  window.__moveOnInside = { state, dispose: () => window.removeEventListener('keydown', once) };
+  return true;
+})()`;
+/** What the listener did, and the listener taken off whether it fired or not. */
+const TYPED_INSIDE = `(() => { const held = window.__moveOnInside; if (held === undefined || held === null) return null; held.dispose(); return held.state; })()`;
+
+/**
+ * HOW LONG THE REWIND'S OWN TICK IS GIVEN TO ARRIVE AND BE SPENT. The
+ * renderer's window is `REPO_CHANGED_DEBOUNCE_MS` in
+ * src/renderer/state/repo-changed.ts, read out of the checkout under test so
+ * the wait follows the number, and the arm waits at least three of them as
+ * Phase 282.2's entry asks. It is not the whole road, though: main's watcher
+ * debounces 300 ms before it (src/main/watcher/repo-watcher.ts
+ * `DEFAULT_DEBOUNCE_MS`), and the round trip was measured in the app at 1,139
+ * ms before the adoption existed (./redline-press `RewindHold`). A first ⌥↩
+ * pressed at 450 ms would leave that tick still in the air, and at the Phase
+ * 282.1 bytes a tick that arrived after ⌘Z would read the file and let the
+ * hold go, which is the defect not reproducing for the wrong reason. So the
+ * floor is over twice the measured round trip, and the clock is printed.
+ */
+const TICK_FLOOR_MS = 2500;
+function repoChangedDebounceMs() {
+  try {
+    const source = readFileSync(join(APP_ROOT, 'src', 'renderer', 'state', 'repo-changed.ts'), 'utf8');
+    const found = /REPO_CHANGED_DEBOUNCE_MS\s*=\s*(\d+)/.exec(source);
+    if (found !== null) return Number(found[1]);
+  } catch {
+    /* a checkout with no source beside its build: the number it shipped with */
+  }
+  return 150;
+}
+/** ⌘Z is pressed until the tab is clean and never past this many times. */
+const UNDO_CAP = 5;
+/** How long the picture is given to let the rewound change go after the undo. */
+const LET_GO_CAP_MS = 1500;
+const KEYSTROKE = 'x';
+
+/** Every toast seen for `ms`, off the screen and off the store, because an info toast leaves after five seconds. */
+async function toastsFor(cdp, ms) {
+  const seen = new Set();
+  for (const stop = Date.now() + ms; Date.now() < stop; ) {
+    for (const t of (await face(cdp)).toasts) seen.add(t);
+    for (const t of (await tabState(cdp)).toasts ?? []) seen.add(t);
+    await sleep(50);
+  }
+  return [...seen];
+}
+
+async function armU(cdp) {
+  // U. UNDO IS A WAY OUT. Everything is accepted first, so the baseline is the
+  // file and the three new changes are the whole picture whatever ran before;
+  // ⌥⌫ is pressed on paragraph 4's, so paragraph 6's is the change that
+  // follows it and the one the accept after the undo takes at HEAD. The caret
+  // goes into paragraph 8, below every change, BEFORE the press: the mark
+  // stays on paragraph 4's change because a caret outside every change moves
+  // nobody (./redline-current `caretMoveOf`), the keydown still reaches the
+  // scroller from the document, and the rewind takes the keyboard from nobody
+  // because it was not on a change wrapper.
+  await cdpEval(cdp, focusHost);
+  await acceptDownTo(cdp, 0);
+  const baseU = readNotes();
+  const fileU = withMarkers(baseU, [[2, 'uniform'], [4, 'victor'], [6, 'whiskey']]);
+  const rewoundU = withMarkers(fileU, [[4, markerOf(baseU, 4)]]);
+  shellWrite(NOTES, fileU);
+  const drawnU = await faceUntil(
+    cdp,
+    (f) => f.changes === 3 && ['uniform', 'victor', 'whiskey'].every((w) => f.inss.includes(w)),
+    20000
+  );
+  await cdpEval(cdp, focusHost);
+  await markInserting(cdp, 'victor');
+  await cdpEval(cdp, TYPING_READS);
+  const typeAt = fileU.indexOf('enough sentences', fileU.indexOf('Paragraph 8 of'));
+  const currentU = await cdpEval(cdp, 'window.__moveOn.current()');
+  await cdpEval(cdp, `window.__moveOn.put(${String(typeAt)})`);
+  await sleep(200);
+  const markedU = await face(cdp);
+  const atPress = await tabState(cdp);
+
+  // THE PRESS, with the keystroke in its task. The landing is read off the
+  // DISK, which is the one place the write cannot be late to, and the tab and
+  // the picture a moment after it, once the press's own continuation has run.
+  await cdpEval(cdp, CLEAR_TOASTS);
+  await cdpEval(cdp, typeInsideThePress(KEYSTROKE));
+  const pressedAt = await pressTimed(cdp, CHORD.rewind);
+  const inside = await cdpEval(cdp, TYPED_INSIDE);
+  let landedAt = 0;
+  for (const stop = Date.now() + 10000; landedAt === 0 && Date.now() < stop; ) {
+    if (readNotes() === rewoundU) landedAt = Date.now();
+    else await sleep(20);
+  }
+  await sleep(150);
+  const atLanding = await tabState(cdp);
+  const faceAtLanding = await face(cdp);
+  const toastsAtLanding = [...new Set([...faceAtLanding.toasts, ...(atLanding.toasts ?? [])])];
+
+  // The first keystroke of a session loads monaco, so the buffer is waited for
+  // rather than assumed: ⌘Z has nothing to undo until the model holds the
+  // keystroke. The wait below is on the clock from the landing either way.
+  const bufferU = `${fileU.slice(0, typeAt)}${KEYSTROKE}${fileU.slice(typeAt)}`;
+  let buffered = atLanding;
+  for (const stop = Date.now() + 20000; buffered.value !== bufferU && Date.now() < stop; ) {
+    await sleep(100);
+    buffered = await tabState(cdp);
+  }
+  const debounceMs = repoChangedDebounceMs();
+  const tickWaitMs = Math.max(3 * debounceMs, TICK_FLOOR_MS);
+  const waitFrom = landedAt === 0 ? pressedAt : landedAt;
+  while (Date.now() - waitFrom < tickWaitMs) await sleep(50);
+  const waitedMs = Date.now() - waitFrom;
+  const afterWait = await tabState(cdp);
+  const faceAfterWait = await face(cdp);
+
+  // ⌥↩ ON THE DIRTY TAB: held, and the sentence names the way out.
+  await cdpEval(cdp, CLEAR_TOASTS);
+  await pressTimed(cdp, CHORD.accept);
+  const toastsWhileDirty = await toastsFor(cdp, 1200);
+  const afterDirtyAccept = await face(cdp);
+
+  // ⌘Z UNTIL THE TAB IS CLEAN, and not once more: the model's undo stack
+  // reaches back past the agent's write (./monaco-loader `resetWorkingModel`
+  // is an edit), so a press too many would make the tab dirty again with the
+  // text from before it. The flag is the store's, or the banner's without the
+  // drive.
+  await cdpEval(cdp, CLEAR_TOASTS);
+  const dirtyNow = async () => {
+    const tab = await tabState(cdp);
+    return tab.seam === true ? tab.dirty : (await face(cdp)).unsaved;
+  };
+  let undoPresses = 0;
+  let undoAt = 0;
+  let dirty = await dirtyNow();
+  while (dirty !== false && undoPresses < UNDO_CAP) {
+    undoAt = Date.now();
+    await keyNow(cdp, CHORD.undoTyping);
+    undoPresses += 1;
+    for (const stop = Date.now() + 1500; Date.now() < stop; ) {
+      dirty = await dirtyNow();
+      if (dirty === false) break;
+      await sleep(30);
+    }
+  }
+  const cleanAt = Date.now();
+
+  // THE WAY OUT, measured. The picture is given a bounded moment to let the
+  // rewound change go, which at HEAD is the read the clean transition pulls
+  // and at the Phase 282.1 bytes never comes; then ⌥↩, on whatever is current.
+  // With nothing current one ⌥↓ is pressed first, as `acceptDownTo` does,
+  // because the claim is that the accept is no longer HELD and not where the
+  // mark was left.
+  const letGo = await faceUntil(cdp, (f) => !f.inss.includes('victor'), LET_GO_CAP_MS);
+  const letGoMs = letGo.inss.includes('victor') ? -1 : Date.now() - cleanAt;
+  const afterUndo = await tabState(cdp);
+  let before2 = letGo;
+  let stepped = false;
+  if (before2.currentCount === 0 && before2.changes > 0) {
+    await press(cdp, CHORD.next);
+    stepped = true;
+    before2 = await face(cdp);
+  }
+  const acceptAt = await pressTimed(cdp, CHORD.accept);
+  const toastsAfterUndo = await toastsFor(cdp, 1500);
+  const after2 = await face(cdp);
+  const atEnd = await tabState(cdp);
+  const diskEnd = readNotes();
+
+  readings.u = {
+    seam: atPress.seam === true && atEnd.seam === true,
+    drawn: drawnU.changes === 3 && ['uniform', 'victor', 'whiskey'].every((w) => drawnU.inss.includes(w)) && currentU === fileU,
+    marked:
+      markedU.currentCount === 1 &&
+      markedU.inss[markedU.currentIndex] === 'victor' &&
+      String(markedU.activeClass ?? '').includes('ed-redline-doc'),
+    cleanAtPress: atPress.seam === true ? atPress.dirty === false : markedU.unsaved === false,
+    typedInside: inside !== null && inside !== undefined && inside.fired === true && inside.taken === true,
+    insideReading: inside ?? null,
+    pressToLandingMs: landedAt === 0 ? -1 : landedAt - pressedAt,
+    dirtyAtLanding: atLanding.seam === true ? atLanding.dirty : faceAtLanding.unsaved,
+    fileAtLanding: landedAt !== 0,
+    drawnAtLanding: faceAtLanding.inss.includes('victor'),
+    toastsAtLanding,
+    bufferHoldsKeystroke: buffered.value === bufferU,
+    debounceMs,
+    tickWaitMs,
+    waitedMs,
+    dirtyAfterWait: afterWait.seam === true ? afterWait.dirty : faceAfterWait.unsaved,
+    savedIsDiskAfterWait: afterWait.seam === true ? afterWait.savedContents === readNotes() : null,
+    toastsWhileDirty,
+    dirtySentence: toastsWhileDirty.some((t) => t.includes(WAY_OUT)),
+    changesWhileDirty: afterDirtyAccept.changes,
+    undoPresses,
+    cleanAfterUndo: dirty === false,
+    bannerUnsavedAfterUndo: letGo.unsaved,
+    letGoMs,
+    savedIsDiskAfterUndo: afterUndo.seam === true ? afterUndo.savedContents === diskEnd : null,
+    stepped,
+    undoToAcceptMs: undoAt === 0 ? -1 : acceptAt - undoAt,
+    toastsAfterUndo,
+    heldAfterUndo: toastsAfterUndo.includes(HELD_ACCEPT),
+    before: before2.changes,
+    after: after2.changes,
+    accepted: after2.changes === before2.changes - 1,
+    drawnAfter: after2.inss,
+    rewoundStillDrawn: after2.inss.includes('victor'),
+    diskIsRewind: diskEnd === rewoundU,
+    savedIsDisk: atEnd.seam === true && atEnd.savedContents === diskEnd
+  };
+  readings.u.landedDirty =
+    readings.u.fileAtLanding === true && readings.u.dirtyAtLanding === true && readings.u.drawnAtLanding === true;
+
+  // EVERY READING, as a line, whatever the grade: at the Phase 282.1 bytes
+  // these lines are the measurement of the window the reverifiers reasoned
+  // about, and the grade below them is the one sentence.
+  const u = readings.u;
+  note(
+    'U1',
+    'THE PRESS: ⌥⌫ with a keystroke in the chord’s own task',
+    `listener ${JSON.stringify(u.insideReading)}, the write landed ${String(u.pressToLandingMs)} ms after the key, dirty at the landing ${String(u.dirtyAtLanding)}, "victor" still drawn ${String(u.drawnAtLanding)}, toasts ${JSON.stringify(u.toastsAtLanding)}`
+  );
+  note(
+    'U2',
+    'THE WAIT past the rewind’s own watcher tick, on the clock',
+    `${String(u.waitedMs)} ms (three windows of ${String(u.debounceMs)} ms is ${String(3 * u.debounceMs)}, the floor ${String(TICK_FLOOR_MS)}); after it dirty ${String(u.dirtyAfterWait)}, the buffer holds the keystroke ${String(u.bufferHoldsKeystroke)}, savedContents is the disk’s ${String(u.savedIsDiskAfterWait)}`
+  );
+  note('U3', '⌥↩ ON THE DIRTY TAB', `toasts ${JSON.stringify(u.toastsWhileDirty)}, ${String(u.changesWhileDirty)} changes drawn`);
+  note(
+    'U4',
+    '⌘Z UNTIL CLEAN',
+    `${String(u.undoPresses)} press(es), dirty ${String(dirty)}, banner says unsaved ${String(u.bannerUnsavedAfterUndo)}, the picture let "victor" go ${u.letGoMs < 0 ? `never within ${String(LET_GO_CAP_MS)} ms` : `${String(u.letGoMs)} ms after the tab went clean`}, savedContents is the disk’s ${String(u.savedIsDiskAfterUndo)}`
+  );
+  note(
+    'U5',
+    '⌥↩ AFTER THE UNDO',
+    `${String(u.undoToAcceptMs)} ms after the ⌘Z that made the tab clean${u.stepped ? ', one ⌥↓ first because nothing was current' : ''}; toasts ${JSON.stringify(u.toastsAfterUndo)}; ${String(u.before)} -> ${String(u.after)} changes; drawn ${JSON.stringify(u.drawnAfter)}`
+  );
+  note(
+    'U6',
+    'THE DISK AND THE TAB at the end',
+    `the file is the rewound text ${String(u.diskIsRewind)}, savedContents is the disk’s ${String(u.savedIsDisk)}; reads are counted by no seam in this build, so savedContents moving onto the disk’s bytes is the read’s own trace`
+  );
+  armCheck(
+    'U',
+    'u',
+    'U. UNDO IS A WAY OUT: after a rewind lands on a dirty tab, ⌘Z to clean and the next ⌥↩ accepts, with the picture and the tab on the disk’s bytes',
+    'U is not graded at PR 28’s head',
+    `${String(u.before)} -> ${String(u.after)} changes ${String(u.undoToAcceptMs)} ms after ⌘Z, toasts ${JSON.stringify(u.toastsAfterUndo)}`
+  );
+}
+
+/** ⌘⇧Z, the buffer's own redo, taken by ./redline-edits beside ⌘Z. */
+const REDO_TYPING = { key: 'z', code: 'KeyZ', vk: 90, modifiers: 4 | 8 };
+/** ⌘⇧Z is pressed until the tab is clean and never past this many times. */
+const REDO_CAP = 3;
+
+async function armZ(cdp) {
+  // Z. A PRESS TOO MANY, TAKEN BACK. The first half is arm U's, with this
+  // arm's own three words: everything accepted, three changes written from
+  // outside, paragraph 4's marked, the caret put into paragraph 8, ⌥⌫ with one
+  // keystroke in the chord's own task, the landing read off the disk, the
+  // buffer waited for and the rewind's own watcher tick waited out.
+  const WORDS_Z = ['xray', 'yankee', 'zulu'];
+  const REWOUND_WORD = WORDS_Z[1];
+  await cdpEval(cdp, focusHost);
+  await acceptDownTo(cdp, 0);
+  const baseZ = readNotes();
+  const fileZ = withMarkers(baseZ, [[2, WORDS_Z[0]], [4, WORDS_Z[1]], [6, WORDS_Z[2]]]);
+  const rewoundZ = withMarkers(fileZ, [[4, markerOf(baseZ, 4)]]);
+  shellWrite(NOTES, fileZ);
+  const drawnZ = await faceUntil(cdp, (f) => f.changes === 3 && WORDS_Z.every((w) => f.inss.includes(w)), 20000);
+  await cdpEval(cdp, focusHost);
+  await markInserting(cdp, REWOUND_WORD);
+  await cdpEval(cdp, TYPING_READS);
+  const typeAt = fileZ.indexOf('enough sentences', fileZ.indexOf('Paragraph 8 of'));
+  await cdpEval(cdp, `window.__moveOn.put(${String(typeAt)})`);
+  await sleep(200);
+  const markedZ = await face(cdp);
+  const atPress = await tabState(cdp);
+  await cdpEval(cdp, CLEAR_TOASTS);
+  await cdpEval(cdp, typeInsideThePress(KEYSTROKE));
+  const pressedAt = await pressTimed(cdp, CHORD.rewind);
+  const inside = await cdpEval(cdp, TYPED_INSIDE);
+  let landedAt = 0;
+  for (const stop = Date.now() + 10000; landedAt === 0 && Date.now() < stop; ) {
+    if (readNotes() === rewoundZ) landedAt = Date.now();
+    else await sleep(20);
+  }
+  await sleep(150);
+  const atLanding = await tabState(cdp);
+  const faceAtLanding = await face(cdp);
+  const bufferZ = `${fileZ.slice(0, typeAt)}${KEYSTROKE}${fileZ.slice(typeAt)}`;
+  let buffered = atLanding;
+  for (const stop = Date.now() + 20000; buffered.value !== bufferZ && Date.now() < stop; ) {
+    await sleep(100);
+    buffered = await tabState(cdp);
+  }
+  const debounceMs = repoChangedDebounceMs();
+  const waitFrom = landedAt === 0 ? pressedAt : landedAt;
+  while (Date.now() - waitFrom < Math.max(3 * debounceMs, TICK_FLOOR_MS)) await sleep(50);
+  const waitedMs = Date.now() - waitFrom;
+
+  // THE HELD ⌘Z: the keydown and its first repeat, the second sent WITHOUT
+  // waiting for the first to be answered, so it can land inside the read the
+  // first one pulls. Which side of the read it landed on is read afterwards
+  // off `savedContents`: still the agent's text means the read came back to a
+  // dirty tab and was dropped; the rewound text means the read had landed and
+  // the repeat un-applied it.
+  const zKey = { key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 4 };
+  const sentAt = Date.now();
+  const first = cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', ...zKey });
+  const repeat = cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', ...zKey, autoRepeat: true });
+  await Promise.all([first, repeat]);
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', ...zKey });
+  const sentMs = Date.now() - sentAt;
+  await sleep(700);
+  const afterHeld = await tabState(cdp);
+  const faceAfterHeld = await face(cdp);
+
+  // THE PERSON SEES THEY WENT TOO FAR: ⌘⇧Z until the tab is clean, with the
+  // caret back in the text as a click would put it.
+  await cdpEval(cdp, CLEAR_TOASTS);
+  let redoPresses = 0;
+  let dirty = afterHeld.dirty;
+  while (dirty !== false && redoPresses < REDO_CAP) {
+    await cdpEval(cdp, `window.__moveOn.put(${String(typeAt)})`);
+    await keyNow(cdp, REDO_TYPING);
+    redoPresses += 1;
+    for (const stop = Date.now() + 1500; Date.now() < stop; ) {
+      dirty = (await tabState(cdp)).dirty;
+      if (dirty === false) break;
+      await sleep(30);
+    }
+  }
+  const cleanAt = Date.now();
+  const letGo = await faceUntil(cdp, (f) => !f.inss.includes(REWOUND_WORD), LET_GO_CAP_MS);
+  const letGoMs = letGo.inss.includes(REWOUND_WORD) ? -1 : Date.now() - cleanAt;
+  const afterRedo = await tabState(cdp);
+
+  // ⌥↩ IN THE RHYTHM, on whatever is current (one ⌥↓ first when nothing is).
+  await cdpEval(cdp, focusHost);
+  let before2 = await face(cdp);
+  if (before2.currentCount === 0 && before2.changes > 0) {
+    await press(cdp, CHORD.next);
+    before2 = await face(cdp);
+  }
+  const pressedOn = before2.currentIndex === -1 ? null : before2.inss[before2.currentIndex];
+  await cdpEval(cdp, CLEAR_TOASTS);
+  await pressTimed(cdp, CHORD.accept);
+  const toastsAtAccept = await toastsFor(cdp, 900);
+  const after2 = await face(cdp);
+
+  // THE AGENT WRITES ANOTHER FILE OF THE REPOSITORY, which is the read that
+  // drew the accepted rewind backwards before the fix round.
+  shellWrite('elsewhere.txt', `written by arm Z at ${String(Date.now())}\n`);
+  const back = await faceUntil(cdp, (f) => f.dels.includes(REWOUND_WORD), 2500);
+  const atEnd = await tabState(cdp);
+  const diskEnd = readNotes();
+
+  readings.z = {
+    seam: atPress.seam === true && atEnd.seam === true,
+    drawn: drawnZ.changes === 3 && WORDS_Z.every((w) => drawnZ.inss.includes(w)),
+    marked:
+      markedZ.currentCount === 1 &&
+      markedZ.inss[markedZ.currentIndex] === REWOUND_WORD &&
+      String(markedZ.activeClass ?? '').includes('ed-redline-doc'),
+    cleanAtPress: atPress.dirty === false,
+    typedInside: inside !== null && inside !== undefined && inside.fired === true && inside.taken === true,
+    pressToLandingMs: landedAt === 0 ? -1 : landedAt - pressedAt,
+    dirtyAtLanding: atLanding.dirty,
+    fileAtLanding: landedAt !== 0,
+    drawnAtLanding: faceAtLanding.inss.includes(REWOUND_WORD),
+    bufferHoldsKeystroke: buffered.value === bufferZ,
+    debounceMs,
+    waitedMs,
+    sentMs,
+    dirtyAfterHeld: afterHeld.dirty === true,
+    bufferAfterHeld:
+      afterHeld.value === baseZ ? 'the text from before the agent wrote' : afterHeld.value === fileZ ? 'the agent’s text' : afterHeld.value === rewoundZ ? 'the rewound text' : 'other',
+    secondUndoInsideTheRead: afterHeld.savedContents === fileZ,
+    changesAfterHeld: faceAfterHeld.changes,
+    redoPresses,
+    cleanAfterRedo: dirty === false,
+    letGoCapMs: LET_GO_CAP_MS,
+    letGoMs,
+    rewoundDrawnAfterRedo: letGo.inss.includes(REWOUND_WORD),
+    savedIsDiskAfterRedo: afterRedo.savedContents === readNotes(),
+    pressedOn,
+    toastsAtAccept,
+    before: before2.changes,
+    after: after2.changes,
+    accepted: after2.changes === before2.changes - 1,
+    acceptedRewound: pressedOn === REWOUND_WORD && after2.changes === before2.changes - 1,
+    backwardsAfterOutsideWrite: back.dels.includes(REWOUND_WORD),
+    diskIsRewind: diskEnd === rewoundZ,
+    savedIsDisk: atEnd.savedContents === diskEnd
+  };
+  readings.z.landedDirty =
+    readings.z.fileAtLanding === true && readings.z.dirtyAtLanding === true && readings.z.drawnAtLanding === true;
+
+  const z = readings.z;
+  note(
+    'Z1',
+    'THE PRESS, as arm U makes it',
+    `the write landed ${String(z.pressToLandingMs)} ms after the key, dirty at the landing ${String(z.dirtyAtLanding)}, "${REWOUND_WORD}" still drawn ${String(z.drawnAtLanding)}, the buffer holds the keystroke ${String(z.bufferHoldsKeystroke)}, waited ${String(z.waitedMs)} ms past the landing`
+  );
+  note(
+    'Z2',
+    'THE HELD ⌘Z: a keydown and its first repeat',
+    `both sent within ${String(z.sentMs)} ms; after them dirty ${String(z.dirtyAfterHeld)}, the buffer is ${z.bufferAfterHeld}, ${String(z.changesAfterHeld)} changes drawn; the repeat landed ${z.secondUndoInsideTheRead ? 'BEFORE any read had answered (savedContents is still the agent’s text: a read this build pulled came back to a dirty tab and was dropped, and a build that pulls none reads the same)' : 'AFTER the read (savedContents had moved, so it un-applied the read itself)'}`
+  );
+  note(
+    'Z3',
+    '⌘⇧Z UNTIL CLEAN',
+    `${String(z.redoPresses)} press(es), clean ${String(z.cleanAfterRedo)}, the picture let "${REWOUND_WORD}" go ${z.letGoMs < 0 ? `never within ${String(LET_GO_CAP_MS)} ms` : `${String(z.letGoMs)} ms after the tab went clean`}, savedContents is the disk’s ${String(z.savedIsDiskAfterRedo)}`
+  );
+  note(
+    'Z4',
+    '⌥↩ IN THE RHYTHM, then a write elsewhere in the repository',
+    `pressed on ${JSON.stringify(z.pressedOn)}; toasts ${JSON.stringify(z.toastsAtAccept)}; ${String(z.before)} -> ${String(z.after)} changes; "${REWOUND_WORD}" drawn backwards after the outside write ${String(z.backwardsAfterOutsideWrite)}; the file is the rewound text ${String(z.diskIsRewind)}, savedContents is the disk’s ${String(z.savedIsDisk)}`
+  );
+  armCheck(
+    'Z',
+    'z',
+    'Z. A PRESS TOO MANY, TAKEN BACK: a second ⌘Z and the ⌘⇧Z that answers it still end with the picture on the disk’s bytes, and the rewound change is never accepted',
+    'Z is not graded at PR 28’s head',
+    `the repeat landed ${z.secondUndoInsideTheRead ? 'before any read answered' : 'after the read'}; let go ${String(z.letGoMs)} ms after ⌘⇧Z; ⌥↩ on ${JSON.stringify(z.pressedOn)} took ${String(z.before)} -> ${String(z.after)} changes, toasts ${JSON.stringify(z.toastsAtAccept)}`
+  );
+}
+
+const ARM_DRIVES = { O: armO, L: armL, C: armC, R: armR, T: armT, U: armU, Z: armZ };
+async function driveArms(cdp) {
+  for (const arm of CHOSEN.arms) {
+    const armDrive = ARM_DRIVES[arm];
+    if (armDrive !== undefined) await armDrive(cdp);
+  }
+}
+
 await withElectron(
   {
     label: 'moveon',
     userDataDir: profile,
     tmuxSocket: null,
-    cwd: REPO,
+    // PHASE 282.2. The build under test, which is this checkout unless
+    // REDLINEMOVEON_CHECKOUT names another; `.` is resolved against it.
+    cwd: APP_ROOT,
     args: ['--remote-debugging-port=0', '--use-mock-keychain'],
     env: withoutDevRenderer({ HOME: home, GMUX_TMUX_SOCKET: socket, GMUX_PROBES: '1' }),
     ceilingMs: 15 * 60 * 1000
@@ -1327,32 +2241,44 @@ await withElectron(
       await until(cdp, hasChanges(8), 30000);
 
       if (PARENT) await driveParent(cdp);
-      else await driveHead(cdp);
+      else if (runs('H')) await driveHead(cdp);
 
       // PR 28's head has the move-on, so H is graded there exactly as at HEAD.
-      const bad = grade(readings, PARENT ? 'parent' : 'head');
-      check(
-        'G1',
-        PARENT
-          ? 'THE PARENT: the arrows stop at the ends, an accept leaves nothing current, the second ⌥↩ accepts nothing, and the rewind leaves nothing current'
-          : 'THE WHOLE ROUND: both verbs move on, the arrows loop, the file moves only when a rewind writes it, and the end of the document is quiet',
-        bad.length === 0,
-        bad.length === 0 ? 'every arm above agrees' : bad.join('; ')
-      );
+      // PHASE 282.2: a subset that leaves H out grades no whole round, and
+      // says so rather than reporting the drive it skipped as a failure.
+      if (PARENT || runs('H')) {
+        const bad = grade(readings, PARENT ? 'parent' : 'head');
+        check(
+          'G1',
+          PARENT
+            ? 'THE PARENT: the arrows stop at the ends, an accept leaves nothing current, the second ⌥↩ accepts nothing, and the rewind leaves nothing current'
+            : 'THE WHOLE ROUND: both verbs move on, the arrows loop, the file moves only when a rewind writes it, and the end of the document is quiet',
+          bad.length === 0,
+          bad.length === 0 ? 'every arm above agrees' : bad.join('; ')
+        );
+      } else {
+        note('G1', 'H was not run, so the whole round is not graded', `REDLINEMOVEON_ARMS=${ARMS_RAW}`);
+      }
 
+      const ranArms = CHOSEN.arms.filter((a) => a !== 'H');
       if (PARENT) {
-        note('G2', 'PHASE 282’s arms O, L, C, R and T were not run', 'they are graded against PR 28’s head: ACCEPT_ADVANCE_PARENT=282');
+        note('G2', 'PHASE 282’s arms O, L, C, R and T and Phase 282.2’s U and Z were not run', 'the five are graded against PR 28’s head: ACCEPT_ADVANCE_PARENT=282');
+      } else if (ranArms.length === 0) {
+        note('G2', 'no arm after H was chosen', `REDLINEMOVEON_ARMS=${ARMS_RAW}`);
       } else {
         await driveArms(cdp);
         const graded = gradeArms(readings, PR28_HEAD ? 'pr28' : 'head');
-        const armBad = armFindings(graded);
+        // Only the arms that ran: one left out by the knob is not a finding.
+        const armBad = armFindings(graded, ranArms);
         check(
           'G2',
-          PR28_HEAD
-            ? 'PR 28’S HEAD: the move lands one change early after an outside write, the keyboard drops with the last change, ⌥⌫ ⌥↩ draws a change backwards, a held ⌥⌫ rewinds more than one, and a typing burst is saved scrambled'
-            : 'PHASE 282: the move follows the change that came next, the keyboard stays, one press is one press, and a typing burst is saved whole',
+          ARMS_RAW !== ''
+            ? `THE ARMS CHOSEN, ${ranArms.join(', ')}, graded ${PR28_HEAD ? 'as PR 28’s head' : 'as HEAD'}`
+            : PR28_HEAD
+              ? 'PR 28’S HEAD: the move lands one change early after an outside write, the keyboard drops with the last change, ⌥⌫ ⌥↩ draws a change backwards, a held ⌥⌫ rewinds more than one, and a typing burst is saved scrambled'
+              : 'PHASE 282 AND 282.2: the move follows the change that came next, the keyboard stays, one press is one press, a typing burst is saved whole, undoing your edits lets a rewound change be accepted, and a ⌘Z too many taken back does not lose that',
           armBad.length === 0,
-          armBad.length === 0 ? 'every Phase 282 arm agrees' : armBad.join('; ')
+          armBad.length === 0 ? 'every arm that ran agrees' : armBad.join('; ')
         );
       }
     } finally {

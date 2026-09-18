@@ -527,10 +527,12 @@ export function RedlineDocument({
         // adoption, so a refused adoption lands it on the trailing bytes that
         // still draw the change, and the release effect below lets it go on
         // the redraw that does not. `entry` is the very object the press
-        // pushed, so this lands exactly that hold.
+        // pushed, so this lands exactly that hold. PHASE 282.2's FIX ROUND: and
+        // with the bytes the write WROTE, so the release can tell an adoption
+        // that refused from one that took (./redline-press `releaseHolds`).
         const adopted = useEditor.getState().tabs.find((t) => t.id === live.id);
         if (kind === 'rewind' && adopted !== undefined) {
-          landHold(rewindHolds.current, result.entry, adopted.savedContents, result.was);
+          landHold(rewindHolds.current, result.entry, adopted.savedContents, result.was, result.contents);
         }
       }
       // A REWIND MOVES ON TOO, which is PR 28's author's ask of 2026-09-16:
@@ -892,6 +894,43 @@ export function RedlineDocument({
       tab.savedContents
     );
   }, [composed, tab.savedContents]);
+  // PHASE 282.2. THE WAY OUT THE SENTENCE PROMISES. A landed hold on a dirty
+  // tab answers ⌥↩ with "Save or undo your edits first, then accept", and the
+  // undo led nowhere: ⌘Z takes the tab back to clean (./redline-edits marks it
+  // from the buffer), but both clauses of the release above wait for a READ,
+  // and the only reader was the watcher's tick (./store `init`). The rewind's
+  // own tick had come and gone while the tab was dirty, the walk skips a dirty
+  // tab by rule, and on a paused agent nothing else in the repository changes,
+  // so Phase 282.1's reverify read the hold standing on a CLEAN tab and every
+  // ⌥↩ saying "still being rewound" while nothing was. So the view asks for
+  // the read that tick would have made, on the transition to clean.
+  //
+  // A READ, AND NOT AN ADOPTION OF THE BYTES THE HOLD REMEMBERS. The hold knows
+  // what the rewind wrote, but a read asks the disk what is there NOW, so a
+  // write that landed between the rewind and the undo is what the picture
+  // shows. It is ./tab-io's `refreshRepo` whole: rule 22 (still clean, still
+  // the same model) and rule 26 (`savedContents` unmoved since the read began)
+  // guard it as they guard the watcher's, and a second call joins the queued
+  // walk rather than racing the first.
+  //
+  // ONLY WITH A LANDED HOLD, so an ordinary undo on an ordinary tab reads
+  // nothing; a hold still in the air has no bytes on disk to find, and its own
+  // landing adopts them on a tab that is clean by then. Keyed on the flag
+  // ALONE, so nothing is read on the way INTO dirty and nothing on a redraw.
+  // The holds are this mount's, and the `[tab.id]` effect that empties them is
+  // declared before this one and so runs first: a switch from a dirty tab to
+  // a clean one moves the flag too, and finds no hold to read for.
+  //
+  // THE FIX ROUND: IT ASKS AGAIN ON EVERY CLEAN TRANSITION THE HOLD OUTLIVES,
+  // and the hold now outlives a dirty buffer's picture (./redline-press
+  // `releaseHolds`, the `unread` clause). A second ⌘Z inside this read made the
+  // tab dirty again, so the read was dropped by rule; the ⌘⇧Z that takes it
+  // back is a clean transition under the same landed hold, and reads.
+  useEffect(() => {
+    if (tab.dirty) return;
+    if (!rewindHolds.current.some((h) => h.landed !== null)) return;
+    useEditor.getState().rereadRepo(tab.repoPath);
+  }, [tab.dirty]);
   // PHASE 251. THE ROOM THE PAGE HAS, and the token that re-measures the rail
   // bar when the panel is dragged. It observes the SCROLLER rather than the
   // view, because the scroller is exactly the box the page lives in, so the
