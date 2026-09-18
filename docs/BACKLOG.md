@@ -30515,6 +30515,143 @@ a queued one; this is the queue.
 - No release.
 
 
+## Phase 293 — a session manager: direction D, the Tabbed sheet (operator, 2026-09-18)
+
+**Subject.** `feat(sessions): manage every session from one sheet`
+
+**First body line.** `Phase 293: the Tabbed sheet`
+
+**Semver.** Minor. From Session → Manage Sessions… a person sees every session Tortie manages, across
+every project and machine, whether or not that project's tab is open; ends one or many; removes ended
+ones; and restores past ones, without opening each project to find them.
+
+**The operator's instruction, verbatim.** "Implement direction D, the Tabbed sheet, including the
+compact header, activity columns, inline actions, and batch End." The context he named, in his own
+checkout and UNTRACKED there: start at `designs/session-manager/README.md`; the selected mockup is
+`designs/tabbed-sheet.html` (it redirects to `designs/index.html#sheet/managed`, drawn by
+`designs/session-manager/views.js`, `app.js`, `styles.css` and the fixture `data.js`); the existing code
+and the gaps are `designs/session-manager/research/reuse-map.md`; the visual contract is
+`designs/session-manager/DESIGN.md`. **Builders and verifiers read those at
+`/Users/gdc/gmux/designs/` by absolute path, read-only.** Committing the study is HIS call and not this
+phase's: `research/past-sessions-current.png` is a capture of his own app with his own session names,
+the same question `unpeel.png` raised.
+
+**Tier 3.** It ends processes, one and many at a time, which is session lifecycle and can lose a
+person's running work; it claims to work across every project, machine and agent; and a batch is a new
+way to be wrong about a target. Two independent methods, one an attack; the per-row matrix over real
+data is mandatory (local and remote, open and closed tabs, every state); fix once, reverify, stop.
+
+**Charter.** The operator's design study of 2026-09-18, four directions drawn and D selected during
+review, inside the Quiet surround (Phase 284). It answers the first half of GitHub issue 27 (JnBrymn: an
+agent session in a closed project held memory for a week, unseen), by making such a session VISIBLE and
+endable; the issue's other half, suspending sessions on a timer or when a project closes, is a policy
+this phase does not make.
+
+### What the study and the tree already say, so no round re-derives it
+
+- **The inventory is already global.** `src/main/sessions/core.ts:2536` `listSessions()` answers every
+  managed session from the manifest and the remote projections, not the active project's; `:2644`
+  `listRemovedSessions()` is the past list, ordered by removal. Closed tabs filter nothing out at that
+  layer: the filtering is the renderer's.
+- **The lifecycle verbs exist and are the ONLY action boundary.** End is `endSession` in
+  `src/renderer/state/sessions-slice.ts:1066` over core's `killSession` (`core.ts:2743`), and it keeps
+  the recovery material and leaves the row under Managed as Ended. Remove is `removeSession`
+  (`sessions-slice.ts:1155`) over core's `removeSession` (`:2890`), a tombstone for 90 days; **never**
+  core's `discardSession` (`:2864`), the hard delete. Restore is `restorePastSession`
+  (`sessions-slice.ts:293`) with `src/main/restore/ask-open-project.ts` asking to open a closed local
+  project first, and `src/renderer/state/resume.ts` (`pastSessionPromise`, `restoreActionCopy`) saying
+  whether a conversation continues or a fresh shell opens.
+- **The action policy exists once.** `src/renderer/app/session-actions.tsx:732` `sessionMenuItems()` and
+  `:938` `closeSession()` carry the state-dependent gates: unknown rows get saved-record reads only,
+  remote rows have capability limits. The sheet REUSES them; a second action policy is this phase's
+  first refusal.
+- **The surface to extend exists.** `src/renderer/app/PastSessionsModal.tsx` and `past-sessions.css`:
+  search, the recovery promise, the busy state, the machine-removed refusal, 90-day retention. The
+  Session menu already carries `Past Sessions…` (`src/main/menu.ts:932`).
+- **The activity columns do NOT exist.** `Session.createdAt` (`src/shared/types.ts:206`) is the original
+  creation time. Message counts and the last message's time are nowhere: `overview:sessions`
+  (`src/shared/ipc/overview.ts`) returns a BOUNDED turn payload (50 by default, 200 at most), so its
+  length is not a count; `countTurns()` (`src/main/overview/store/store.ts:612`) counts normalised
+  turns, not messages; diagnostics' `lastSeen` means last confirmed alive, not last message.
+- **The study's own statement of what is missing** (`reuse-map.md`, "What still needs implementation",
+  eight items) is the build list below, and its Boundaries section is this entry's refusals.
+
+### The mechanism
+
+1. **The door.** Session → **Manage Sessions…** opens the sheet on Managed; **Past Sessions…** stays and
+   opens the same sheet on its Past tab. Reachable with NO project tab open. Native menu rows through
+   `src/main/menu.ts` and the menu-actions seam, per the UI rules; the phase brief names both rows.
+2. **The projection.** One renderer-side join of the global managed list, the removed list, each
+   target's open-tab state, and the existing state and capability helpers, grouped by the WORKSPACE
+   TARGET including machine identity and never by folder basename. A closed tab filters nothing out. A
+   row whose identity is unknown is drawn and offers reads only.
+3. **The sheet, as drawn in D.** A wide centred modal inside the Quiet surround: a 52px title bar holding
+   Sessions, the Managed and Past Sessions tabs with counts, refresh and close; a 47px toolbar holding
+   search and the project, tab-status and state filters; the grid takes the rest and scrolls under
+   sticky column headings. Rows: selection, identity (agent mark, name, machine), state, created date
+   and age, message counts, last-message age, and ONE visible button, **End session…** or **Restore**;
+   an ellipsis opens the quieter actions from `sessionMenuItems()` through `ui:popupMenu`, never a
+   DOM-drawn menu. Columns sort. Tokens only, no colour literal, no tmux vocabulary, just enough words.
+4. **Inline, never stacked.** Details, rename, saved output, confirmations and errors expand inside the
+   row; no modal opens above the sheet. Focus stays inside the sheet, returns to the row after a
+   change, and scroll position is kept. A failed restore KEEPS its row and says why; Retry is offered.
+5. **Batch End.** Row checkboxes and a header checkbox that selects all FILTERED rows. While anything
+   is selected the toolbar's filters are replaced, at no cost in height, by a count and **End selected
+   sessions…**. ONE inline confirmation names the eligible running sessions across projects and says
+   how many selected records are skipped and why (already ended, unavailable, identity unknown).
+   Cancel keeps the selection. Confirm calls the EXISTING per-session end for each target, re-checking
+   capability immediately before each call, leaving ineligible targets untouched, and reports partial
+   results row by row. Ending keeps saved material and leaves each row under Managed as Ended.
+6. **The activity summary, a new main-side aggregate.** Per session: user message count, agent message
+   count, the last actual message's time and author, and explicit COVERAGE (complete, partial,
+   unavailable, not applicable). Tool events and terminal output are excluded. It is an aggregate query
+   over the stored conversation history, never whole histories loaded per row. **Null is preserved and
+   never drawn as zero**: a shell shows a dash with its reason, partial history is marked `+`, a new
+   conversation may truthfully show 0. One new contract channel in `src/shared/ipc/`, so
+   `gate:contract`'s baseline is regenerated in the same commit with the moved lines named.
+7. **Navigation.** Go to session on a live session in a closed project opens the CORRECT target, local
+   or remote, then focuses the session by ID. A remote path is never opened as a local folder. After a
+   restore the sheet stays open, the row moves tabs, and the person chooses whether to go there.
+8. **Refresh without losing the place.** A change from anywhere (a session ends by itself, a restore
+   lands, a project tab opens) updates counts and rows; the tab, filters, sort, selection, expanded
+   row and scroll survive it.
+
+### The proof, run rather than read
+
+- **A per-row matrix over REAL data**: a scratch profile holding local and remote targets, open and
+  closed tabs, and every state (working, needs input, idle, ended, restorable, unknown, machine
+  removed), each row's drawn state, offered actions and refused actions compared with what
+  `sessionMenuItems()` offers for the same session. Universality is claimed, so the matrix is the evidence.
+- **`probe:p293`**, one Electron through `build/electron-run.mjs`: the door with no project open; a
+  closed-tab project's sessions visible; End with a cancel then a confirm, the row Ended and still
+  there; Remove to Past; Restore to a closed project asking to open it; a restore failure keeping its
+  row; select-all under a filter; the batch confirmation's eligible and skipped counts against the
+  fixture's truth; a batch in which one target ends by itself between the confirmation and the call.
+  HELPER_USER_FLOOR raised in the same commit.
+- **The activity aggregate re-derived independently** by the verifier from the stored histories of real
+  sessions across providers (the Phase 137 corpus): counts, last-message time, coverage, and that a
+  shell reads as not applicable and never as zero.
+- **The attack**: a batch over a session whose identity changed, a remote machine that goes unreachable
+  mid-batch, a row removed from another window, a process with no session id (diagnostics has such
+  rows; none may become a target), a project whose folder is gone, 300 sessions for scroll and sort.
+- Gates: the battery, `conformance:overview` if the aggregate touches `src/main/overview/**`,
+  `gate:contract` regenerated, the native menus updated in the same commit, `probe:p284` still green.
+
+### What is NOT in this phase
+
+- **No second action policy.** Every gate is `sessionMenuItems()`'s and the existing lifecycle methods';
+  the sheet presents them.
+- **No permanent delete**, no batch Remove, no batch Restore: D draws batch End only (B draws the
+  others; they stay in the study).
+- **No policy that ends or suspends sessions by itself**, on a timer or when a project closes (issue
+  27's second half). His ruling first.
+- **No memory or CPU meters on the sheet**; those stay in Diagnostics.
+- **Unknown state never gains a destructive action.** A process with no stable session identity is
+  never a target.
+- Directions A, B and C stay in the study. The study itself is not committed by this phase.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -31301,4 +31438,6 @@ cycle rather than only the evening it was written.
 - 2026-09-18, **PHASE 289 LANDED, the keyboard goes back where it was when Catch Me Up closes, `59ed244b`, version 0.107.0 unmoved, no tag, pushed.** After ⇧⌘U and Escape you can type at once. At the parent the keyboard sat on `body`, never inside a terminal in 500 ms of 5 ms samples, and a string typed with real keys arrived in no session; at HEAD it is back within a few milliseconds and the string arrives. The leave focused the terminal in the same task as the store write, while the work was still not drawn; it now waits for the class to leave the shell with a one-shot observer, no timer and no frame. **In a split the keyboard now goes to the OUTLINED pane from every door**: `focusTerminal` asks Phase 286's selector first, and five doors that spelled the first-pane query for themselves call it; driven in a four-pane split with the last pane outlined, the strip rows, the dock, the view chord, the editor's close and the jump out of the page all typed into the outlined pane at HEAD and into the first at the parent. **THE ATTACK VERIFIER CHANGED THE DESIGN**: the first build sent every leave to the terminal, so with the keyboard in an open file ⇧⌘U, Escape and the next typed line went to the outlined session, whose shell RAN it; the opening gesture now records where the keyboard was and the leave gives it back THERE, the terminal only as the fallback, which amends Phase 137's documented leave. The reverifier passed each item live. **Phase 291 is queued from it**: closing the editor out of editor fill, and closing the shortcuts sheet after the page closed behind it, both leave the keyboard on nothing, identical at the parent. His to rule: whether an ended outlined pane should take the keyboard. Gates: typecheck, build, npm test at 937 files and 14,985 tests, smoke:t1, conformance:overview, probe:p137 0 at HEAD and 1 at the parent by design, probe:sessionfocus, probe:p284.
 
 - 2026-09-18, **v0.108.0 RELEASED from `739a9109`, tortie.sh updated to match, and John Berryman named as a contributor.** Gates `35391972432` were green on the release commit itself and durability `35391927731` was DISPATCHED on the candidate `f0b167af` rather than inherited from the nightly, and only then was the tag pushed; release run `35392980685` built, signed, notarized and published the draft with all six assets in 22 minutes, most of it Apple's notary. The app INSIDE the DMG reads `accepted` / `source=Notarized Developer ID` / `origin=Developer ID Application: Gregory Ceccarelli (4GRQMF5T5U)` at `CFBundleShortVersionString` 0.108.0, `codesign --verify --deep --strict` exit 0, `xcrun stapler validate` worked on the app and on the DMG, mounted read-only and nothing installed; the stable download and `latest-mac.yml` answer 200 at 0.108.0. **THE RELEASE PAGE CARRIES THE CHANGELOG ENTRY, READ BACK AND DIFFED EMPTY**, at his word: the body is the 0.108.0 section without its heading line, 22 lines and 15 bullets, the same sha256 on both sides, and it was synced again after the credit below. **The release carries twelve phases**: 277 a write clears only the text it wrote, 278 a confirmed variable name survives a filled cap, 279 readiness and teardown fail differently, 281 and 281.1 the Claude meter reads the item Claude Code reads, 282 the press that moves on (PR 28), 282.1 and 282.2 the save surface re-verified and undo as a way out after a rewind, 284 and 284.1 the quiet surround, 286 the keyboard stays in the session across the focus flight, 288 the meters keep the foot of an empty session list, 289 the keyboard goes back where it was when Catch Me Up closes; with 280's research and the method in CLAUDE.md. **John Berryman is named on the first bullet**, his pull request 28 landed as `d8debd9d`, in the shape 0.97.0 uses for a contributor, which is what the site's feed reads to draw its Contributors row. tortie.sh: the changelog feed synced through 0.108.0 and SIX sentences added where the release made a page incomplete, none rewritten, being the Redline page's rewind and accept paragraphs and its three shortcut rows (the press moves on, the arrows come round) and the ⇧⌘Return row (press it again to go back, since Escape inside the mode now goes to the agent); the usage meters, Catch Me Up, Appearance and llms.txt were read and left alone. **Queued behind it**: 292 for issue 29 (scrollback is not anchored, PR 30, its reproduction running), 290 a rewind's caution belongs to the file, 291 the filled editor's and the shortcuts sheet's close, 285, 283, 287. **His plate**: issues 27, 26, 23 and 14; the stray `unknown` keychain item; the status-line tap ordering defects; whether an ended outlined pane should take the keyboard; one ⌘Z too many un-applying a pulled read. My fourteen commits of today carry greg@itavero.software where the repository's own identity is gregce@gmail.com; from the release commit on they use the repository's.
+
+- 2026-09-18, **PHASE 293 QUEUED, a session manager, direction D the Tabbed sheet (operator), Tier 3, minor.** His words: "Implement direction D, the Tabbed sheet, including the compact header, activity columns, inline actions, and batch End." His design study of today drew four directions inside the Quiet surround and selected D; it lives UNTRACKED in his checkout under `designs/`, and the entry tells builders to read it there by absolute path and leaves committing it to him, because one of its files is a capture of his own app. The entry carries the study's reuse map checked against the tree (the inventory is already global at `core.ts:2536`, the lifecycle verbs and the one action policy exist, the Past Sessions modal is the surface to extend, and the activity columns exist NOWHERE, since the overview's turn payload is bounded and is not a count), the eight things to build, batch End as orchestration over the existing per-session end with a re-check before every call, the new main-side activity aggregate with null never drawn as zero, and its refusals: no second action policy, no permanent delete, no batch Remove or Restore, and no policy that ends sessions by itself. It answers the first half of GitHub issue 27 by making a forgotten session visible and endable. **Also today after the release**: every item from 0.105.0 on names its commit again (`1c74121d`, 33 items, four release pages and the site feed synced, each read back and diffed empty) and the rule is in CLAUDE.md (`53014a8f`), because he opened tortie.sh and found the last four releases with no commit links and John Berryman unnamed.
 
