@@ -30652,6 +30652,129 @@ this phase does not make.
 - No release.
 
 
+## Phase 292 — scrollback is not anchored (GitHub issue 29 and pull request 30, John Berryman, 2026-09-18)
+
+**Subject.** `fix(terminal): a parked pane holds its place by itself, so stop scrolling it` (the pull
+request's own)
+
+**First body line.** `Phase 292: the reader's line stays where they put it`
+
+**Semver.** Patch. Scroll back in a session to read while the agent keeps writing, and the text stays
+where you put it. Today it slides away from you, one line for every line printed, until it reaches the
+top of the transcript and sticks there.
+
+**Tier 3.** It is wrong in every local session on both tmux versions Tortie runs, it was reported from
+outside with a reproduction, and the mechanism being deleted was itself built on a measurement. Two
+independent methods, one an attack; the parent measurement is mandatory and already exists below; fix
+once, reverify, stop.
+
+**Charter.** Issue 29, filed 2026-09-18 by John Berryman with steps (a shell loop printing a line every
+50 ms; scroll back; "it scrolls in the reverse direction") and the reason it matters: you start reading
+an agent's long answer, prompt it again, scroll up to finish reading, and the text is moving. Pull
+request 30, his, `fix/pane-scroll-holds-place` at `27794be4` on `59ed244b`, deletes the mechanism. The
+operator asked on 2026-09-18 for it to be looked at, reproduced, and queued. It is built the way Phase
+282 built his pull request 28: on his branch (it accepts maintainer pushes), his fix under his name, our
+rounds under the operator's, closed and integrated once verified, and **named in the changelog item**:
+`Contributed by [John Berryman](https://github.com/JnBrymn) in [#30](https://github.com/gregce/tortie/pull/30)`.
+
+### What was measured before this entry was written, so no round re-derives it
+
+Two reproducers, independently, neither trusting the issue nor the pull request
+(`wf_58a096e0-950`; scratch probe `scratchpad/i29-app/probe-i29.mjs` with six run logs, tmux rig
+`scratchpad/i29-rig/rig.mts` with its JSON readings).
+
+- **In the app, the issue's own steps, the SCREEN as the ruler** (the pane's xterm buffer rows, checked
+  against two screenshots, because `capture-pane` cannot see a scrolled-back view). Real wheel events,
+  about 100 lines back, then nothing touched for 8 s at 17.5 lines printed per second:
+
+  | Build | tmux | Top line at the park → after 8 s | Moved per line printed |
+  | --- | --- | --- | --- |
+  | main `739a9109` | 3.7b (bundled) | 259 → 117 | −1.014 |
+  | main `739a9109` | 3.6a (system, what `npm run dev` uses) | 259 → 118 | −1.007 |
+  | PR 30 `27794be4` | 3.7b | 261 → 261, all 33 samples | 0 |
+  | PR 30 `27794be4` | 3.6a | 261 → 261, all 33 samples | 0 |
+
+  Parked 201 lines back on main it reached the top of the transcript in 3.75 s and stuck there.
+- **tmux holds a scrolled-back view still by itself, on both versions.** Three readings: PR 30's build
+  above; INSIDE the main build during a held scrollbar drag, when the app suspends its correction, the
+  top line stayed 73 for a second while history grew 330 → 348, and fell 18 lines a second again the
+  moment the drag was released; and the on-screen top line equals (history when copy mode was entered)
+  − `scroll_position` − 2 to the line, so `scroll_position` counts from the bottom AS IT WAS FROZEN
+  AT ENTRY, not from the live bottom.
+- **The app's correction is the thing moving it.** `src/renderer/terminal/scroll/surface.ts` `refresh()`
+  (~:344) polls every `SCROLLED_POLL_MS` = 250 ms while scrolled and sends `anchorFrom`;
+  `src/main/sessions/core.ts` (~:2441) calls `anchorPaneScroll` in `src/main/tmux/scroll.ts` (~:306),
+  which scrolls UP by `history − seenHistory`. `scroll_position` rose +142 against +140 lines printed,
+  4 or 5 lines per tick, and the screen fell by the same.
+- **Why it went unseen since Phase 12.3.** The founding measurement in `scroll.ts`'s comment ("LINE-272
+  became LINE-280 after eight new lines") was read with `capture-pane -p`, which answered the LIVE
+  screen the whole time the pane was scrolled back (newest line 414 → 554 while the screen showed 259
+  to 302). And by tmux's own formats `history_size − scroll_position` stays constant on main, which
+  LOOKS like a held view while the screen slides; on PR 30 it grows while the screen is still.
+- **What pull request 30 leaves, measured.** (1) THE THUMB NOW LIES: `TerminalScrollbar.tsx:68-69` draws
+  `1 − position / history`, a frozen-frame position over a live history, so with the text held the
+  thumb creeps DOWN (531 → 601 px of an 810 px lane in 8 s, and 390.8 → 410.2 px under a stationary
+  pointer during a drag) while the reader is in fact getting FURTHER from live; an honest thumb is
+  `position + (liveHistory − historyAtEntry)`. (2) The drag's pixel-to-line map (`:88`) is off by the
+  same growth; a drag to the top sends the live history and tmux clamps it. (3) It changes
+  `SCROLLED_POLL_MS` 250 → 100 under a comment that still describes the deleted correction, and its
+  commit message names deletions that exist at neither head. (4) Its rig is opt-in (`GMUX_SCROLL_IT=1`),
+  its "for the record" arm drives its own `goto-line` rule and not the shipped `anchorPaneScroll`, and
+  it reads the first NON-BLANK row rather than row 0. (5) Its changelog item sits under what is now
+  `## 0.108.0`.
+- **What moves a parked view on BOTH builds and is not this defect.** A WINDOW resize jumps it forward
+  by rows − 1 (114 → 157 on PR 30, 32 → 71 on main): `holdPositionAcrossResize` is called from the zoom
+  and font effects only (`TerminalPane.tsx:670`, `:724`). Lines printed during the park are skipped on
+  the way down, because scrolling to the bottom leaves copy mode and jumps to live. With a full history
+  main sawtooths (421..442) and PR 30 does not. tmux 3.6a and 3.7b differ on `refresh-from-pane` (3.7b
+  holds the content and re-bases the position, 3.6a slides it). A session on another machine has no
+  scroll target (`scrollTarget()` answers null), so neither the defect nor the fix runs there; read, not
+  measured.
+
+### The mechanism
+
+1. **Take his deletion as it is**: no `anchorPaneScroll`, no `anchorFrom` in
+   `src/shared/ipc/terminal.ts`, the poll a bare `readPaneScroll`. `gate:contract`'s baseline is
+   regenerated in the same commit and the commit body names the lines that moved.
+2. **An honest thumb.** The surface records the history at the moment the pane entered copy mode and
+   the scrollbar draws, and the drag maps, `position + (liveHistory − historyAtEntry)` over the live
+   history. Computed in the renderer from the two numbers the poll already returns, so it is the same
+   on 3.6a and 3.7b and asks tmux for nothing new. The poll returns to 250 ms and its comment says what
+   it is for now: the thumb.
+3. **The window-resize hold.** `holdPositionAcrossResize` is called from the fit that follows a window
+   resize as well as from zoom and font, so narrowing the window keeps the reader's line. Under PR 30
+   the held position is stable, which makes the existing hold correct where main's kept growing.
+4. **The founding comment is corrected in place**, saying which ruler it used and why that ruler cannot
+   see a scrolled-back view, so nobody rebuilds the correction from a `capture-pane` reading again.
+5. **His rig, made honest and cheap**: its "for the record" arm drives the SHIPPED function from the
+   parent commit's behaviour described as a fixture, it reads row 0, and if it fits the battery's
+   budget it loses its opt-in flag.
+6. **The changelog item moves under a new `## Unreleased`**, names him, and gets its commit link from
+   the follow-up docs commit.
+
+### The proof, run rather than read
+
+- **`probe:p292`**, the reproduction's app probe adopted: real wheel events, the screen as the ruler,
+  8 s of samples: red at the parent (−1.0 lines per line printed), green at HEAD (0), on BOTH tmux
+  binaries (`GMUX_TMUX_BIN`); the thumb's position against the honest formula while parked and during
+  a held drag; a window resize while parked. HELPER_USER_FLOOR raised in the same commit.
+- `probe:p95`, the existing scroll probe, still green; its unit suite `p95-scroll-stops.test.ts` kept.
+- The attack: an alt-screen app inside the pane, wrapped long lines across a width change, a history
+  at its limit, a split with two parked panes, a keystroke that leaves copy mode on purpose, the jump
+  back to live, and 200,000 lines for the drag (the rig's existing arm).
+- Gates: typecheck, build with `gate:contract` regenerated, test, smoke:t1.
+
+### What is NOT in this phase
+
+- The lines skipped on the way back down to live: a real cost to the issue's own use, but a different
+  mechanism (leaving copy mode), and its own entry once this one lands.
+- The half-width glitch on jumping back to a project that the pull request's body mentions: his
+  observation, unmeasured.
+- Remote sessions gain no scrollback here; they have none today.
+- No change to how the scrollbar looks.
+- No release.
+
+
 ## THE RUNNING LOG. APPEND HERE, NEWEST LAST. `tail` THIS FILE TO SEE WHERE THE QUEUE IS
 
 The operator asked for this on 2026-08-21, in his words, because the end of this file had drifted
@@ -31440,4 +31563,6 @@ cycle rather than only the evening it was written.
 - 2026-09-18, **v0.108.0 RELEASED from `739a9109`, tortie.sh updated to match, and John Berryman named as a contributor.** Gates `35391972432` were green on the release commit itself and durability `35391927731` was DISPATCHED on the candidate `f0b167af` rather than inherited from the nightly, and only then was the tag pushed; release run `35392980685` built, signed, notarized and published the draft with all six assets in 22 minutes, most of it Apple's notary. The app INSIDE the DMG reads `accepted` / `source=Notarized Developer ID` / `origin=Developer ID Application: Gregory Ceccarelli (4GRQMF5T5U)` at `CFBundleShortVersionString` 0.108.0, `codesign --verify --deep --strict` exit 0, `xcrun stapler validate` worked on the app and on the DMG, mounted read-only and nothing installed; the stable download and `latest-mac.yml` answer 200 at 0.108.0. **THE RELEASE PAGE CARRIES THE CHANGELOG ENTRY, READ BACK AND DIFFED EMPTY**, at his word: the body is the 0.108.0 section without its heading line, 22 lines and 15 bullets, the same sha256 on both sides, and it was synced again after the credit below. **The release carries twelve phases**: 277 a write clears only the text it wrote, 278 a confirmed variable name survives a filled cap, 279 readiness and teardown fail differently, 281 and 281.1 the Claude meter reads the item Claude Code reads, 282 the press that moves on (PR 28), 282.1 and 282.2 the save surface re-verified and undo as a way out after a rewind, 284 and 284.1 the quiet surround, 286 the keyboard stays in the session across the focus flight, 288 the meters keep the foot of an empty session list, 289 the keyboard goes back where it was when Catch Me Up closes; with 280's research and the method in CLAUDE.md. **John Berryman is named on the first bullet**, his pull request 28 landed as `d8debd9d`, in the shape 0.97.0 uses for a contributor, which is what the site's feed reads to draw its Contributors row. tortie.sh: the changelog feed synced through 0.108.0 and SIX sentences added where the release made a page incomplete, none rewritten, being the Redline page's rewind and accept paragraphs and its three shortcut rows (the press moves on, the arrows come round) and the ⇧⌘Return row (press it again to go back, since Escape inside the mode now goes to the agent); the usage meters, Catch Me Up, Appearance and llms.txt were read and left alone. **Queued behind it**: 292 for issue 29 (scrollback is not anchored, PR 30, its reproduction running), 290 a rewind's caution belongs to the file, 291 the filled editor's and the shortcuts sheet's close, 285, 283, 287. **His plate**: issues 27, 26, 23 and 14; the stray `unknown` keychain item; the status-line tap ordering defects; whether an ended outlined pane should take the keyboard; one ⌘Z too many un-applying a pulled read. My fourteen commits of today carry greg@itavero.software where the repository's own identity is gregce@gmail.com; from the release commit on they use the repository's.
 
 - 2026-09-18, **PHASE 293 QUEUED, a session manager, direction D the Tabbed sheet (operator), Tier 3, minor.** His words: "Implement direction D, the Tabbed sheet, including the compact header, activity columns, inline actions, and batch End." His design study of today drew four directions inside the Quiet surround and selected D; it lives UNTRACKED in his checkout under `designs/`, and the entry tells builders to read it there by absolute path and leaves committing it to him, because one of its files is a capture of his own app. The entry carries the study's reuse map checked against the tree (the inventory is already global at `core.ts:2536`, the lifecycle verbs and the one action policy exist, the Past Sessions modal is the surface to extend, and the activity columns exist NOWHERE, since the overview's turn payload is bounded and is not a count), the eight things to build, batch End as orchestration over the existing per-session end with a re-check before every call, the new main-side activity aggregate with null never drawn as zero, and its refusals: no second action policy, no permanent delete, no batch Remove or Restore, and no policy that ends sessions by itself. It answers the first half of GitHub issue 27 by making a forgotten session visible and endable. **Also today after the release**: every item from 0.105.0 on names its commit again (`1c74121d`, 33 items, four release pages and the site feed synced, each read back and diffed empty) and the rule is in CLAUDE.md (`53014a8f`), because he opened tortie.sh and found the last four releases with no commit links and John Berryman unnamed.
+
+- 2026-09-18, **ISSUE 29 REPRODUCED AND PHASE 292 QUEUED, scrollback is not anchored (John Berryman, pull request 30), Tier 3.** Two reproducers, independently. In the app with his own steps and the screen as the ruler, the line a person scrolled back to slides toward older text at one line for every line printed, 259 to 117 in eight seconds, the same on the bundled tmux 3.7b and the system 3.6a, and runs to the top of the transcript and sticks; on his build it holds at 261 for all 33 samples on both. **He is right about the cause**: tmux holds a scrolled-back view still by itself (measured three ways, one of them inside the main build during a held drag, when the app's correction is suspended), and the 250 ms correction is what drags it; the measurement that correction was built on in Phase 12.3 was read with `capture-pane`, which shows the live screen and cannot see the view. **What his pull request leaves, measured**: the scrollbar thumb now lies, creeping DOWN while the reader gets further from live, because it divides a frozen-frame position by a live history; the poll went 250 to 100 ms under a comment describing the deleted mechanism; and its rig's "for the record" arm drives its own rule and not the shipped function. A window resize moves a parked view on both builds, because the hold is wired to zoom and font only. The phase takes his deletion as it is on his own branch, under his name, and adds an honest thumb, the window-resize hold and the corrected founding comment; the changelog item names him.
 
