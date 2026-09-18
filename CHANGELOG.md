@@ -4,7 +4,9 @@ Each commit appears once under Added, Changed or Fixed. Every bullet stays on on
 
 The operator set the style on 2026-08-23 by rewriting every entry, and it binds every entry after. An item is one or two sentences. It says what a person can now do or what no longer goes wrong, in plain words, and then stops. A limit that a person will hit goes in the same item in one clause, e.g. "Saves have no undo", and a limit nobody will hit stays in the commit body. No measured numbers unless the number is the point. No build story, no file names, no gate names. The lead paragraph says what the release is about in two or three sentences and lists nothing.
 
-## Unreleased
+## 0.108.0 (2026-09-18)
+
+This release is about the keyboard ending up where you are. Entering session focus, closing Catch Me Up and coming back from the editor could each leave it on nothing until you clicked, and in a split it went to the first pane rather than the one that is outlined; it now stays with you, and the session focus chord no longer sends Enter to your agent on the way. Alongside that, a save or a rewind no longer loses what you typed at the wrong moment, the Redline chords move on to the next change by themselves, the window goes quiet around a single outline, and the Claude usage meter stops telling you to sign in when you already are.
 
 ### Changed
 
